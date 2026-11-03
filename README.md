@@ -14,7 +14,10 @@ Eigene Server-Verwaltung für Windows – ein Fenster für **SSH, RDP und VNC**,
 | **Snippets** | Häufige Befehle speichern, im Terminal mit einem Klick ausführen |
 | **Known Hosts / Logs** | Gespeicherte Host-Keys ansehen und zurücksetzen; Verbindungsverlauf (nur lokal, ohne Passwörter) |
 | **Cloud** | Ende-zu-Ende verschlüsselter Sync zwischen PCs (Supabase), Merge bei Änderungen auf beiden Seiten |
-| **Import** | mRemoteNG (`confCons.xml`) |
+| **Jump Hosts** | Verbindung über einen oder mehrere SSH-Hosts hintereinander (SSH, SFTP, Tunnel, VNC, RDP) |
+| **Geteilte Ansicht** | Mehrere SSH-Terminals nebeneinander in einem Tab, mit Broadcast (Eingabe an alle gleichzeitig) |
+| **Einstellungen** | Design, Terminal (Themes, Schrift, Cursor, Scrollback), SSH, RDP, VNC, Auto-Sperre, Master-Passwort ändern, Backup |
+| **Import** | mRemoteNG, OpenSSH-Config (`~/.ssh/config`), PuTTY (direkt aus Windows oder .reg), CSV |
 
 ## Starten (Windows)
 
@@ -106,7 +109,7 @@ dotnet run --project src/MultiServerView.App
 
 | Teil | Status |
 |---|---|
-| Vault, Crypto, Merge, Sync-Logik, SSH, SFTP, Port Forwarding, VNC-Brücke, Import | **Automatisch getestet** (76 Tests; SSH, SFTP und alle drei Weiterleitungs-Arten gegen einen echten sshd, Sync gegen simulierte Supabase-API) |
+| Vault, Crypto, Merge, Sync-Logik, SSH, SFTP, Port Forwarding, VNC-Brücke, Import | **Automatisch getestet** (92 Tests; SSH, SFTP und alle drei Weiterleitungs-Arten gegen einen echten sshd, Sync gegen simulierte Supabase-API) |
 | UI (Tabs, Palette, Keychain, SFTP, Snippets, Weiterleitungen, Formulare, Terminal) | Im Browser mit Playwright durchgespielt (Demo-Daten und Demo-Shell) |
 | VNC Ende-zu-Ende | Getestet: noVNC → C#-Brücke → echter VNC-Server |
 | Windows-Fenster (WebView2), **RDP-Control**, DPAPI | **Kompiliert, aber noch nie auf Windows gelaufen.** RDP ist der riskanteste Teil (ActiveX-Hosting). Falls es dort hakt: Button «In Windows-RDP öffnen» startet mstsc als Ausweg |
@@ -117,5 +120,5 @@ dotnet run --project src/MultiServerView.App
 - Solange eine Palette oder ein Dialog offen ist, wird ein laufendes RDP-Fenster kurz ausgeblendet (natives Fenster liegt sonst über dem UI). Die Session läuft weiter.
 - PuTTY-Keys (`.ppk`) vorher in PuTTYgen nach OpenSSH exportieren.
 - mRemoteNG-Import übernimmt keine Passwörter (mRemoteNG verschlüsselt sie selber). Einen Termius-Import gibt es nicht.
-- Keine Jump-Hosts/Host-Chains, kein Split-View, kein Telnet/Serial/Mosh (siehe [`docs/termius-vergleich.md`](docs/termius-vergleich.md)).
+- Kein Telnet/Serial/Mosh, kein KI-Autocomplete, keine Teams (siehe [`docs/termius-vergleich.md`](docs/termius-vergleich.md)).
 - Die Titelleiste ist die normale Windows-Titelleiste (Tabs sitzen darunter).

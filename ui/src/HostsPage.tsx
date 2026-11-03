@@ -1,8 +1,19 @@
-import { useMemo, useRef } from 'react';
-import { IconPlus, IconSearch, IconServer, IconStar, IconUpload } from './Icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { IconEdit, IconFolder, IconGrid, IconPlus, IconSearch, IconServer, IconStar, IconTrash, IconUpload, IconDuplicate, IconPlay } from './Icons';
 import { HostTile } from './HostTile';
+import { ContextMenu } from './ContextMenu';
+import { isNative } from './bridge';
 import { filterServers, parseTarget } from './search';
 import type { Server } from './types';
+
+export type ImportKind = 'mremoteng' | 'sshconfig' | 'putty-win' | 'putty-reg' | 'csv';
+const IMPORTS: { kind: ImportKind; label: string; hint: string; accept: string; nativeOnly?: boolean }[] = [
+  { kind: 'mremoteng', label: 'mRemoteNG', hint: 'confCons.xml', accept: '.xml' },
+  { kind: 'sshconfig', label: 'OpenSSH-Config', hint: '~/.ssh/config', accept: '*' },
+  { kind: 'putty-win', label: 'PuTTY (aus Windows)', hint: 'liest die gespeicherten Sitzungen direkt', accept: '', nativeOnly: true },
+  { kind: 'putty-reg', label: 'PuTTY (.reg-Datei)', hint: 'Export aus regedit', accept: '.reg' },
+  { kind: 'csv', label: 'CSV-Datei', hint: 'name, host, port, protocol, user, group …', accept: '.csv,.txt' },
+];
 
 /** Termius-Stil: Suchzeile oben, darunter schlichte Karten ("ssh, root"). */
 export function HostsPage({
@@ -13,9 +24,14 @@ export function HostsPage({
   openServerIds,
   onSelect,
   onConnect,
+  onSftp,
+  onFav,
+  onDuplicateHost,
+  onDelete,
   onNew,
   onQuick,
   onImport,
+  onSplit,
 }: {
   servers: Server[];
   query: string;
@@ -24,12 +40,38 @@ export function HostsPage({
   openServerIds: Set<string>;
   onSelect: (s: Server) => void;
   onConnect: (s: Server, forceNew: boolean) => void;
+  onSftp: (s: Server) => void;
+  onFav: (s: Server) => void;
+  onDuplicateHost: (s: Server) => void;
+  onDelete: (s: Server) => void;
   onNew: () => void;
   onQuick: (draft: Partial<Server>) => void;
-  onImport: (file: File) => void;
+  onImport: (kind: ImportKind, file?: File) => void;
+  onSplit: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const pendingKind = useRef<ImportKind>('mremoteng');
+  const importRef = useRef<HTMLDivElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const q = query.trim();
+
+  useEffect(() => {
+    if (!importOpen) return;
+    const onDown = (e: MouseEvent) => !importRef.current?.contains(e.target as Node) && setImportOpen(false);
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [importOpen]);
+
+  function startImport(it: (typeof IMPORTS)[number]) {
+    setImportOpen(false);
+    pendingKind.current = it.kind;
+    if (it.kind === 'putty-win') return onImport(it.kind);
+    if (fileRef.current) {
+      fileRef.current.accept = it.accept === '*' ? '' : it.accept;
+      fileRef.current.click();
+    }
+  }
 
   const filtered = useMemo(
     () => (q ? filterServers(servers, q) : [...servers].sort((a, b) => a.name.localeCompare(b.name))),
@@ -84,9 +126,36 @@ export function HostsPage({
         <button className="primary" onClick={onNew}>
           <IconPlus size={15} /> Neuer Host
         </button>
-        <input ref={fileRef} type="file" accept=".xml" hidden onChange={(e) => e.target.files?.[0] && onImport(e.target.files[0])} />
-        <button className="tool" title="Hosts aus mRemoteNG (confCons.xml) importieren" onClick={() => fileRef.current?.click()}>
-          <IconUpload size={15} /> Import
+        <input
+          ref={fileRef}
+          type="file"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) onImport(pendingKind.current, f);
+          }}
+        />
+        <div className="pop-anchor" ref={importRef}>
+          <button className="tool" onClick={() => setImportOpen((o) => !o)}>
+            <IconUpload size={15} /> Import
+          </button>
+          {importOpen && (
+            <div className="popover light" style={{ left: 0, right: 'auto', width: 330 }}>
+              <div className="pop-section">Hosts importieren aus</div>
+              <div className="pop-list" style={{ width: '100%' }}>
+                {IMPORTS.filter((i) => !i.nativeOnly || isNative).map((it) => (
+                  <button key={it.kind} className="pop-item" onClick={() => startImport(it)}>
+                    <span className="pop-name">{it.label}</span>
+                    <span className="pop-sub">{it.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <button className="tool" title="Mehrere SSH-Hosts nebeneinander in einem Tab" onClick={onSplit}>
+          <IconGrid size={15} /> Geteilte Ansicht
         </button>
       </div>
 
@@ -114,6 +183,10 @@ export function HostsPage({
                     tabIndex={0}
                     title={`${s.name} – ${s.host}:${s.port}`}
                     onClick={() => onSelect(s)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenu({ x: e.clientX, y: e.clientY, server: s });
+                    }}
                     onDoubleClick={(e) => onConnect(s, e.shiftKey)}
                     onKeyDown={(e) => e.key === 'Enter' && onConnect(s, e.shiftKey)}
                   >
@@ -133,8 +206,25 @@ export function HostsPage({
               </div>
             </section>
           ))}
-          <p className="muted small">Doppelklick oder Enter verbindet · Klick zeigt Details · Shift öffnet eine zusätzliche Session</p>
+          <p className="muted small">Doppelklick oder Enter verbindet · Klick zeigt Details · Rechtsklick für mehr · Shift öffnet eine zusätzliche Session</p>
         </>
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: 'Verbinden', icon: <IconPlay size={14} />, onClick: () => onConnect(menu.server, false) },
+            { label: 'In neuem Tab verbinden', icon: <IconDuplicate size={14} />, onClick: () => onConnect(menu.server, true) },
+            ...(menu.server.protocol === 'ssh' ? [{ label: 'SFTP öffnen', icon: <IconFolder size={14} />, onClick: () => onSftp(menu.server) }] : []),
+            { label: 'Details bearbeiten', icon: <IconEdit size={14} />, onClick: () => onSelect(menu.server), separator: true },
+            { label: menu.server.favorite ? 'Favorit entfernen' : 'Als Favorit markieren', icon: <IconStar size={14} filled={menu.server.favorite} />, onClick: () => onFav(menu.server) },
+            { label: 'Duplizieren', icon: <IconDuplicate size={14} />, onClick: () => onDuplicateHost(menu.server) },
+            { label: 'Löschen', icon: <IconTrash size={14} />, danger: true, separator: true, onClick: () => onDelete(menu.server) },
+          ]}
+        />
       )}
     </div>
   );

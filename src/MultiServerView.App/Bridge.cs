@@ -34,6 +34,9 @@ internal sealed class Bridge : IDisposable
     private readonly IRdpController _rdp;
     private readonly Action<object> _emit;
     private readonly HistoryStore _history;
+    private readonly AppSettingsStore _settings;
+    private readonly Func<string, Task<string?>> _pickSavePath;
+    private readonly ConcurrentDictionary<string, JumpTunnel> _tunnels = new();
     private readonly ConcurrentDictionary<string, SshPump> _ssh = new();
     private readonly ConcurrentDictionary<string, SftpSession> _sftp = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _transfers = new();
@@ -41,16 +44,46 @@ internal sealed class Bridge : IDisposable
     private readonly PortForwardManager _forwards = new();
     private readonly WebSocketTcpProxy _vncProxy = new();
 
-    public Bridge(VaultStore vault, SyncService sync, HistoryStore history, IRdpController rdp, Action<object> emit)
+    public Bridge(VaultStore vault, SyncService sync, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit,
+        Func<string, Task<string?>> pickSavePath)
     {
         _vault = vault;
         _history = history;
+        _settings = settings;
+        _pickSavePath = pickSavePath;
         _forwards.StatusChanged += (id, running, error) =>
             emit(new { @event = "forward.status", ruleId = id, running, error });
         _sync = sync;
         _rdp = rdp;
         _emit = emit;
         _auto = new AutoSync(vault, sync, emit);
+    }
+
+    /// <summary>Löst Jump-Hosts (samt Zugangsdaten aus Identities und Keys) für Verbindungsketten auf.</summary>
+    private (ServerEntry Server, KeyEntry? Key)? Jumps(string id)
+    {
+        var s = _vault.FindResolved(id);
+        return s == null ? null : (s, s.Auth == AuthMethod.Key ? _vault.FindKey(s.KeyId) : null);
+    }
+
+    private HostKeyTrust CheckHost(string host, int port, string fp) => _vault.CheckHostKey(host, port, fp);
+
+    /// <summary>Öffnet bei Bedarf einen Jump-Tunnel für RDP/VNC und gibt das tatsächlich zu verbindende Ziel zurück.</summary>
+    private async Task<ServerEntry> TunnelFor(string sessionId, ServerEntry server)
+    {
+        var tunnel = await JumpTunnel.OpenAsync(server, Jumps, CheckHost);
+        if (tunnel == null) return server;
+        if (_tunnels.TryRemove(sessionId, out var old)) old.Dispose();
+        _tunnels[sessionId] = tunnel;
+        var effective = server.Clone();
+        effective.Host = tunnel.Host;
+        effective.Port = tunnel.Port;
+        return effective;
+    }
+
+    private void CloseTunnel(string sessionId)
+    {
+        if (_tunnels.TryRemove(sessionId, out var t)) t.Dispose();
     }
 
     public async Task<string> HandleAsync(string requestJson)
@@ -90,6 +123,7 @@ internal sealed class Bridge : IDisposable
             case "vault.lock":
                 CloseAllSessions();
                 foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
+                foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
                 _forwards.StopAll();
                 _vault.Lock();
                 return null;
@@ -113,9 +147,7 @@ internal sealed class Bridge : IDisposable
             }
             case "import.mremoteng":
             {
-                var result = MRemoteNgImporter.Parse(Str(p, "xml"));
-                var imported = _vault.UpsertMany(result.Servers);
-                return new { imported, skipped = result.Skipped };
+                return ImportResult(MRemoteNgImporter.Parse(Str(p, "xml")));
             }
 
             // ---------------------------------------------------------- Keys (private Keys verlassen den Host nie Richtung UI)
@@ -162,10 +194,24 @@ internal sealed class Bridge : IDisposable
             {
                 var server = _vault.FindResolved(Str(p, "serverId")) ?? throw new KeyNotFoundException("Server nicht gefunden.");
                 var hid = _history.Begin(server, "vnc");
-                _history.End(hid, true);
-                var url = _vncProxy.Register(server.Host, server.Port > 0 ? server.Port : 5900);
+                ServerEntry target;
+                try
+                {
+                    target = await TunnelFor(Opt(p, "sessionId").Length > 0 ? Opt(p, "sessionId") : server.Id, server);
+                    _history.End(hid, true);
+                }
+                catch (Exception ex)
+                {
+                    _history.End(hid, false, Friendly(ex));
+                    throw;
+                }
+                var url = _vncProxy.Register(target.Host, target.Port > 0 ? target.Port : 5900);
                 return new { url, username = server.Username, password = server.Password };
             }
+
+            case "vnc.close":
+                CloseTunnel(Str(p, "sessionId"));
+                return null;
 
             // ---------------------------------------------------------- RDP
             case "rdp.open":
@@ -175,11 +221,13 @@ internal sealed class Bridge : IDisposable
                 var hid = _history.Begin(server, "rdp");
                 try
                 {
-                    _rdp.Open(sessionId, server, Bounds(p));
+                    var effective = await TunnelFor(sessionId, server);
+                    _rdp.Open(sessionId, effective, Bounds(p));
                     _history.End(hid, true);
                 }
                 catch (Exception ex)
                 {
+                    CloseTunnel(sessionId);
                     _history.End(hid, false, Friendly(ex));
                     throw;
                 }
@@ -190,6 +238,7 @@ internal sealed class Bridge : IDisposable
                 return null;
             case "rdp.close":
                 _rdp.Close(Str(p, "sessionId"));
+                CloseTunnel(Str(p, "sessionId"));
                 return null;
             case "rdp.suspend":
                 _rdp.SetSuspended(Bool(p, "suspended"));
@@ -261,7 +310,7 @@ internal sealed class Bridge : IDisposable
                 var hid = _history.Begin(server, "forward");
                 try
                 {
-                    await _forwards.StartAsync(rule, server, key, (h, port, fp) => _vault.CheckHostKey(h, port, fp));
+                    await _forwards.StartAsync(rule, server, key, CheckHost, Jumps);
                     _history.End(hid, true, $"{rule.Type} {rule.BindPort}");
                 }
                 catch (Exception ex)
@@ -295,7 +344,7 @@ internal sealed class Bridge : IDisposable
                 var server = _vault.FindResolved(Str(p, "serverId")) ?? throw new KeyNotFoundException("Server nicht gefunden.");
                 var key = server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null;
                 var hid = _history.Begin(server, "sftp");
-                var session = new SftpSession(server, key, (h, port, fp) => _vault.CheckHostKey(h, port, fp));
+                var session = new SftpSession(server, key, CheckHost, Jumps);
                 try
                 {
                     var home = await session.ConnectAsync();
@@ -360,6 +409,52 @@ internal sealed class Bridge : IDisposable
                 LocalFs.MakeDir(Str(p, "path"));
                 return null;
 
+            // ---------------------------------------------------------- Einstellungen, Passwort, Backup
+            case "settings.get":
+                return _settings.Current;
+            case "settings.save":
+                return _settings.Save(p.Deserialize<AppSettings>(Json.Options) ?? throw new ArgumentException("Ungültige Einstellungen."));
+            case "vault.changePassword":
+            {
+                _vault.ChangePassword(Str(p, "oldPassword"), Str(p, "newPassword"));
+                if (!_sync.Settings.IsConfigured) return new { cloud = "none" };
+                try
+                {
+                    await _sync.ForceUploadAsync();
+                    return new { cloud = "updated" };
+                }
+                catch (Exception ex)
+                {
+                    return new { cloud = "failed", message = Friendly(ex) };
+                }
+            }
+            case "vault.export":
+            {
+                var path = await _pickSavePath($"MultiServerView-Backup-{DateTime.Now:yyyy-MM-dd}.msv");
+                if (path == null) return new { saved = false };
+                _vault.ExportTo(path);
+                return new { saved = true, path };
+            }
+            case "vault.info":
+                return new { path = _vault.FilePath, version = typeof(Bridge).Assembly.GetName().Version?.ToString(3) ?? "" };
+            case "vault.reveal":
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{_vault.FilePath}\"") { UseShellExecute = true });
+                return null;
+            case "sync.adoptPassword":
+                await _sync.AdoptCloudPasswordAsync(Str(p, "password"));
+                return null;
+            case "sync.forceUpload":
+                await _sync.ForceUploadAsync();
+                return null;
+
+            // ---------------------------------------------------------- Weitere Importe
+            case "import.sshconfig":
+                return ImportResult(SshConfigImporter.Parse(Str(p, "text")));
+            case "import.putty":
+                return ImportResult(Opt(p, "text").Length > 0 ? PuttyImporter.ParseReg(Str(p, "text")) : PuttyImporter.FromSessions(ReadPuttyRegistry()));
+            case "import.csv":
+                return ImportResult(CsvImporter.Parse(Str(p, "text")));
+
             // ---------------------------------------------------------- Cloud
             case "sync.get":
                 return SyncDto(_sync.Settings);
@@ -402,7 +497,7 @@ internal sealed class Bridge : IDisposable
         var key = server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null;
         var hid = _history.Begin(server, "ssh");
 
-        var session = new SshTerminalSession(server, key, (host, port, fp) => _vault.CheckHostKey(host, port, fp));
+        var session = new SshTerminalSession(server, key, CheckHost, Jumps);
         var pump = new SshPump(session, chunk => _emit(new { @event = "ssh.data", sessionId, data = Convert.ToBase64String(chunk) }));
         session.Info += message => _emit(new { @event = "ssh.info", sessionId, message });
         session.Closed += reason =>
@@ -494,6 +589,43 @@ internal sealed class Bridge : IDisposable
     }
 
     // ================================================================== Hilfen
+
+    /// <summary>Übernimmt importierte Hosts, überspringt Duplikate (gleicher Name, Host, Port, Protokoll) und biegt Jump-Host-Verweise um.</summary>
+    private object ImportResult(Core.Import.ImportResult result)
+    {
+        var existing = _vault.List();
+        var remap = new Dictionary<string, string>();
+        var fresh = new List<ServerEntry>();
+        foreach (var s in result.Servers)
+        {
+            var dup = existing.FirstOrDefault(e => e.Name == s.Name && e.Host == s.Host && e.Port == s.Port && e.Protocol == s.Protocol);
+            if (dup != null) remap[s.Id] = dup.Id;
+            else fresh.Add(s);
+        }
+        foreach (var s in fresh)
+            if (s.JumpHostId.Length > 0 && remap.TryGetValue(s.JumpHostId, out var mapped)) s.JumpHostId = mapped;
+
+        var imported = _vault.UpsertMany(fresh);
+        return new { imported, skipped = result.Skipped, duplicates = result.Servers.Count - fresh.Count };
+    }
+
+    /// <summary>Liest gespeicherte PuTTY-Sitzungen direkt aus der Windows-Registry.</summary>
+    private static IEnumerable<PuttySession> ReadPuttyRegistry()
+    {
+        using var root = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\SimonTatham\PuTTY\Sessions");
+        if (root == null) throw new InvalidOperationException("Auf diesem PC wurden keine gespeicherten PuTTY-Sitzungen gefunden.");
+        foreach (var name in root.GetSubKeyNames())
+        {
+            using var k = root.OpenSubKey(name);
+            if (k == null) continue;
+            yield return new PuttySession(
+                Uri.UnescapeDataString(name),
+                k.GetValue("HostName") as string ?? "",
+                k.GetValue("PortNumber") is int port ? port : 22,
+                k.GetValue("Protocol") as string ?? "ssh",
+                k.GetValue("UserName") as string ?? "");
+        }
+    }
 
     private SftpSession Sftp(JsonElement p) =>
         _sftp.TryGetValue(Str(p, "sessionId"), out var s) ? s : throw new InvalidOperationException("Die SFTP-Verbindung ist nicht offen.");
@@ -592,6 +724,7 @@ internal sealed class Bridge : IDisposable
     {
         _auto.Dispose();
         _forwards.Dispose();
+        foreach (var id in _tunnels.Keys.ToList()) CloseTunnel(id);
         foreach (var t in _transfers.Values) t.Cancel();
         foreach (var id in _sftp.Keys.ToList()) CloseSftp(id);
         CloseAllSessions();

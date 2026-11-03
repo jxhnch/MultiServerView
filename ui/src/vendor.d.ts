@@ -8,6 +8,8 @@ declare module '@novnc/novnc' {
     showDotCursor: boolean;
     background: string;
     viewOnly: boolean;
+    qualityLevel: number;
+    compressionLevel: number;
     disconnect(): void;
     sendCredentials(credentials: { username?: string; password?: string; target?: string }): void;
     sendCtrlAltDel(): void;

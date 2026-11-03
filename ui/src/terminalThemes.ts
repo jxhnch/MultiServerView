@@ -45,10 +45,15 @@ export interface TermSettings {
   theme: string;
   font: string;
   fontSize: number;
+  cursorStyle: 'bar' | 'block' | 'underline';
+  cursorBlink: boolean;
+  scrollback: number;
+  /** Markierten Text sofort in die Zwischenablage kopieren. */
+  copyOnSelect: boolean;
 }
 
 const KEY = 'msv-terminal';
-const DEFAULTS: TermSettings = { theme: 'night-owl', font: 'cascadia', fontSize: 14 };
+const DEFAULTS: TermSettings = { theme: 'night-owl', font: 'cascadia', fontSize: 14, cursorStyle: 'bar', cursorBlink: true, scrollback: 10000, copyOnSelect: false };
 let current: TermSettings = load();
 const listeners = new Set<(s: TermSettings) => void>();
 

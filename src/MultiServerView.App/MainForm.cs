@@ -32,10 +32,29 @@ public sealed class MainForm : Form
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var sync = new SyncService(vault, settings, cfg => new SupabaseClient(http, cfg.Url, cfg.AnonKey));
 
+        var appSettings = new AppSettingsStore(Path.Combine(roaming, "settings.json"));
+
         Controls.Add(_web);
-        _rdp = new RdpManager(this, Emit);
+        _rdp = new RdpManager(this, Emit, () => appSettings.Current);
         var history = new HistoryStore(Path.Combine(roaming, "history.json"));
-        _bridge = new Bridge(vault, sync, history, _rdp, Emit);
+        _bridge = new Bridge(vault, sync, history, appSettings, _rdp, Emit, PickSavePath);
+    }
+
+    /// <summary>Zeigt den «Speichern unter»-Dialog (läuft auf dem UI-Thread). null = abgebrochen.</summary>
+    private Task<string?> PickSavePath(string suggestedName)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+        BeginInvoke(() =>
+        {
+            using var dialog = new SaveFileDialog
+            {
+                FileName = suggestedName,
+                Filter = "MultiServerView-Backup (*.msv)|*.msv|Alle Dateien (*.*)|*.*",
+                Title = "Vault-Backup speichern"
+            };
+            tcs.SetResult(dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null);
+        });
+        return tcs.Task;
     }
 
     /// <summary>Schickt ein Event ans UI (thread-sicher).</summary>

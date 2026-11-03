@@ -2,6 +2,7 @@ import {
   DEFAULT_PORT,
   type BrowseResult,
   type FileEntry,
+  type HostSettings,
   type ForwardItem,
   type ForwardRule,
   type HistoryEntry,
@@ -111,6 +112,7 @@ interface MockState {
   snippets: Snippet[];
   forwards: ForwardRule[];
   history: HistoryEntry[];
+  settings: HostSettings;
   sync: SyncInfo;
 }
 const MOCK_KEY = 'msv-mock-v3';
@@ -131,6 +133,7 @@ function loadMock(): MockState {
     snippets: [],
     forwards: [],
     history: [],
+    settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false },
     sync: { configured: false, url: '', anonKey: '', email: '', hasPassword: false, lastSync: null },
   };
 }
@@ -152,6 +155,7 @@ function demoServers(): Server[] {
     auth: 'password',
     keyId: '',
     identityId: '',
+    jumpHostId: '',
     os: '',
     group: '',
     tags: [],
@@ -296,7 +300,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
     if (!mock.unlocked) throw new Error('Der Vault ist gesperrt.');
   };
   const onlyNative = (what: string) => {
-    throw new Error(`${what} funktioniert nur in der Windows-App (im Browser ist nur die Oberfläche mit Demo-Daten).`);
+    throw new Error(`${what} gibt es nur in der Windows-App (im Browser siehst du nur die Oberfläche mit Demo-Daten).`);
   };
 
   switch (method) {
@@ -441,6 +445,36 @@ async function callMock(method: string, params: any): Promise<unknown> {
       persistMock();
       return null;
 
+
+
+    // ---- Einstellungen, Passwort, Backup
+    case 'settings.get':
+      return mock.settings;
+    case 'settings.save':
+      mock.settings = { ...mock.settings, ...params };
+      persistMock();
+      return mock.settings;
+    case 'vault.changePassword':
+      need();
+      if (params.oldPassword !== mock.password) throw new Error('Falsches Passwort.');
+      if (!params.newPassword || params.newPassword.length < 8) throw new Error('Das neue Master-Passwort muss mindestens 8 Zeichen haben.');
+      mock.password = params.newPassword;
+      persistMock();
+      return { cloud: 'none' };
+    case 'vault.export':
+      return { saved: true, path: 'C:\\Users\\demo\\Documents\\MultiServerView-Backup.msv' };
+    case 'vault.info':
+      return { path: 'C:\\Users\\demo\\AppData\\Roaming\\MultiServerView\\vault.msv', version: '0.1.0' };
+    case 'vault.reveal':
+      return null;
+    case 'sync.adoptPassword':
+    case 'sync.forceUpload':
+    case 'import.sshconfig':
+    case 'import.putty':
+    case 'import.csv':
+      return onlyNative('Diese Funktion');
+    case 'vnc.close':
+      return null;
 
     // ---- Identities
     case 'identities.list':
@@ -595,6 +629,12 @@ export interface Rect {
   h: number;
 }
 
+export interface ImportOutcome {
+  imported: number;
+  skipped: number;
+  duplicates?: number;
+}
+
 export interface SyncConfigInput {
   url: string;
   anonKey: string;
@@ -613,7 +653,7 @@ export const api = {
   serversDelete: (id: string) => call<void>('servers.delete', { id }),
   serversTouch: (id: string) => call<Server>('servers.touch', { id }),
   hostsForget: (id: string) => call<void>('hosts.forget', { id }),
-  importMremoteng: (xml: string) => call<{ imported: number; skipped: number }>('import.mremoteng', { xml }),
+  importMremoteng: (xml: string) => call<ImportOutcome>('import.mremoteng', { xml }),
 
   keysList: () => call<KeyInfo[]>('keys.list'),
   keysSave: (k: { id?: string; name: string; privateKey?: string; passphrase?: string }) => call<KeyInfo>('keys.save', k),
@@ -625,7 +665,8 @@ export const api = {
   sshResize: (sessionId: string, cols: number, rows: number) => call<void>('ssh.resize', { sessionId, cols, rows }),
   sshClose: (sessionId: string) => call<void>('ssh.close', { sessionId }),
 
-  vncOpen: (serverId: string) => call<{ url: string; username: string; password: string }>('vnc.open', { serverId }),
+  vncOpen: (serverId: string, sessionId: string) => call<{ url: string; username: string; password: string }>('vnc.open', { serverId, sessionId }),
+  vncClose: (sessionId: string) => call<void>('vnc.close', { sessionId }),
 
   rdpOpen: (sessionId: string, serverId: string, r: Rect) => call<void>('rdp.open', { sessionId, serverId, ...r }),
   rdpLayout: (sessionId: string, r: Rect, visible: boolean) => call<void>('rdp.layout', { sessionId, ...r, visible }),
@@ -667,6 +708,19 @@ export const api = {
   localBrowse: (path: string) => call<BrowseResult>('local.browse', { path }),
   localRoots: () => call<BrowseResult>('local.roots'),
   localMkdir: (path: string) => call<void>('local.mkdir', { path }),
+
+  settingsGet: () => call<HostSettings>('settings.get'),
+  settingsSave: (s: HostSettings) => call<HostSettings>('settings.save', s),
+  vaultChangePassword: (oldPassword: string, newPassword: string) =>
+    call<{ cloud: 'none' | 'updated' | 'failed'; message?: string }>('vault.changePassword', { oldPassword, newPassword }),
+  vaultExport: () => call<{ saved: boolean; path?: string }>('vault.export'),
+  vaultInfo: () => call<{ path: string; version: string }>('vault.info'),
+  vaultReveal: () => call<void>('vault.reveal'),
+  syncAdoptPassword: (password: string) => call<void>('sync.adoptPassword', { password }),
+  syncForceUpload: () => call<void>('sync.forceUpload'),
+  importSshConfig: (text: string) => call<ImportOutcome>('import.sshconfig', { text }),
+  importPutty: (text?: string) => call<ImportOutcome>('import.putty', { text: text ?? '' }),
+  importCsv: (text: string) => call<ImportOutcome>('import.csv', { text }),
 
   syncGet: () => call<SyncInfo>('sync.get'),
   syncSave: (c: SyncConfigInput) => call<SyncInfo>('sync.save', c),

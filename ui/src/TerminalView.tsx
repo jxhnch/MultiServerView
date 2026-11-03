@@ -25,6 +25,9 @@ export function TerminalView({
   onEdit,
   onOpenSftp,
   onManageSnippets,
+  bare,
+  registerSender,
+  onUserInput,
 }: {
   tabId: string;
   server: Server;
@@ -36,6 +39,12 @@ export function TerminalView({
   onEdit: () => void;
   onOpenSftp: () => void;
   onManageSnippets: () => void;
+  /** Nur das Terminal, ohne Werkzeugleiste (für die geteilte Ansicht). */
+  bare?: boolean;
+  /** Meldet eine Funktion an, mit der Text wie getippt in dieses Terminal geschickt werden kann. */
+  registerSender?: (send: ((text: string) => void) | null) => void;
+  /** Wird bei jeder Eingabe des Benutzers aufgerufen (für Broadcast). */
+  onUserInput?: (data: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -47,6 +56,8 @@ export function TerminalView({
   const [bg, setBg] = useState(() => findTheme(getTermSettings().theme).bg);
   activeRef.current = active;
   reconnectRef.current = onReconnect;
+  const inputRef = useRef(onUserInput);
+  inputRef.current = onUserInput;
 
   const setStatus = (s: SessionStatus) => {
     statusRef.current = s;
@@ -61,9 +72,9 @@ export function TerminalView({
       fontFamily: findFont(st.font).css,
       fontSize: st.fontSize,
       lineHeight: 1.18,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      scrollback: 10000,
+      cursorBlink: st.cursorBlink,
+      cursorStyle: st.cursorStyle,
+      scrollback: st.scrollback,
       allowProposedApi: true,
       theme: toXtermTheme(findTheme(st.theme)),
     });
@@ -110,7 +121,10 @@ export function TerminalView({
     hostRef.current!.addEventListener('contextmenu', onContext);
 
     term.onData((d) => {
-      if (statusRef.current === 'connected') void api.sshInput(tabId, toB64(d)).catch(() => undefined);
+      if (statusRef.current === 'connected') {
+        void api.sshInput(tabId, toB64(d)).catch(() => undefined);
+        inputRef.current?.(d);
+      }
       else if (d === '\r' && (statusRef.current === 'closed' || statusRef.current === 'error')) reconnectRef.current();
     });
     term.onBinary((d) => {
@@ -141,11 +155,19 @@ export function TerminalView({
       }
     });
 
+    // Markierten Text automatisch kopieren (wenn in den Einstellungen aktiv)
+    term.onSelectionChange(() => {
+      if (getTermSettings().copyOnSelect && term.hasSelection()) navigator.clipboard?.writeText(term.getSelection()).catch(() => undefined);
+    });
+
     // Aussehen live ändern (Theme, Schrift, Grösse)
     const offSettings = onTermSettings((n) => {
       term.options.theme = toXtermTheme(findTheme(n.theme));
       term.options.fontFamily = findFont(n.font).css;
       term.options.fontSize = n.fontSize;
+      term.options.cursorStyle = n.cursorStyle;
+      term.options.cursorBlink = n.cursorBlink;
+      term.options.scrollback = n.scrollback;
       setBg(findTheme(n.theme).bg);
       requestAnimationFrame(() => {
         try {
@@ -209,6 +231,15 @@ export function TerminalView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, reconnectKey]);
 
+  // ---------------------------------------------------------------- Sender für Broadcast
+  useEffect(() => {
+    registerSender?.((text) => {
+      if (statusRef.current === 'connected') void api.sshInput(tabId, toB64(text)).catch(() => undefined);
+    });
+    return () => registerSender?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId]);
+
   // ---------------------------------------------------------------- Fokus beim Wechseln
   useEffect(() => {
     if (!active) return;
@@ -222,6 +253,15 @@ export function TerminalView({
     });
     return () => cancelAnimationFrame(id);
   }, [active]);
+
+  if (bare)
+    return (
+      <div className="bare-body" style={{ background: bg }}>
+        <div className="term-wrap" style={{ background: bg }}>
+          <div className="term-host" ref={hostRef} />
+        </div>
+      </div>
+    );
 
   return (
     <SessionFrame

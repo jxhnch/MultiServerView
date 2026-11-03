@@ -164,6 +164,8 @@ export function CloudPanel({
         </div>
       )}
 
+      {info?.configured && <PasswordTools toast={toast} onChanged={onChanged} />}
+
       <Setup />
     </div>
   );
@@ -210,6 +212,75 @@ function Setup() {
         </button>
       </div>
       <pre className="code">{SUPABASE_SQL}</pre>
+    </details>
+  );
+}
+
+/** Für den Fall, dass das Master-Passwort auf einem anderen Gerät geändert wurde (oder dieses Gerät die Cloud ersetzen soll). */
+function PasswordTools({ toast, onChanged }: { toast: (msg: string, kind?: 'ok' | 'error') => void; onChanged: () => Promise<void> }) {
+  const [adopting, setAdopting] = useState(false);
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function adopt(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await api.syncAdoptPassword(pw);
+      await onChanged();
+      toast('Neues Master-Passwort übernommen');
+      setAdopting(false);
+      setPw('');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function force() {
+    if (!confirm('Den Cloud-Vault mit dem Stand dieses Geräts überschreiben?\nÄnderungen anderer Geräte, die noch nicht hier sind, gehen dabei verloren.')) return;
+    try {
+      await api.syncForceUpload();
+      toast('Cloud mit diesem Vault überschrieben');
+      await onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  return (
+    <details className="card-form setup">
+      <summary>Erweitert: Master-Passwort geändert?</summary>
+      <p className="muted small">
+        Ändert man das Master-Passwort, ist der Cloud-Vault mit dem neuen Schlüssel verschlüsselt. Andere Geräte, die noch das alte Passwort benutzen,
+        können dann nicht mehr synchronisieren, bis sie das neue Passwort übernehmen.
+      </p>
+      <div className="actions" style={{ justifyContent: 'flex-start' }}>
+        <button onClick={() => setAdopting(true)}>Neues Master-Passwort übernehmen…</button>
+        <button className="ghost danger" onClick={() => void force()}>
+          Cloud mit diesem Vault überschreiben
+        </button>
+      </div>
+      {adopting && (
+        <form className="card-form" style={{ background: 'var(--surface-2)' }} onSubmit={adopt}>
+          <label>
+            Neues Master-Passwort (das du auf dem anderen Gerät gesetzt hast)
+            <input type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
+          </label>
+          {error && <div className="error">{error}</div>}
+          <div className="actions">
+            <button type="button" onClick={() => setAdopting(false)}>
+              Abbrechen
+            </button>
+            <button className="primary" disabled={busy || pw.length < 8}>
+              Übernehmen
+            </button>
+          </div>
+        </form>
+      )}
     </details>
   );
 }

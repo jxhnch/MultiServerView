@@ -12,6 +12,7 @@ export interface Server {
   auth: AuthMethod;
   keyId: string;
   identityId: string;
+  jumpHostId: string;
   os: string;
   group: string;
   tags: string[];
@@ -93,6 +94,17 @@ export interface BrowseResult {
   entries: FileEntry[];
 }
 
+/** Einstellungen des Host-Prozesses (C#). */
+export interface HostSettings {
+  sshKeepAliveSeconds: number;
+  sshConnectTimeoutSeconds: number;
+  rdpColorDepth: number;
+  rdpClipboard: boolean;
+  rdpDrives: boolean;
+  rdpDynamicResize: boolean;
+  rdpWarnOnCertificate: boolean;
+}
+
 export interface SyncInfo {
   configured: boolean;
   url: string;
@@ -128,6 +140,7 @@ export function emptyServer(): Server {
     auth: 'password',
     keyId: '',
     identityId: '',
+    jumpHostId: '',
     os: '',
     group: '',
     tags: [],

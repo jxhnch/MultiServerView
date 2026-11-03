@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import RFB from '@novnc/novnc';
 import { api } from './bridge';
 import { SessionFrame } from './SessionFrame';
+import { getUiSettings } from './uiSettings';
 import type { Server, SessionStatus } from './types';
 
 /** VNC-Session über noVNC. Die Bytes laufen über eine lokale Brücke im Host (Einmal-Token). */
@@ -47,12 +48,14 @@ export function VncView({
     setPw('');
 
     api
-      .vncOpen(server.id)
+      .vncOpen(server.id, tabId)
       .then(({ url, username, password }) => {
         if (cancelled || !boxRef.current) return;
         boxRef.current.replaceChildren();
         rfb = new RFB(boxRef.current, url, { credentials: { username, password }, shared: true });
-        rfb.scaleViewport = true;
+        const ui = getUiSettings();
+        rfb.scaleViewport = ui.vncScale;
+        rfb.qualityLevel = ui.vncQuality;
         rfb.resizeSession = false;
         rfb.background = '#0b0d12';
         rfbRef.current = rfb;
@@ -83,6 +86,7 @@ export function VncView({
         /* schon getrennt */
       }
       rfbRef.current = null;
+      void api.vncClose(tabId).catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, reconnectKey]);

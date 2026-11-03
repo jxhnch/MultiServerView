@@ -25,6 +25,7 @@ export function HostPanel({
   groups,
   keys,
   identities,
+  jumpCandidates,
   onSave,
   onConnect,
   onSftp,
@@ -38,6 +39,7 @@ export function HostPanel({
   groups: string[];
   keys: KeyInfo[];
   identities: Identity[];
+  jumpCandidates: Server[];
   onSave: (s: Server) => Promise<Server>;
   onConnect: (s: Server) => Promise<void>;
   onSftp: (s: Server) => Promise<void>;
@@ -185,6 +187,23 @@ export function HostPanel({
             <input type="number" value={s.port} onChange={(e) => set('port', Number(e.target.value))} />
             Port
           </div>
+        </div>
+
+        <div className="group-card">
+          <h3>Verbindung</h3>
+          <Field label="Über Jump Host">
+            <select value={s.jumpHostId} onChange={(e) => set('jumpHostId', e.target.value)}>
+              <option value="">Direkt verbinden</option>
+              {jumpCandidates
+                .filter((j) => j.id !== s.id && j.protocol === 'ssh')
+                .map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.name} ({j.host})
+                  </option>
+                ))}
+            </select>
+          </Field>
+          {s.jumpHostId && <p className="hint">Die Verbindung läuft zuerst zum Jump Host und von dort weiter zu diesem Server (auch mehrstufig, wenn der Jump Host selbst einen hat).</p>}
         </div>
 
         <div className="group-card">

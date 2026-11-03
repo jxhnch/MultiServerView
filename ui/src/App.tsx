@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, isNative, onEvent } from './bridge';
 import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SyncInfo, type SyncStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
-import { HostsPage } from './HostsPage';
 import { Keychain } from './Keychain';
 import { CloudPanel } from './CloudPanel';
 import { TerminalView } from './TerminalView';
@@ -16,15 +15,22 @@ import { ForwardsPage } from './ForwardsPage';
 import { KnownHostsPage } from './KnownHostsPage';
 import { LogsPage } from './LogsPage';
 import { HostTile } from './HostTile';
-import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconShield, IconSun } from './Icons';
+import { SettingsPage } from './SettingsPage';
+import { SplitView, type SplitPane } from './SplitView';
+import { SplitPicker } from './SplitPicker';
+import { HostsPage, type ImportKind } from './HostsPage';
+import { getUiSettings, onUiSettings, setUiSettings } from './uiSettings';
+import { readTextAuto } from './files';
+import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSettings, IconShield, IconSun } from './Icons';
 
 type Phase = 'loading' | 'locked' | 'ready';
-type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud';
+type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud' | 'settings';
 type Theme = 'light' | 'dark';
 interface Tab {
   id: string;
   serverId: string;
-  kind: 'session' | 'sftp';
+  kind: 'session' | 'sftp' | 'split';
+  panes?: SplitPane[];
   reconnectKey: number;
 }
 interface Toast {
@@ -37,14 +43,6 @@ interface PanelState {
   key: number;
 }
 const HOME = 'home';
-
-function loadTheme(): Theme {
-  try {
-    return localStorage.getItem('msv-theme') === 'dark' ? 'dark' : 'light';
-  } catch {
-    return 'light';
-  }
-}
 
 export function App() {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -62,23 +60,16 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [theme, setTheme] = useState<Theme>(loadTheme);
+  const [theme, setThemeState] = useState<Theme>(getUiSettings().theme);
+  const [splitPicker, setSplitPicker] = useState(false);
 
   const byId = useMemo(() => new Map(servers.map((s) => [s.id, s])), [servers]);
   const groups = useMemo(() => [...new Set(servers.map((s) => s.group).filter(Boolean))].sort(), [servers]);
   const openServerIds = useMemo(() => new Set(tabs.map((t) => t.serverId)), [tabs]);
   const themeClass = theme === 'light' ? 'theme-light' : 'theme-dark';
 
-  const toggleTheme = () =>
-    setTheme((t) => {
-      const next = t === 'light' ? 'dark' : 'light';
-      try {
-        localStorage.setItem('msv-theme', next);
-      } catch {
-        /* nicht schlimm */
-      }
-      return next;
-    });
+  const toggleTheme = () => setUiSettings({ theme: theme === 'light' ? 'dark' : 'light' });
+  useEffect(() => onUiSettings((u) => setThemeState(u.theme)), []);
 
   // ---------------------------------------------------------------- Toasts
   const toast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
@@ -163,6 +154,15 @@ export function App() {
     [tabs],
   );
 
+  const openSplit = useCallback((ids: string[]) => {
+    setSplitPicker(false);
+    setPanel(null);
+    const panes: SplitPane[] = ids.map((serverId) => ({ id: crypto.randomUUID(), serverId, reconnectKey: 0 }));
+    const t: Tab = { id: crypto.randomUUID(), serverId: ids[0], kind: 'split', panes, reconnectKey: 0 };
+    setTabs((prev) => [...prev, t]);
+    setActive(t.id);
+  }, []);
+
   const closeTab = useCallback(
     (id: string) => {
       const i = tabs.findIndex((t) => t.id === id);
@@ -186,7 +186,7 @@ export function App() {
     (id: string) => {
       const t = tabs.find((x) => x.id === id);
       const s = t && byId.get(t.serverId);
-      if (s) void open(s, true, t.kind);
+      if (s && t.kind !== 'split') void open(s, true, t.kind);
     },
     [tabs, byId, open],
   );
@@ -244,6 +244,24 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [phase, tabs, active, cycle, closeTab, duplicate, newHost]);
 
+  // Automatisch sperren nach Untätigkeit (Einstellung «Sicherheit»)
+  const lastActivity = useRef(Date.now());
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    const touch = () => (lastActivity.current = Date.now());
+    const events = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'] as const;
+    events.forEach((e) => window.addEventListener(e, touch, true));
+    const timer = window.setInterval(() => {
+      const minutes = getUiSettings().autoLockMinutes;
+      if (minutes > 0 && Date.now() - lastActivity.current > minutes * 60_000) void lock();
+    }, 15_000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, touch, true));
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   // RDP ist ein natives Fenster über dem UI -> bei Overlays kurz ausblenden
   const drawerOpen = panel !== null && active !== HOME;
   const overlayOpen = paletteOpen || drawerOpen;
@@ -272,16 +290,56 @@ export function App() {
   async function remove(s: Server) {
     await api.serversDelete(s.id);
     setServers((prev) => prev.filter((x) => x.id !== s.id));
-    setTabs((prev) => prev.filter((t) => t.serverId !== s.id));
+    setTabs((prev) =>
+      prev.flatMap((t) => {
+        if (t.kind !== 'split') return t.serverId === s.id ? [] : [t];
+        const panes = (t.panes ?? []).filter((p) => p.serverId !== s.id);
+        return panes.length === 0 ? [] : [{ ...t, panes, serverId: panes[0].serverId }];
+      }),
+    );
     setActive(HOME);
     setPanel(null);
   }
 
-  async function importFile(file: File) {
+  async function toggleFav(s: Server) {
     try {
-      const { imported, skipped } = await api.importMremoteng(await file.text());
+      await save({ ...s, favorite: !s.favorite });
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  async function duplicateHost(s: Server) {
+    try {
+      await save({ ...s, id: '', name: `${s.name} (Kopie)`, lastUsed: null, favorite: false });
+      toast('Host dupliziert');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  async function deleteHost(s: Server) {
+    if (!confirm(`«${s.name}» wirklich löschen?`)) return;
+    try {
+      await remove(s);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  async function importFile(kind: ImportKind, file?: File) {
+    try {
+      const text = file ? await readTextAuto(file) : '';
+      const r =
+        kind === 'mremoteng' ? await api.importMremoteng(text)
+        : kind === 'sshconfig' ? await api.importSshConfig(text)
+        : kind === 'csv' ? await api.importCsv(text)
+        : await api.importPutty(kind === 'putty-reg' ? text : undefined);
       await refresh();
-      toast(`${imported} Host${imported === 1 ? '' : 's'} importiert${skipped ? `, ${skipped} übersprungen (nicht unterstützt)` : ''}. Passwörter bitte neu eintragen.`);
+      const parts = [`${r.imported} Host${r.imported === 1 ? '' : 's'} importiert`];
+      if (r.duplicates) parts.push(`${r.duplicates} schon vorhanden`);
+      if (r.skipped) parts.push(`${r.skipped} übersprungen (nicht unterstützt)`);
+      toast(parts.join(', ') + (kind === 'csv' ? '.' : '. Passwörter bitte neu eintragen.'));
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -290,6 +348,8 @@ export function App() {
   function onPaletteAction(a: PaletteAction) {
     setPaletteOpen(false);
     if (a === 'new') newHost();
+    else if (a === 'split') setSplitPicker(true);
+    else if (a === 'settings') goTo('settings');
     else if (a === 'keys') goTo('keys');
     else if (a === 'cloud') goTo('cloud');
     else void lock();
@@ -312,6 +372,7 @@ export function App() {
       groups={groups}
       keys={keys}
       identities={identities}
+      jumpCandidates={servers}
       onSave={save}
       onConnect={connectFromPanel}
       onSftp={sftpFromPanel}
@@ -329,9 +390,37 @@ export function App() {
           <IconServer size={16} /> Hosts
         </button>
         {tabs.map((t) => {
+          const st = statuses[t.id] ?? 'connecting';
+          if (t.kind === 'split') {
+            return (
+              <button
+                key={t.id}
+                className={'tab' + (active === t.id ? ' on' : '')}
+                title="Geteilte Ansicht"
+                onClick={() => setActive(t.id)}
+                onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+              >
+                <span className="tile sm neutral">
+                  <IconGrid size={13} />
+                </span>
+                <span className="tab-name">Split · {t.panes?.length ?? 0} Hosts</span>
+                <span className={`status-dot ${st}`} />
+                <span
+                  className="x"
+                  role="button"
+                  aria-label="Tab schliessen"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(t.id);
+                  }}
+                >
+                  <IconClose size={13} />
+                </span>
+              </button>
+            );
+          }
           const s = byId.get(t.serverId);
           if (!s) return null;
-          const st = statuses[t.id] ?? 'connecting';
           return (
             <button
               key={t.id}
@@ -405,6 +494,9 @@ export function App() {
                 <IconCloud size={17} /> Cloud &amp; Sync
               </button>
               <div className="nav-foot">
+                <button className={'nav-item grow' + (section === 'settings' ? ' on' : '')} onClick={() => goTo('settings')}>
+                  <IconSettings size={17} /> Einstellungen
+                </button>
                 <button className="ghost" title={theme === 'light' ? 'Dunkles Design' : 'Helles Design'} onClick={toggleTheme}>
                   {theme === 'light' ? <IconMoon size={16} /> : <IconSun size={16} />}
                 </button>
@@ -421,6 +513,11 @@ export function App() {
                   openServerIds={openServerIds}
                   onSelect={openPanel}
                   onConnect={(s, forceNew) => void open(s, forceNew)}
+                  onSftp={(s) => void open(s, false, 'sftp')}
+                  onFav={(s) => void toggleFav(s)}
+                  onDuplicateHost={(s) => void duplicateHost(s)}
+                  onDelete={(s) => void deleteHost(s)}
+                  onSplit={() => setSplitPicker(true)}
                   onNew={newHost}
                   onQuick={(draft) => openPanel({ ...emptyServer(), ...draft })}
                   onImport={importFile}
@@ -432,6 +529,7 @@ export function App() {
               {section === 'knownhosts' && <KnownHostsPage toast={toast} />}
               {section === 'logs' && <LogsPage toast={toast} />}
               {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
+              {section === 'settings' && <SettingsPage onLock={() => void lock()} toast={toast} />}
             </div>
 
             {active === HOME && section === 'hosts' && panelEl}
@@ -439,6 +537,24 @@ export function App() {
         </div>
 
         {tabs.map((t) => {
+          if (t.kind === 'split') {
+            return (
+              <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
+                <SplitView
+                  tabId={t.id}
+                  panes={t.panes ?? []}
+                  onPanesChange={(panes) => setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, panes, serverId: panes[0]?.serverId ?? x.serverId } : x)))}
+                  servers={servers}
+                  byId={byId}
+                  active={active === t.id}
+                  onStatus={setStatus}
+                  onEdit={openPanel}
+                  onOpenSftp={(srv) => void open(srv, false, 'sftp')}
+                  onManageSnippets={() => goTo('snippets')}
+                />
+              </div>
+            );
+          }
           const s = byId.get(t.serverId);
           if (!s) return null;
           const common = {
@@ -465,6 +581,8 @@ export function App() {
       </div>
 
       {drawerOpen && panelEl}
+
+      {splitPicker && <SplitPicker servers={servers.filter((x) => x.protocol === 'ssh')} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
 
       {paletteOpen && (
         <CommandPalette

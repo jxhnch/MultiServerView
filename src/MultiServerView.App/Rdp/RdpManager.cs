@@ -17,14 +17,16 @@ internal sealed class RdpManager : IRdpController, IDisposable
 {
     private readonly Control _owner;
     private readonly Action<object> _emit;
+    private readonly Func<AppSettings> _settings;
     private readonly Dictionary<string, RdpSession> _sessions = new();
     private readonly System.Windows.Forms.Timer _poll = new() { Interval = 500 };
     private bool _suspended;
 
-    public RdpManager(Control owner, Action<object> emit)
+    public RdpManager(Control owner, Action<object> emit, Func<AppSettings> settings)
     {
         _owner = owner;
         _emit = emit;
+        _settings = settings;
         _poll.Tick += (_, _) => Poll();
         _poll.Start();
     }
@@ -90,7 +92,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         var session = new RdpSession { Id = id, Host = host, Ocx = ocx, WantVisible = true };
         _sessions[id] = session;
 
-        Configure(ocx, server, bounds.Size);
+        Configure(ocx, server, bounds.Size, _settings());
         host.Visible = !_suspended;
         host.BringToFront();
 
@@ -107,7 +109,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         host.Focus();
     }
 
-    private static void Configure(dynamic ocx, ServerEntry server, Size size)
+    private static void Configure(dynamic ocx, ServerEntry server, Size size, AppSettings settings)
     {
         Try(() => ocx.Server = server.Host);
 
@@ -125,11 +127,13 @@ internal sealed class RdpManager : IRdpController, IDisposable
 
         Try(() => ocx.DesktopWidth = size.Width);
         Try(() => ocx.DesktopHeight = size.Height);
-        Try(() => ocx.ColorDepth = 32);
+        Try(() => ocx.ColorDepth = settings.RdpColorDepth);
         Try(() => ocx.AdvancedSettings9.RDPPort = server.Port > 0 ? server.Port : 3389);
         Try(() => ocx.AdvancedSettings9.SmartSizing = true);
         Try(() => ocx.AdvancedSettings9.EnableCredSspSupport = true);
-        Try(() => ocx.AdvancedSettings9.RedirectClipboard = true);
+        Try(() => ocx.AdvancedSettings9.RedirectClipboard = settings.RdpClipboard);
+        Try(() => ocx.AdvancedSettings9.RedirectDrives = settings.RdpDrives);
+        Try(() => ocx.AdvancedSettings9.AuthenticationLevel = settings.RdpWarnOnCertificate ? 2u : 0u);
         Try(() => ocx.AdvancedSettings9.PerformanceFlags = 0x0); // volle Qualität (Hintergrund, Animationen, ...)
         Try(() => ocx.AdvancedSettings9.BitmapPeristence = 1);
 
@@ -154,7 +158,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
             s.Host.Bounds = bounds;
             s.Host.Visible = !_suspended;
             s.Host.BringToFront();
-            QueueResolutionUpdate(s, bounds.Size);
+            if (_settings().RdpDynamicResize) QueueResolutionUpdate(s, bounds.Size);
         }
         else
         {

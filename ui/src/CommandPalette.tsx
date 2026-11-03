@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconCloud, IconKey, IconLock, IconPlus } from './Icons';
+import { IconCloud, IconGrid, IconKey, IconLock, IconPlus, IconSettings } from './Icons';
 import { HostTile } from './HostTile';
 import { filterServers } from './search';
 import type { Server } from './types';
 
-export type PaletteAction = 'new' | 'keys' | 'cloud' | 'lock';
+export type PaletteAction = 'new' | 'split' | 'settings' | 'keys' | 'cloud' | 'lock';
 
 interface Item {
   key: string;
@@ -16,6 +16,8 @@ interface Item {
 
 const ACTIONS: Item[] = [
   { key: 'a-new', action: 'new', label: 'Neuen Host anlegen', hint: 'Ctrl+Shift+N' },
+  { key: 'a-split', action: 'split', label: 'Geteilte Ansicht öffnen' },
+  { key: 'a-settings', action: 'settings', label: 'Einstellungen' },
   { key: 'a-keys', action: 'keys', label: 'Schlüssel verwalten' },
   { key: 'a-cloud', action: 'cloud', label: 'Cloud & Sync' },
   { key: 'a-lock', action: 'lock', label: 'Vault sperren' },
@@ -73,7 +75,7 @@ export function CommandPalette({
   }
 
   const actionIcon = (a?: PaletteAction) =>
-    a === 'new' ? <IconPlus size={16} /> : a === 'keys' ? <IconKey size={16} /> : a === 'cloud' ? <IconCloud size={16} /> : <IconLock size={16} />;
+    a === 'new' ? <IconPlus size={16} /> : a === 'split' ? <IconGrid size={16} /> : a === 'settings' ? <IconSettings size={16} /> : a === 'keys' ? <IconKey size={16} /> : a === 'cloud' ? <IconCloud size={16} /> : <IconLock size={16} />;
 
   return (
     <div className="overlay top" onMouseDown={onClose}>
