@@ -49,6 +49,21 @@ jobs:
             Start-Process .\wv2.exe -ArgumentList '/silent','/install' -Wait
           }
 
+      # Ein echter SSH-Server auf dem Runner, damit Terminal, SFTP, Jump Host und Port Forwarding wirklich getestet werden.
+      - name: OpenSSH-Server für den Selbsttest einrichten
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          try {
+            $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
+            if ($cap.State -ne 'Installed') { Add-WindowsCapability -Online -Name $cap.Name | Out-Null }
+            $pw = 'Smoke-Test-Pw-123!'
+            New-LocalUser -Name msvtest -Password (ConvertTo-SecureString $pw -AsPlainText -Force) -PasswordNeverExpires | Out-Null
+            Start-Service sshd
+            "sshd: " + (Get-Service sshd).Status
+            "MSV_SMOKE_SSH=127.0.0.1:22:msvtest:$pw" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          } catch { "OpenSSH-Server nicht verfügbar: $_" }
+
       # Startet die fertige App wirklich (Fenster, WebView2, Vault, DPAPI, RDP-Control), bedient die Oberfläche
       # per Skript und legt Screenshots + Bericht ab.
       - name: Selbsttest der App auf Windows
@@ -70,7 +85,8 @@ jobs:
         run: |
           Get-ChildItem smoke\*.png -ErrorAction SilentlyContinue | ForEach-Object {
             "===PNG:$($_.Name)==="
-            [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            for ($i = 0; $i -lt $b64.Length; $i += 3000) { "PNGDATA " + $b64.Substring($i, [Math]::Min(3000, $b64.Length - $i)) }
             "===ENDPNG==="
           }
 

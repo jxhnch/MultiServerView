@@ -171,15 +171,10 @@ public sealed partial class MainForm : Form
         try { _bridge.Dispose(); Log("Bridge aufgeräumt"); } catch (Exception ex) { Log("Bridge-Fehler: " + ex.Message); }
         base.OnFormClosed(e);
 
-        // Sicherheitsnetz: Hält irgendein Hintergrunddienst den Prozess am Leben, wird er nach 5 Sekunden hart beendet.
-        // So bleibt nach dem Schliessen des Fensters nie ein unsichtbarer Prozess mit entsperrtem Vault im Speicher.
-        var code = Environment.ExitCode;
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(5000);
-            Log("Prozess hing - beende hart");
-            Environment.Exit(code);
-        });
+        // Alles ist gespeichert und aufgeräumt: sofort beenden. So bleibt nach dem Schliessen des Fensters nie ein
+        // unsichtbarer Prozess mit entsperrtem Vault im Speicher (WebView2 hielt den Prozess sonst noch Sekunden offen).
+        Log("beende Prozess");
+        Environment.Exit(Environment.ExitCode);
     }
 
     private void Log(string message)

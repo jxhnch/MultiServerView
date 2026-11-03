@@ -16,6 +16,12 @@ public static class OsDetector
 
     public static string Parse(string output)
     {
+        // Windows-Server mit OpenSSH: cmd.exe versteht "cat" und "uname" nicht.
+        if (output.Contains("not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("nicht als interner oder externer Befehl", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("is not recognized as the name of a cmdlet", StringComparison.OrdinalIgnoreCase))
+            return "windows";
+
         string? id = null;
         string? idLike = null;
         var uname = "";

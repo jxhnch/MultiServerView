@@ -4,7 +4,7 @@ import {
   siRockylinux, siUbuntu, siVoidlinux,
   type SimpleIcon,
 } from 'simple-icons';
-import { ProtocolIcon } from './Icons';
+import { IconMonitor, ProtocolIcon } from './Icons';
 import type { Server } from './types';
 
 /** Betriebssystem-Kennung (vom Host erkannt) -> Logo. */
@@ -19,7 +19,7 @@ const OS_LABEL: Record<string, string> = {
   debian: 'Debian', ubuntu: 'Ubuntu', centos: 'CentOS', fedora: 'Fedora', redhat: 'Red Hat', rocky: 'Rocky Linux',
   almalinux: 'AlmaLinux', arch: 'Arch Linux', manjaro: 'Manjaro', alpine: 'Alpine', opensuse: 'openSUSE', nixos: 'NixOS',
   kali: 'Kali', mint: 'Linux Mint', pop: 'Pop!_OS', gentoo: 'Gentoo', void: 'Void', freebsd: 'FreeBSD', openbsd: 'OpenBSD',
-  raspberrypi: 'Raspberry Pi OS', proxmox: 'Proxmox', linux: 'Linux', macos: 'macOS',
+  raspberrypi: 'Raspberry Pi OS', proxmox: 'Proxmox', linux: 'Linux', macos: 'macOS', windows: 'Windows',
 };
 
 export const osLabel = (os: string) => OS_LABEL[os] ?? '';
@@ -27,6 +27,12 @@ export const osLabel = (os: string) => OS_LABEL[os] ?? '';
 /** Farbkachel eines Hosts: Distro-Logo (SSH, sobald erkannt) oder Protokoll-Icon. */
 export function HostTile({ server, size = 'md' }: { server: Pick<Server, 'protocol' | 'os'>; size?: 'sm' | 'md' | 'lg' }) {
   const px = size === 'sm' ? 13 : size === 'lg' ? 24 : 20;
+  if (server.protocol === 'ssh' && server.os === 'windows')
+    return (
+      <span className={`tile ${size} rdp`} title="Windows">
+        <IconMonitor size={px} />
+      </span>
+    );
   const icon = server.protocol === 'ssh' ? OS_ICONS[server.os] : undefined;
 
   if (icon) {
