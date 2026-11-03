@@ -167,6 +167,16 @@ public sealed partial class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         Log("Fenster geschlossen");
+
+        // Wächter im Hintergrund: Egal was beim Aufräumen hängt (RDP-Control, offene SSH-Kanäle) - nach 3 Sekunden ist der Prozess weg.
+        var exitCode = Environment.ExitCode;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(3000);
+            Log("Aufräumen dauerte zu lange - beende hart");
+            Environment.Exit(exitCode);
+        });
+
         try { _rdp.Dispose(); Log("RDP aufgeräumt"); } catch (Exception ex) { Log("RDP-Fehler: " + ex.Message); }
 
         // Das Aufräumen der Netzwerk-Sitzungen kann bei einer hängenden Verbindung blockieren (SSH-Kanäle schliessen).
@@ -175,7 +185,7 @@ public sealed partial class MainForm : Form
         {
             try { _bridge.Dispose(); Log("Bridge aufgeräumt"); } catch (Exception ex) { Log("Bridge-Fehler: " + ex.Message); }
         });
-        if (!cleanup.Wait(TimeSpan.FromSeconds(3))) Log("Aufräumen dauerte zu lange - beende trotzdem");
+        cleanup.Wait(TimeSpan.FromSeconds(2));
         base.OnFormClosed(e);
 
         // Alles ist gespeichert und aufgeräumt: sofort beenden. So bleibt nach dem Schliessen des Fensters nie ein

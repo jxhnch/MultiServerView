@@ -130,7 +130,7 @@ public sealed class SshTerminalSession : IDisposable
     /// <summary>Erkennt das Betriebssystem des Servers ("debian", "ubuntu", "linux", "macos", ...) oder "" bei Misserfolg.</summary>
     public async Task<string> DetectOsAsync()
     {
-        var output = await RunCommandAsync("cat /etc/os-release 2>/dev/null; echo '---'; uname -s 2>/dev/null", TimeSpan.FromSeconds(5));
+        var output = await RunCommandAsync(OsDetector.ProbeCommand, TimeSpan.FromSeconds(5));
         return output == null ? "" : OsDetector.Parse(output);
     }
 

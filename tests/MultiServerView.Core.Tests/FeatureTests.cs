@@ -146,6 +146,7 @@ public class OsDetectorTests
     [InlineData("---\nDarwin", "macos")]
     [InlineData("---\nFreeBSD", "freebsd")]
     [InlineData("", "")]
+    [InlineData("\nMicrosoft Windows [Version 10.0.26100.33674]\n", "windows")]
     [InlineData("'cat' is not recognized as an internal or external command,\noperable program or batch file.", "windows")]
     [InlineData("'cat' ist nicht als interner oder externer Befehl, ausführbares Programm oder Batchdatei", "windows")]
     public void Parses_os_release(string output, string expected) => Assert.Equal(expected, OsDetector.Parse(output));

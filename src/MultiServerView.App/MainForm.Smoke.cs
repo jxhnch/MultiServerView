@@ -180,7 +180,7 @@ public sealed partial class MainForm
             using (var probe = new SshTerminalSession(probeServer, null, (_, _, _) => HostKeyTrust.Trusted))
             {
                 await probe.ConnectAsync(80, 24);
-                var raw = await probe.RunCommandAsync("cat /etc/os-release 2>/dev/null; echo '---'; uname -s 2>/dev/null", TimeSpan.FromSeconds(8));
+                var raw = await probe.RunCommandAsync(OsDetector.ProbeCommand, TimeSpan.FromSeconds(8));
                 Check("OS-Erkennung: Befehl lieferte Ausgabe", raw != null, Snip(raw ?? "(null)", 200));
                 Check("OS-Erkennung: Windows-Server wird erkannt", OsDetector.Parse(raw ?? "") == "windows", "erkannt: '" + OsDetector.Parse(raw ?? "") + "'");
             }

@@ -191,12 +191,12 @@ internal sealed class RdpManager : IRdpController, IDisposable
         timer.Start();
     }
 
-    private void CloseCore(string id)
+    private void CloseCore(string id, bool disconnect = true)
     {
         if (!_sessions.Remove(id, out var s)) return;
         s.ResizeTimer?.Stop();
         s.ResizeTimer?.Dispose();
-        Try(() => { if (Convert.ToInt32(s.Ocx.Connected) != 0) s.Ocx.Disconnect(); });
+        if (disconnect) Try(() => { if (Convert.ToInt32(s.Ocx.Connected) != 0) s.Ocx.Disconnect(); });
         _owner.Controls.Remove(s.Host);
         s.Host.Dispose();
     }
@@ -240,6 +240,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
     {
         _poll.Stop();
         _poll.Dispose();
-        foreach (var id in _sessions.Keys.ToList()) CloseCore(id);
+        // Beim Beenden nicht sauber abmelden: Disconnect() kann bei einer gerade verbindenden Sitzung blockieren.
+        foreach (var id in _sessions.Keys.ToList()) CloseCore(id, disconnect: false);
     }
 }

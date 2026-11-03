@@ -14,10 +14,17 @@ public static class OsDetector
         ["proxmox"] = "proxmox"
     };
 
+    /// <summary>
+    /// Befehl, der auf Linux/BSD/macOS die Kennung liefert und auf Windows (cmd.exe) mit "ver" antwortet.
+    /// Ohne Umleitungen (2>/dev/null) - die versteht cmd.exe nicht und meldet nur einen Pfadfehler.
+    /// </summary>
+    public const string ProbeCommand = "cat /etc/os-release; echo '---'; uname -s || ver";
+
     public static string Parse(string output)
     {
         // Windows-Server mit OpenSSH: cmd.exe versteht "cat" und "uname" nicht.
-        if (output.Contains("not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
+        if (output.Contains("Microsoft Windows [", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
             || output.Contains("nicht als interner oder externer Befehl", StringComparison.OrdinalIgnoreCase)
             || output.Contains("is not recognized as the name of a cmdlet", StringComparison.OrdinalIgnoreCase))
             return "windows";
