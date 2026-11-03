@@ -93,11 +93,11 @@ export function CommandPalette({
               onClick={(e) => choose(it, e.shiftKey)}
             >
               {it.server ? (
-                <span className={`proto-ico ${it.server.protocol}`}>
-                  <ProtocolIcon protocol={it.server.protocol} size={16} />
+                <span className={`tile sm ${it.server.protocol}`}>
+                  <ProtocolIcon protocol={it.server.protocol} size={14} />
                 </span>
               ) : (
-                <span className="proto-ico action">{actionIcon(it.action)}</span>
+                <span className="tile sm action">{actionIcon(it.action)}</span>
               )}
               <span className="pname">{it.label}</span>
               {it.server && (

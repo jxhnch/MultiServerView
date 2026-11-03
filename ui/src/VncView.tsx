@@ -116,10 +116,10 @@ export function VncView({
       onEdit={onEdit}
       extraActions={
         <>
-          <button className="ghost" onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={status !== 'connected'}>
+          <button onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={status !== 'connected'}>
             Strg+Alt+Entf
           </button>
-          <button className="ghost" onClick={sendClipboard} disabled={status !== 'connected'}>
+          <button onClick={sendClipboard} disabled={status !== 'connected'}>
             Zwischenablage senden
           </button>
         </>

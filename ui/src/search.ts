@@ -39,3 +39,14 @@ export function timeAgo(iso: string | null): string {
   const d = Math.round(h / 24);
   return `vor ${d} ${d === 1 ? 'Tag' : 'Tagen'}`;
 }
+
+/** Erkennt "[ssh://|rdp://|vnc://][user@]host[:port]" (auch mit führendem "ssh "). */
+export function parseTarget(input: string): Partial<Server> | null {
+  const text = input.trim().replace(/^ssh\s+/i, '');
+  const m = /^(?:(ssh|rdp|vnc):\/\/)?(?:([^@\s]+)@)?([A-Za-z0-9._-]+|\[[0-9a-fA-F:]+\])(?::(\d{1,5}))?$/.exec(text);
+  if (!m) return null;
+  const protocol = (m[1]?.toLowerCase() as Server['protocol'] | undefined) ?? 'ssh';
+  const host = m[3];
+  const port = m[4] ? Number(m[4]) : { ssh: 22, rdp: 3389, vnc: 5900 }[protocol];
+  return { name: host, host, port, protocol, username: m[2] ?? '' };
+}

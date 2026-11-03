@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, isNative, onEvent } from './bridge';
 import { emptyServer, type KeyInfo, type Server, type SessionStatus, type SyncInfo, type SyncStatus } from './types';
-import { filterServers } from './search';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
-import { ServerForm } from './ServerForm';
+import { HostPanel } from './HostPanel';
 import { HostsPage } from './HostsPage';
 import { Keychain } from './Keychain';
 import { CloudPanel } from './CloudPanel';
 import { TerminalView } from './TerminalView';
 import { VncView } from './VncView';
 import { RdpView } from './RdpView';
-import { IconChevron, IconClose, IconCloud, IconKey, IconLock, IconPlus, IconSearch, IconServer, ProtocolIcon } from './Icons';
+import { IconClose, IconCloud, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSun, ProtocolIcon } from './Icons';
 
 type Phase = 'loading' | 'locked' | 'ready';
 type Section = 'hosts' | 'keys' | 'cloud';
+type Theme = 'light' | 'dark';
 interface Tab {
   id: string;
   serverId: string;
@@ -25,7 +25,19 @@ interface Toast {
   msg: string;
   kind: 'ok' | 'error';
 }
+interface PanelState {
+  server: Server;
+  key: number;
+}
 const HOME = 'home';
+
+function loadTheme(): Theme {
+  try {
+    return localStorage.getItem('msv-theme') === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
 
 export function App() {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -38,14 +50,27 @@ export function App() {
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
   const [active, setActive] = useState<string>(HOME);
   const [section, setSection] = useState<Section>('hosts');
-  const [filter, setFilter] = useState('');
+  const [query, setQuery] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [editing, setEditing] = useState<Server | null>(null);
+  const [panel, setPanel] = useState<PanelState | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [theme, setTheme] = useState<Theme>(loadTheme);
 
   const byId = useMemo(() => new Map(servers.map((s) => [s.id, s])), [servers]);
   const groups = useMemo(() => [...new Set(servers.map((s) => s.group).filter(Boolean))].sort(), [servers]);
   const openServerIds = useMemo(() => new Set(tabs.map((t) => t.serverId)), [tabs]);
+  const themeClass = theme === 'light' ? 'theme-light' : 'theme-dark';
+
+  const toggleTheme = () =>
+    setTheme((t) => {
+      const next = t === 'light' ? 'dark' : 'light';
+      try {
+        localStorage.setItem('msv-theme', next);
+      } catch {
+        /* nicht schlimm */
+      }
+      return next;
+    });
 
   // ---------------------------------------------------------------- Toasts
   const toast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
@@ -73,7 +98,6 @@ export function App() {
     });
   }, [refresh]);
 
-  // Ereignisse vom Host, die nicht zu einer bestimmten Session gehören
   useEffect(
     () =>
       onEvent((e) => {
@@ -94,6 +118,7 @@ export function App() {
     setKeys([]);
     setTabs([]);
     setStatuses({});
+    setPanel(null);
     setActive(HOME);
     setVaultExists(true);
     setPhase('locked');
@@ -103,11 +128,14 @@ export function App() {
   const goTo = useCallback((s: Section) => {
     setSection(s);
     setActive(HOME);
+    setPanel(null);
   }, []);
 
   const open = useCallback(
     async (s: Server, forceNew = false) => {
       setPaletteOpen(false);
+      setPanel(null);
+      setQuery('');
       const existing = forceNew ? undefined : tabs.find((t) => t.serverId === s.id);
       if (existing) setActive(existing.id);
       else {
@@ -164,6 +192,14 @@ export function App() {
 
   const setStatus = useCallback((id: string, s: SessionStatus) => setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s })), []);
 
+  // ---------------------------------------------------------------- Panel
+  const openPanel = useCallback((server: Server) => setPanel((p) => ({ server, key: (p?.key ?? 0) + 1 })), []);
+  const newHost = useCallback(() => {
+    setSection('hosts');
+    setActive(HOME);
+    openPanel(emptyServer());
+  }, [openPanel]);
+
   // ---------------------------------------------------------------- Tastenkürzel
   // Im Terminal gehören einfache Strg-Kombinationen der Shell (Strg+K, Strg+W, ...). Deshalb:
   //   Strg+K  (nicht im Terminal)  /  Strg+Umschalt+K (überall)  -> Schnell verbinden
@@ -184,7 +220,7 @@ export function App() {
         setActive(n === 1 ? HOME : (tabs[n - 2]?.id ?? active));
       } else if (key === 'w' && e.shiftKey) {
         if (active !== HOME) closeTab(active);
-      } else if (key === 'n' && e.shiftKey) setEditing(emptyServer());
+      } else if (key === 'n' && e.shiftKey) newHost();
       else if (key === 'd' && e.shiftKey) {
         if (active !== HOME) duplicate(active);
       } else handled = false;
@@ -196,19 +232,26 @@ export function App() {
     }
     window.addEventListener('keydown', onKey, true); // capture: vor xterm
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [phase, tabs, active, cycle, closeTab, duplicate]);
+  }, [phase, tabs, active, cycle, closeTab, duplicate, newHost]);
 
   // RDP ist ein natives Fenster über dem UI -> bei Overlays kurz ausblenden
-  const overlayOpen = paletteOpen || editing !== null;
+  const drawerOpen = panel !== null && active !== HOME;
+  const overlayOpen = paletteOpen || drawerOpen;
   useEffect(() => {
     if (isNative && phase === 'ready') void api.rdpSuspend(overlayOpen).catch(() => undefined);
   }, [overlayOpen, phase]);
 
   // ---------------------------------------------------------------- Speichern / Löschen / Import
-  async function save(s: Server) {
+  const save = useCallback(async (s: Server): Promise<Server> => {
     const saved = await api.serversSave(s);
     setServers((prev) => (prev.some((x) => x.id === saved.id) ? prev.map((x) => (x.id === saved.id ? saved : x)) : [...prev, saved]));
-    setEditing(null);
+    setPanel((p) => (p ? { ...p, server: saved } : p));
+    return saved;
+  }, []);
+
+  async function connectFromPanel(draft: Server) {
+    const saved = await save(draft);
+    await open(saved);
   }
 
   async function remove(s: Server) {
@@ -216,15 +259,7 @@ export function App() {
     setServers((prev) => prev.filter((x) => x.id !== s.id));
     setTabs((prev) => prev.filter((t) => t.serverId !== s.id));
     setActive(HOME);
-    setEditing(null);
-  }
-
-  async function toggleFav(s: Server) {
-    try {
-      await save({ ...s, favorite: !s.favorite });
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    }
+    setPanel(null);
   }
 
   async function importFile(file: File) {
@@ -239,127 +274,158 @@ export function App() {
 
   function onPaletteAction(a: PaletteAction) {
     setPaletteOpen(false);
-    if (a === 'new') setEditing(emptyServer());
+    if (a === 'new') newHost();
     else if (a === 'keys') goTo('keys');
     else if (a === 'cloud') goTo('cloud');
     else void lock();
   }
 
   // ---------------------------------------------------------------- Render
-  if (phase === 'loading') return <div className="center muted">Lade…</div>;
+  if (phase === 'loading') return <div className={`fill center muted ${themeClass}`}>Lade…</div>;
   if (phase === 'locked')
     return (
-      <Unlock
-        exists={vaultExists}
-        onDone={onUnlocked}
-        onVaultInstalled={() => {
-          setVaultExists(true);
-        }}
-      />
+      <div className={`fill ${themeClass}`}>
+        <Unlock exists={vaultExists} onDone={onUnlocked} onVaultInstalled={() => setVaultExists(true)} />
+      </div>
     );
 
+  const panelEl = panel && (
+    <HostPanel
+      key={panel.key}
+      initial={panel.server}
+      drawer={active !== HOME}
+      groups={groups}
+      keys={keys}
+      onSave={save}
+      onConnect={connectFromPanel}
+      onDelete={remove}
+      onClose={() => setPanel(null)}
+      onGoToKeys={() => goTo('keys')}
+      toast={toast}
+    />
+  );
+
   return (
-    <div className="app">
-      <Sidebar
-        servers={servers}
-        filter={filter}
-        setFilter={setFilter}
-        statuses={statuses}
-        tabs={tabs}
-        activeServerId={tabs.find((t) => t.id === active)?.serverId}
-        section={section}
-        onHome={goTo}
-        homeActive={active === HOME}
-        syncStatus={syncStatus}
-        syncConfigured={!!syncInfo?.configured}
-        onOpen={open}
-        onEdit={setEditing}
-        onNew={() => setEditing(emptyServer())}
-        onPalette={() => setPaletteOpen(true)}
-        onLock={lock}
-      />
-
-      <main>
-        <div className="tabbar">
-          <button className={'tab home' + (active === HOME ? ' on' : '')} onClick={() => setActive(HOME)}>
-            <IconServer size={15} /> Start
-          </button>
-          {tabs.map((t) => {
-            const s = byId.get(t.serverId);
-            if (!s) return null;
-            const st = statuses[t.id] ?? 'connecting';
-            return (
-              <button
-                key={t.id}
-                className={'tab' + (active === t.id ? ' on' : '')}
-                title={`${s.name} – ${s.host}`}
-                onClick={() => setActive(t.id)}
-                onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+    <div className={`app ${themeClass}`}>
+      <div className="tabbar chrome">
+        <button className={'tab home' + (active === HOME ? ' on' : '')} onClick={() => setActive(HOME)}>
+          <IconServer size={16} /> Hosts
+        </button>
+        {tabs.map((t) => {
+          const s = byId.get(t.serverId);
+          if (!s) return null;
+          const st = statuses[t.id] ?? 'connecting';
+          return (
+            <button
+              key={t.id}
+              className={'tab' + (active === t.id ? ' on' : '')}
+              title={`${s.name} – ${s.host}`}
+              onClick={() => setActive(t.id)}
+              onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+            >
+              <span className={`tile sm ${s.protocol}`}>
+                <ProtocolIcon protocol={s.protocol} size={13} />
+              </span>
+              <span className="tab-name">{s.name}</span>
+              <span className={`status-dot ${st}`} />
+              <span
+                className="x"
+                role="button"
+                aria-label="Tab schliessen"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(t.id);
+                }}
               >
-                <span className={`status-dot ${st}`} />
-                <span className={`proto-ico sm ${s.protocol}`}>
-                  <ProtocolIcon protocol={s.protocol} size={13} />
-                </span>
-                <span className="tab-name">{s.name}</span>
-                <span
-                  className="x"
-                  role="button"
-                  aria-label="Tab schliessen"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(t.id);
-                  }}
-                >
-                  <IconClose size={13} />
-                </span>
+                <IconClose size={13} />
+              </span>
+            </button>
+          );
+        })}
+        <button className="tab-add" title="Neue Verbindung (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
+          <IconPlus size={17} />
+        </button>
+        <span className="grow" />
+        <button
+          className="bar-btn"
+          title={syncInfo?.configured ? `Cloud: ${syncStatus.message || 'verbunden'}` : 'Cloud einrichten'}
+          onClick={() => goTo('cloud')}
+        >
+          <IconCloud size={17} />
+          <span className={`badge ${!syncInfo?.configured ? 'off' : syncStatus.state === 'syncing' ? 'syncing' : syncStatus.state === 'error' ? 'error' : 'ok'}`} />
+        </button>
+        <button className="bar-btn" title="Vault sperren" onClick={lock}>
+          <IconLock size={17} />
+        </button>
+      </div>
+
+      <div className="body">
+        <div className={'view' + (active === HOME ? ' on' : '')}>
+          <div className="home-shell">
+            <nav className="nav">
+              <button className={'nav-item' + (section === 'hosts' ? ' on' : '')} onClick={() => goTo('hosts')}>
+                <IconServer size={17} /> Hosts
               </button>
-            );
-          })}
-          <button className="tab add" title="Neue Verbindung (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
-            <IconPlus size={16} />
-          </button>
-        </div>
-
-        <div className="content">
-          <div className={'view start' + (active === HOME ? ' on' : '')}>
-            {section === 'hosts' && (
-              <HostsPage
-                servers={servers}
-                query={filter}
-                onOpen={open}
-                onEdit={setEditing}
-                onFav={toggleFav}
-                onNew={() => setEditing(emptyServer())}
-                onImport={importFile}
-              />
-            )}
-            {section === 'keys' && <Keychain keys={keys} servers={servers} onChanged={refresh} toast={toast} />}
-            {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
-          </div>
-
-          {tabs.map((t) => {
-            const s = byId.get(t.serverId);
-            if (!s) return null;
-            const common = {
-              tabId: t.id,
-              server: s,
-              active: active === t.id,
-              reconnectKey: t.reconnectKey,
-              onStatus: setStatus,
-              onReconnect: () => reconnect(t.id),
-              onDuplicate: () => duplicate(t.id),
-              onEdit: () => setEditing(s),
-            };
-            return (
-              <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
-                {s.protocol === 'ssh' && <TerminalView {...common} />}
-                {s.protocol === 'vnc' && <VncView {...common} />}
-                {s.protocol === 'rdp' && <RdpView {...common} />}
+              <button className={'nav-item' + (section === 'keys' ? ' on' : '')} onClick={() => goTo('keys')}>
+                <IconKey size={17} /> Schlüssel
+              </button>
+              <button className={'nav-item' + (section === 'cloud' ? ' on' : '')} onClick={() => goTo('cloud')}>
+                <IconCloud size={17} /> Cloud &amp; Sync
+              </button>
+              <div className="nav-foot">
+                <button className="ghost" title={theme === 'light' ? 'Dunkles Design' : 'Helles Design'} onClick={toggleTheme}>
+                  {theme === 'light' ? <IconMoon size={16} /> : <IconSun size={16} />}
+                </button>
               </div>
-            );
-          })}
+            </nav>
+
+            <div className="home-main">
+              {section === 'hosts' && (
+                <HostsPage
+                  servers={servers}
+                  query={query}
+                  setQuery={setQuery}
+                  selectedId={panel?.server.id || undefined}
+                  openServerIds={openServerIds}
+                  onSelect={openPanel}
+                  onConnect={(s, forceNew) => void open(s, forceNew)}
+                  onNew={newHost}
+                  onQuick={(draft) => openPanel({ ...emptyServer(), ...draft })}
+                  onImport={importFile}
+                />
+              )}
+              {section === 'keys' && <Keychain keys={keys} servers={servers} onChanged={refresh} toast={toast} />}
+              {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
+            </div>
+
+            {active === HOME && section === 'hosts' && panelEl}
+          </div>
         </div>
-      </main>
+
+        {tabs.map((t) => {
+          const s = byId.get(t.serverId);
+          if (!s) return null;
+          const common = {
+            tabId: t.id,
+            server: s,
+            active: active === t.id,
+            reconnectKey: t.reconnectKey,
+            onStatus: setStatus,
+            onReconnect: () => reconnect(t.id),
+            onDuplicate: () => duplicate(t.id),
+            onEdit: () => openPanel(s),
+          };
+          return (
+            <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
+              {s.protocol === 'ssh' && <TerminalView {...common} />}
+              {s.protocol === 'vnc' && <VncView {...common} />}
+              {s.protocol === 'rdp' && <RdpView {...common} />}
+            </div>
+          );
+        })}
+      </div>
+
+      {drawerOpen && panelEl}
 
       {paletteOpen && (
         <CommandPalette
@@ -368,21 +434,6 @@ export function App() {
           onOpen={(s, forceNew) => void open(s, forceNew)}
           onAction={onPaletteAction}
           onClose={() => setPaletteOpen(false)}
-        />
-      )}
-      {editing && (
-        <ServerForm
-          initial={editing}
-          groups={groups}
-          keys={keys}
-          onSave={save}
-          onDelete={remove}
-          onClose={() => setEditing(null)}
-          onGoToKeys={() => {
-            setEditing(null);
-            goTo('keys');
-          }}
-          toast={toast}
         />
       )}
 
@@ -397,144 +448,3 @@ export function App() {
     </div>
   );
 }
-
-// ==================================================================== Sidebar
-
-function Sidebar(props: {
-  servers: Server[];
-  filter: string;
-  setFilter: (v: string) => void;
-  statuses: Record<string, SessionStatus>;
-  tabs: Tab[];
-  activeServerId?: string;
-  section: Section;
-  homeActive: boolean;
-  onHome: (s: Section) => void;
-  syncStatus: SyncStatus;
-  syncConfigured: boolean;
-  onOpen: (s: Server, forceNew?: boolean) => void;
-  onEdit: (s: Server) => void;
-  onNew: () => void;
-  onPalette: () => void;
-  onLock: () => void;
-}) {
-  const { servers, filter } = props;
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-
-  const shown = useMemo(() => (filter ? filterServers(servers, filter) : servers), [servers, filter]);
-  const favorites = shown.filter((s) => s.favorite);
-  const grouped = useMemo(() => {
-    const m = new Map<string, Server[]>();
-    for (const s of [...shown].filter((x) => !x.favorite).sort((a, b) => a.name.localeCompare(b.name))) {
-      const g = s.group || 'Ohne Gruppe';
-      m.set(g, [...(m.get(g) ?? []), s]);
-    }
-    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [shown]);
-
-  const toggle = (g: string) =>
-    setCollapsed((prev) => {
-      const n = new Set(prev);
-      if (n.has(g)) n.delete(g);
-      else n.add(g);
-      return n;
-    });
-
-  const sessionStatus = (serverId: string): SessionStatus | undefined => {
-    const t = props.tabs.find((x) => x.serverId === serverId);
-    return t ? props.statuses[t.id] ?? 'connecting' : undefined;
-  };
-
-  const row = (s: Server, keyPrefix = '') => {
-    const st = sessionStatus(s.id);
-    return (
-      <div
-        key={keyPrefix + s.id}
-        className={'srv' + (props.activeServerId === s.id ? ' on' : '')}
-        onClick={(e) => props.onOpen(s, e.shiftKey)}
-        title={`${s.name} – ${s.host}`}
-      >
-        <span className={`proto-ico ${s.protocol}`}>
-          <ProtocolIcon protocol={s.protocol} size={15} />
-        </span>
-        <span className="srv-text">
-          <span className="sname">{s.name}</span>
-          <span className="shost">
-            {s.username ? `${s.username}@` : ''}
-            {s.host}
-          </span>
-        </span>
-        {st && <span className={`status-dot ${st}`} />}
-      </div>
-    );
-  };
-
-  const syncText =
-    !props.syncConfigured ? 'Cloud einrichten' : props.syncStatus.state === 'syncing' ? 'Synchronisiere…' : props.syncStatus.state === 'error' ? 'Sync-Fehler' : 'Synchronisiert';
-  const syncClass = !props.syncConfigured ? 'off' : props.syncStatus.state === 'error' ? 'error' : props.syncStatus.state === 'syncing' ? 'connecting' : 'connected';
-
-  return (
-    <aside>
-      <div className="brand">
-        <span className="logo-mark">
-          <IconServer size={15} />
-        </span>
-        MultiServerView
-      </div>
-
-      <button className="palette-btn" onClick={props.onPalette}>
-        <IconSearch size={15} />
-        <span className="grow">Schnell verbinden</span>
-        <kbd>Ctrl K</kbd>
-      </button>
-
-      <div className="sb-tools">
-        <input placeholder="Hosts filtern…" value={filter} onChange={(e) => props.setFilter(e.target.value)} />
-        <button title="Neuer Host (Ctrl+Shift+N)" onClick={props.onNew}>
-          <IconPlus size={16} />
-        </button>
-      </div>
-
-      <div className="sb-scroll">
-        {favorites.length > 0 && (
-          <section>
-            <h3>Favoriten</h3>
-            {favorites.map((s) => row(s, 'fav-'))}
-          </section>
-        )}
-        {grouped.map(([g, list]) => (
-          <section key={g}>
-            <h3 className="clickable" onClick={() => toggle(g)}>
-              <IconChevron size={12} open={!collapsed.has(g)} /> {g} <span className="count">{list.length}</span>
-            </h3>
-            {!collapsed.has(g) && list.map((s) => row(s))}
-          </section>
-        ))}
-        {shown.length === 0 && <div className="muted pad">Keine Hosts.</div>}
-      </div>
-
-      <nav className="sb-nav">
-        <button className={props.homeActive && props.section === 'hosts' ? 'on' : ''} onClick={() => props.onHome('hosts')}>
-          <IconServer size={16} /> Hosts
-        </button>
-        <button className={props.homeActive && props.section === 'keys' ? 'on' : ''} onClick={() => props.onHome('keys')}>
-          <IconKey size={16} /> Schlüssel
-        </button>
-        <button className={props.homeActive && props.section === 'cloud' ? 'on' : ''} onClick={() => props.onHome('cloud')}>
-          <IconCloud size={16} /> Cloud
-        </button>
-      </nav>
-
-      <div className="sb-foot">
-        <button className={`sync-chip ${syncClass}`} onClick={() => props.onHome('cloud')} title={props.syncStatus.message}>
-          <span className="dot-sm" /> {syncText}
-        </button>
-        <span className="grow" />
-        <button className="ghost icon-only" title="Vault sperren" onClick={props.onLock}>
-          <IconLock size={16} />
-        </button>
-      </div>
-    </aside>
-  );
-}
-

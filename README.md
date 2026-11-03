@@ -7,7 +7,7 @@ Eigene Server-Verwaltung für Windows – ein Fenster für **SSH, RDP und VNC**,
 | **SSH** | Echtes Terminal (xterm.js), Passwort **oder SSH-Key**, Host-Key-Prüfung, Tabs bleiben beim Wechseln offen |
 | **RDP** | Natives Windows-RDP-Control (wie mstsc / mRemoteNG) direkt im Tab |
 | **VNC** | noVNC im Tab, inkl. Strg+Alt+Entf und Zwischenablage |
-| **Schnell wechseln** | `Ctrl+K` Suche, Tabs, Favoriten, Gruppen, «zuletzt benutzt» |
+| **Schnell wechseln** | Suchzeile oben (auch `ssh user@host` für neue Hosts), `Ctrl+K`, Tabs, Favoriten, Gruppen. Hell/Dunkel umschaltbar |
 | **Keychain** | SSH-Keys einmal importieren, bei mehreren Hosts benutzen |
 | **Cloud** | Ende-zu-Ende verschlüsselter Sync zwischen PCs (Supabase), Merge bei Änderungen auf beiden Seiten |
 | **Import** | mRemoteNG (`confCons.xml`) |

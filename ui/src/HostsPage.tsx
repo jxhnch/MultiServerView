@@ -1,145 +1,140 @@
-import { useMemo, useRef, useState } from 'react';
-import { IconEdit, IconPlus, IconServer, IconStar, IconUpload, ProtocolIcon } from './Icons';
-import { filterServers, timeAgo } from './search';
-import { PROTOCOL_LABEL, type Protocol, type Server } from './types';
+import { useMemo, useRef } from 'react';
+import { IconPlus, IconSearch, IconServer, IconStar, IconUpload, ProtocolIcon } from './Icons';
+import { filterServers, parseTarget } from './search';
+import type { Server } from './types';
 
+/** Termius-Stil: Suchzeile oben, darunter schlichte Karten ("ssh, root"). */
 export function HostsPage({
   servers,
   query,
-  onOpen,
-  onEdit,
-  onFav,
+  setQuery,
+  selectedId,
+  openServerIds,
+  onSelect,
+  onConnect,
   onNew,
+  onQuick,
   onImport,
 }: {
   servers: Server[];
   query: string;
-  onOpen: (s: Server, forceNew: boolean) => void;
-  onEdit: (s: Server) => void;
-  onFav: (s: Server) => void;
+  setQuery: (q: string) => void;
+  selectedId?: string;
+  openServerIds: Set<string>;
+  onSelect: (s: Server) => void;
+  onConnect: (s: Server, forceNew: boolean) => void;
   onNew: () => void;
+  onQuick: (draft: Partial<Server>) => void;
   onImport: (file: File) => void;
 }) {
-  const [proto, setProto] = useState<Protocol | 'all'>('all');
   const fileRef = useRef<HTMLInputElement>(null);
+  const q = query.trim();
 
-  const filtered = useMemo(() => {
-    const base = query ? filterServers(servers, query) : [...servers].sort((a, b) => a.name.localeCompare(b.name));
-    return proto === 'all' ? base : base.filter((s) => s.protocol === proto);
-  }, [servers, query, proto]);
+  const filtered = useMemo(
+    () => (q ? filterServers(servers, q) : [...servers].sort((a, b) => a.name.localeCompare(b.name))),
+    [servers, q],
+  );
 
-  // Jeder Host genau einmal, gruppiert (wie Ordner). "Ohne Gruppe" kommt zuletzt.
+  // Gruppen wie Ordner; ohne Gruppen steht einfach "Hosts" darüber.
   const grouped = useMemo(() => {
     const m = new Map<string, Server[]>();
     for (const s of filtered) {
-      const g = s.group || 'Ohne Gruppe';
+      const g = s.group || '';
       m.set(g, [...(m.get(g) ?? []), s]);
     }
-    return [...m.entries()].sort(([a], [b]) => (a === 'Ohne Gruppe' ? 1 : b === 'Ohne Gruppe' ? -1 : a.localeCompare(b)));
+    const hasGroups = [...m.keys()].some((g) => g !== '');
+    return [...m.entries()]
+      .sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
+      .map(([g, list]) => [g || (hasGroups ? 'Ohne Gruppe' : 'Hosts'), list] as const);
   }, [filtered]);
 
-  const counts = useMemo(
-    () => ({
-      all: servers.length,
-      ssh: servers.filter((s) => s.protocol === 'ssh').length,
-      rdp: servers.filter((s) => s.protocol === 'rdp').length,
-      vnc: servers.filter((s) => s.protocol === 'vnc').length,
-    }),
-    [servers],
-  );
+  const target = q ? parseTarget(q) : null;
+  const canConnect = q.length > 0 && (filtered.length > 0 || target !== null);
 
-  const card = (s: Server) => (
-    <div key={s.id} className={`card ${s.protocol}`} onClick={(e) => onOpen(s, e.shiftKey)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen(s, e.shiftKey)}>
-      <div className="card-top">
-        <span className={`proto-ico big ${s.protocol}`}>
-          <ProtocolIcon protocol={s.protocol} size={20} />
-        </span>
-        <span className="grow" />
-        <button
-          className={'icon-btn star' + (s.favorite ? ' on' : '')}
-          title={s.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onFav(s);
-          }}
-        >
-          <IconStar size={16} filled={s.favorite} />
-        </button>
-        <button
-          className="icon-btn reveal"
-          title="Bearbeiten"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(s);
-          }}
-        >
-          <IconEdit size={15} />
-        </button>
-      </div>
-      <div className="card-name">{s.name}</div>
-      <div className="muted card-host">
-        {s.username ? `${s.username}@` : ''}
-        {s.host}
-        {s.port !== { ssh: 22, rdp: 3389, vnc: 5900 }[s.protocol] ? `:${s.port}` : ''}
-      </div>
-      <div className="card-foot">
-        {s.group ? <span className="chip">{s.group}</span> : <span />}
-        <span className="muted small">{timeAgo(s.lastUsed)}</span>
-      </div>
-    </div>
-  );
+  function submit(forceNew = false) {
+    if (!q) return;
+    if (filtered.length > 0) onConnect(filtered[0], forceNew);
+    else if (target) onQuick(target);
+  }
+
+  const sub = (s: Server) => `${s.protocol}, ${s.username || s.host}`;
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <div>
-          <h1>Hosts</h1>
-          <p className="muted">
-            Klick verbindet. <kbd>Shift</kbd>-Klick öffnet eine zusätzliche Session zum selben Host.
-          </p>
-        </div>
-        <div className="head-actions">
-          <input ref={fileRef} type="file" accept=".xml" hidden onChange={(e) => e.target.files?.[0] && onImport(e.target.files[0])} />
-          <button title="Hosts aus mRemoteNG (confCons.xml) importieren" onClick={() => fileRef.current?.click()}>
-            <IconUpload size={15} /> Import
-          </button>
-          <button className="primary" onClick={onNew}>
-            <IconPlus size={15} /> Neuer Host
-          </button>
-        </div>
+    <div className="hosts-main">
+      <div className="searchbar">
+        <IconSearch size={16} />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault(); // verhindert, dass das Enter im gleich geöffneten Panel landet
+            submit(e.shiftKey);
+          }}
+          placeholder="Host suchen oder  ssh user@hostname  eingeben…"
+        />
+        <button className={canConnect ? 'ready' : ''} disabled={!canConnect} onClick={() => submit()}>
+          Connect
+        </button>
+      </div>
+
+      <div className="toolbar">
+        <button className="primary" onClick={onNew}>
+          <IconPlus size={15} /> Neuer Host
+        </button>
+        <input ref={fileRef} type="file" accept=".xml" hidden onChange={(e) => e.target.files?.[0] && onImport(e.target.files[0])} />
+        <button className="tool" title="Hosts aus mRemoteNG (confCons.xml) importieren" onClick={() => fileRef.current?.click()}>
+          <IconUpload size={15} /> Import
+        </button>
       </div>
 
       {servers.length === 0 ? (
         <div className="empty-card">
           <IconServer size={30} />
           <h3>Noch keine Hosts</h3>
-          <p className="muted">Lege deinen ersten Host an – oder importiere deine mRemoteNG-Liste (confCons.xml).</p>
-          <div className="row">
-            <button className="primary" onClick={onNew}>
-              Host hinzufügen
-            </button>
-            <button onClick={() => fileRef.current?.click()}>mRemoteNG importieren</button>
-          </div>
+          <p>Lege einen Host an, tippe oben «ssh user@server» ein oder importiere deine mRemoteNG-Liste.</p>
         </div>
       ) : (
         <>
-          <div className="chips">
-            {(['all', 'ssh', 'rdp', 'vnc'] as const).map((p) => (
-              <button key={p} className={'fchip' + (proto === p ? ' on' : '')} onClick={() => setProto(p)}>
-                {p === 'all' ? 'Alle' : PROTOCOL_LABEL[p]} <span className="count">{counts[p]}</span>
-              </button>
-            ))}
-          </div>
-
-          {filtered.length === 0 && <p className="muted">Kein Host gefunden.</p>}
-          {grouped.map(([g, list]) => (
-            <section key={g} className="group-block">
-              <h2 className="sec">
-                {g} <span className="count">{list.length}</span>
-              </h2>
-              <div className="grid">{list.map(card)}</div>
+          {filtered.length === 0 && (
+            <p className="muted">
+              Kein Host gefunden.{target ? ' Enter legt «' + (target.host ?? '') + '» neu an und verbindet.' : ''}
+            </p>
+          )}
+          {grouped.map(([name, list]) => (
+            <section key={name}>
+              <div className="sec-label">{name}</div>
+              <div className="hgrid" style={{ marginTop: 10 }}>
+                {list.map((s) => (
+                  <div
+                    key={s.id}
+                    className={'hcard' + (selectedId === s.id ? ' sel' : '')}
+                    tabIndex={0}
+                    title={`${s.name} – ${s.host}:${s.port}`}
+                    onClick={() => onSelect(s)}
+                    onDoubleClick={(e) => onConnect(s, e.shiftKey)}
+                    onKeyDown={(e) => e.key === 'Enter' && onConnect(s, e.shiftKey)}
+                  >
+                    <span className={`tile ${s.protocol}`}>
+                      <ProtocolIcon protocol={s.protocol} size={20} />
+                    </span>
+                    <span className="hcard-text">
+                      <span className="hcard-name">{s.name}</span>
+                      <span className="hcard-sub">{sub(s)}</span>
+                    </span>
+                    {s.favorite && (
+                      <span className="fav" title="Favorit">
+                        <IconStar size={13} filled />
+                      </span>
+                    )}
+                    {openServerIds.has(s.id) && <span className="status-dot connected live-dot" title="Session offen" />}
+                  </div>
+                ))}
+              </div>
             </section>
           ))}
+          <p className="muted small">Doppelklick oder Enter verbindet · Klick zeigt Details · Shift öffnet eine zusätzliche Session</p>
         </>
       )}
     </div>
