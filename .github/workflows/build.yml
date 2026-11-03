@@ -60,7 +60,19 @@ jobs:
           $null = $p.Handle
           if (-not $p.WaitForExit(240000)) { $p.Kill(); Add-Content "$out\report.txt" "FEHL Zeitüberschreitung (App hat sich nicht beendet)"; Get-Content "$out\report.txt"; exit 1 }
           if (Test-Path "$out\report.txt") { Get-Content "$out\report.txt" } else { "Kein Bericht erzeugt" }
+          if (Test-Path "$out\exit.log") { "--- Beenden ---"; Get-Content "$out\exit.log" }
           exit $p.ExitCode
+
+      # Die Screenshots zusätzlich als Text ins Log schreiben (für die Auswertung ohne Artefakt-Download)
+      - name: Screenshots als Text ausgeben
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem smoke\*.png -ErrorAction SilentlyContinue | ForEach-Object {
+            "===PNG:$($_.Name)==="
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            "===ENDPNG==="
+          }
 
       - uses: actions/upload-artifact@v4
         if: always()

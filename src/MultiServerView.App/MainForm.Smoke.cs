@@ -87,7 +87,8 @@ public sealed partial class MainForm
             sb.AppendLine().AppendLine(failed == 0 ? "ALLES OK" : $"{failed} FEHLER");
             await File.WriteAllTextAsync(Path.Combine(_smokeDir!, "report.txt"), sb.ToString());
             Environment.ExitCode = failed == 0 ? 0 : 1;
-            BeginInvoke(() => Application.Exit());
+            Log("Selbsttest fertig - schliesse Fenster");
+            BeginInvoke(() => Close());
         }
     }
 

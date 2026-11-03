@@ -166,9 +166,29 @@ public sealed partial class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        _rdp.Dispose();
-        _bridge.Dispose();
+        Log("Fenster geschlossen");
+        try { _rdp.Dispose(); Log("RDP aufgeräumt"); } catch (Exception ex) { Log("RDP-Fehler: " + ex.Message); }
+        try { _bridge.Dispose(); Log("Bridge aufgeräumt"); } catch (Exception ex) { Log("Bridge-Fehler: " + ex.Message); }
         base.OnFormClosed(e);
+
+        // Sicherheitsnetz: Hält irgendein Hintergrunddienst den Prozess am Leben, wird er nach 5 Sekunden hart beendet.
+        // So bleibt nach dem Schliessen des Fensters nie ein unsichtbarer Prozess mit entsperrtem Vault im Speicher.
+        var code = Environment.ExitCode;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(5000);
+            Log("Prozess hing - beende hart");
+            Environment.Exit(code);
+        });
+    }
+
+    private void Log(string message)
+    {
+        try
+        {
+            if (_smokeDir != null) File.AppendAllText(Path.Combine(_smokeDir, "exit.log"), $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+        }
+        catch { /* Protokoll ist nicht kritisch */ }
     }
 
     [DllImport("dwmapi.dll")]
