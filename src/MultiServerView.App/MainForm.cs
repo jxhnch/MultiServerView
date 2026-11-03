@@ -8,7 +8,7 @@ using MultiServerView.Core.Sync;
 
 namespace MultiServerView.App;
 
-public sealed class MainForm : Form
+public sealed partial class MainForm : Form
 {
     private const string Host = "app.msv"; // virtueller Hostname für das gebaute UI
     private static readonly Color Background = Color.FromArgb(14, 16, 21);
@@ -17,8 +17,11 @@ public sealed class MainForm : Form
     private readonly Bridge _bridge;
     private readonly RdpManager _rdp;
 
-    public MainForm()
+    private readonly string? _smokeDir;
+
+    public MainForm(string? smokeDir = null)
     {
+        _smokeDir = smokeDir;
         Text = "MultiServerView";
         Width = 1360;
         Height = 860;
@@ -26,7 +29,11 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Background;
 
-        var roaming = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MultiServerView");
+        // MSV_DATA_DIR: eigener Datenordner (portabler Betrieb oder Selbsttest)
+        var dataOverride = Environment.GetEnvironmentVariable("MSV_DATA_DIR");
+        var roaming = !string.IsNullOrWhiteSpace(dataOverride)
+            ? dataOverride
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MultiServerView");
         var vault = new VaultStore(Path.Combine(roaming, "vault.msv"));
         var settings = new SyncSettingsStore(Path.Combine(roaming, "sync.json"), new DpapiProtector());
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -61,6 +68,7 @@ public sealed class MainForm : Form
     private void Emit(object payload)
     {
         var json = JsonSerializer.Serialize(payload, Json.Options);
+        if (_smokeDir != null) lock (_tap) _tap.Add(json);
         void Post()
         {
             if (!IsDisposed && _web.CoreWebView2 != null) _web.CoreWebView2.PostWebMessageAsJson(json);
@@ -89,8 +97,9 @@ public sealed class MainForm : Form
 
         try
         {
-            var userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MultiServerView", "webview");
+            var userData = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MSV_DATA_DIR"))
+                ? Path.Combine(Environment.GetEnvironmentVariable("MSV_DATA_DIR")!, "webview")
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MultiServerView", "webview");
             var env = await CoreWebView2Environment.CreateAsync(null, userData);
             await _web.EnsureCoreWebView2Async(env);
 
@@ -102,6 +111,13 @@ public sealed class MainForm : Form
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.IsZoomControlEnabled = false;
             core.WebMessageReceived += OnWebMessage;
+            if (_smokeDir != null)
+                core.NavigationCompleted += (_, _) =>
+                {
+                    if (_smokeStarted) return;
+                    _smokeStarted = true;
+                    _ = RunSmokeAsync();
+                };
 
             // Zwischenablage (Terminal: Einfügen per Rechtsklick / Ctrl+Shift+V) ohne Rückfrage erlauben.
             core.PermissionRequested += (_, args) =>

@@ -39,6 +39,38 @@ jobs:
           dotnet publish src/MultiServerView.App -c Release -r win-x64 --self-contained true
           -p:PublishReadyToRun=false -o publish
 
+      - name: WebView2-Runtime sicherstellen
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          if (Test-Path $key) { "WebView2 vorhanden: " + (Get-ItemProperty $key).pv }
+          else {
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile wv2.exe
+            Start-Process .\wv2.exe -ArgumentList '/silent','/install' -Wait
+          }
+
+      # Startet die fertige App wirklich (Fenster, WebView2, Vault, DPAPI, RDP-Control), bedient die Oberfläche
+      # per Skript und legt Screenshots + Bericht ab.
+      - name: Selbsttest der App auf Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          $out = (Resolve-Path smoke).Path
+          $p = Start-Process -FilePath .\publish\MultiServerView.exe -ArgumentList '--smoke', $out -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); Add-Content "$out\report.txt" "FEHL Zeitüberschreitung (App hat sich nicht beendet)"; Get-Content "$out\report.txt"; exit 1 }
+          if (Test-Path "$out\report.txt") { Get-Content "$out\report.txt" } else { "Kein Bericht erzeugt" }
+          exit $p.ExitCode
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Selbsttest-Screenshots
+          path: |
+            smoke/*.png
+            smoke/report.txt
+          if-no-files-found: warn
+
       - uses: actions/upload-artifact@v4
         with:
           name: MultiServerView-win-x64
