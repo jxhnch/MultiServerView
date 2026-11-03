@@ -1,30 +1,66 @@
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using MultiServerView.App.Rdp;
 using MultiServerView.Core;
+using MultiServerView.Core.Sync;
 
 namespace MultiServerView.App;
 
 public sealed class MainForm : Form
 {
-    private const string Host = "app.msv"; // virtueller Hostname fuer das gebaute UI
+    private const string Host = "app.msv"; // virtueller Hostname für das gebaute UI
+    private static readonly Color Background = Color.FromArgb(14, 16, 21);
 
-    private readonly WebView2 _web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(15, 17, 21) };
+    private readonly WebView2 _web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Background };
     private readonly Bridge _bridge;
+    private readonly RdpManager _rdp;
 
     public MainForm()
     {
         Text = "MultiServerView";
-        Width = 1280;
-        Height = 800;
-        MinimumSize = new Size(900, 560);
+        Width = 1360;
+        Height = 860;
+        MinimumSize = new Size(960, 600);
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.FromArgb(15, 17, 21);
+        BackColor = Background;
 
-        var dataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MultiServerView");
-        _bridge = new Bridge(new VaultStore(Path.Combine(dataDir, "vault.msv")));
+        var roaming = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MultiServerView");
+        var vault = new VaultStore(Path.Combine(roaming, "vault.msv"));
+        var settings = new SyncSettingsStore(Path.Combine(roaming, "sync.json"), new DpapiProtector());
+        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var sync = new SyncService(vault, settings, cfg => new SupabaseClient(http, cfg.Url, cfg.AnonKey));
 
         Controls.Add(_web);
+        _rdp = new RdpManager(this, Emit);
+        _bridge = new Bridge(vault, sync, _rdp, Emit);
+    }
+
+    /// <summary>Schickt ein Event ans UI (thread-sicher).</summary>
+    private void Emit(object payload)
+    {
+        var json = JsonSerializer.Serialize(payload, Json.Options);
+        void Post()
+        {
+            if (!IsDisposed && _web.CoreWebView2 != null) _web.CoreWebView2.PostWebMessageAsJson(json);
+        }
+
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(Post); }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { /* Fenster schliesst gerade */ }
+        }
+        else Post();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // Dunkle Titelleiste (Windows 10 20H1+ / 11); auf älteren Systemen passiert einfach nichts.
+        var dark = 1;
+        _ = DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
+        _ = DwmSetWindowAttribute(Handle, 19, ref dark, sizeof(int));
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -34,18 +70,33 @@ public sealed class MainForm : Form
         try
         {
             var userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MultiServerView", "webview");
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MultiServerView", "webview");
             var env = await CoreWebView2Environment.CreateAsync(null, userData);
             await _web.EnsureCoreWebView2Async(env);
 
             var core = _web.CoreWebView2;
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
-            // Ctrl+Tab, Ctrl+W, Ctrl+1..9 usw. gehoeren dem UI und nicht dem Browser.
+            core.Settings.AreDevToolsEnabled = Environment.GetEnvironmentVariable("MSV_DEV_URL") != null;
+            // Ctrl+Tab, Ctrl+W, Ctrl+1..9 usw. gehören dem UI und nicht dem Browser.
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.IsZoomControlEnabled = false;
             core.WebMessageReceived += OnWebMessage;
+
+            // Zwischenablage (Terminal: Einfügen per Rechtsklick / Ctrl+Shift+V) ohne Rückfrage erlauben.
+            core.PermissionRequested += (_, args) =>
+            {
+                if (args.PermissionKind is CoreWebView2PermissionKind.ClipboardRead)
+                    args.State = CoreWebView2PermissionState.Allow;
+            };
+
+            // Externe Links im Standardbrowser öffnen, nie im App-Fenster.
+            core.NewWindowRequested += (_, args) =>
+            {
+                args.Handled = true;
+                if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) && (uri.Scheme is "http" or "https"))
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.ToString()) { UseShellExecute = true });
+            };
 
             // Dev-Modus: `set MSV_DEV_URL=http://localhost:5173` -> Vite-Devserver mit Hot Reload.
             var devUrl = Environment.GetEnvironmentVariable("MSV_DEV_URL");
@@ -72,8 +123,18 @@ public sealed class MainForm : Form
     private async void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         var request = e.WebMessageAsJson;
-        // Vault-Operationen (PBKDF2) nicht auf dem UI-Thread rechnen.
-        var reply = await Task.Run(() => _bridge.Handle(request));
-        _web.CoreWebView2.PostWebMessageAsJson(reply);
+        // Alles ausser dem Aufnehmen der Nachricht läuft im Hintergrund (PBKDF2, SSH-Connect, HTTP, ...).
+        var reply = await Task.Run(() => _bridge.HandleAsync(request));
+        if (!IsDisposed && _web.CoreWebView2 != null) _web.CoreWebView2.PostWebMessageAsJson(reply);
     }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _rdp.Dispose();
+        _bridge.Dispose();
+        base.OnFormClosed(e);
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }

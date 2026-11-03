@@ -1,0 +1,46 @@
+name: Build (Windows)
+
+# Baut die echte Windows-App, führt die Tests aus und legt eine fertige, portable Version
+# (ohne Installation, .NET ist enthalten) als Download unter "Actions -> Artifacts" ab.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Tests (Core)
+        run: dotnet test tests/MultiServerView.Core.Tests -c Release
+
+      - name: UI bauen
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: App veröffentlichen (win-x64, self-contained)
+        run: >
+          dotnet publish src/MultiServerView.App -c Release -r win-x64 --self-contained true
+          -p:PublishReadyToRun=false -o publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MultiServerView-win-x64
+          path: publish
+          if-no-files-found: error

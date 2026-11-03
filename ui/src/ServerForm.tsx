@@ -1,20 +1,28 @@
 import { useState, type FormEvent } from 'react';
-import { DEFAULT_PORT, type Protocol, type Server } from './types';
+import { api } from './bridge';
+import { IconClose } from './Icons';
+import { DEFAULT_PORT, PROTOCOL_LABEL, type KeyInfo, type Protocol, type Server } from './types';
 
 const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc'];
 
 export function ServerForm({
   initial,
   groups,
+  keys,
   onSave,
   onDelete,
   onClose,
+  onGoToKeys,
+  toast,
 }: {
   initial: Server;
   groups: string[];
+  keys: KeyInfo[];
   onSave: (s: Server) => Promise<void>;
   onDelete: (s: Server) => Promise<void>;
   onClose: () => void;
+  onGoToKeys: () => void;
+  toast: (msg: string, kind?: 'ok' | 'error') => void;
 }) {
   const [s, setS] = useState<Server>(initial);
   const [tags, setTags] = useState(initial.tags.join(', '));
@@ -39,6 +47,10 @@ export function ServerForm({
       setError('Name und Host sind Pflicht.');
       return;
     }
+    if (s.protocol === 'ssh' && s.auth === 'key' && !s.keyId) {
+      setError('Bitte einen Key auswählen (oder auf «Passwort» wechseln).');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -55,20 +67,32 @@ export function ServerForm({
     }
   }
 
+  async function forgetHostKey() {
+    try {
+      await api.hostsForget(initial.id);
+      toast('Host-Key vergessen – beim nächsten Verbinden wird er neu gespeichert');
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  }
+
+  const userLabel = s.protocol === 'rdp' ? 'Benutzer (DOMÄNE\\benutzer)' : 'Benutzer';
+  const usesKey = s.protocol === 'ssh' && s.auth === 'key';
+
   return (
     <div className="overlay" onMouseDown={onClose}>
-      <form
-        className="modal"
-        onMouseDown={(e) => e.stopPropagation()}
-        onSubmit={submit}
-        onKeyDown={(e) => e.key === 'Escape' && onClose()}
-      >
-        <h2>{isNew ? 'Neuer Server' : 'Server bearbeiten'}</h2>
+      <form className="modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+        <div className="modal-head">
+          <h2>{isNew ? 'Neuer Host' : 'Host bearbeiten'}</h2>
+          <button type="button" className="ghost icon-only" onClick={onClose}>
+            <IconClose size={16} />
+          </button>
+        </div>
 
         <div className="seg">
           {PROTOCOLS.map((p) => (
             <button type="button" key={p} className={s.protocol === p ? 'on' : ''} onClick={() => setProtocol(p)}>
-              {p.toUpperCase()}
+              {PROTOCOL_LABEL[p]}
             </button>
           ))}
         </div>
@@ -80,27 +104,59 @@ export function ServerForm({
         <div className="row">
           <label className="grow">
             Host / IP
-            <input value={s.host} onChange={(e) => set('host', e.target.value)} placeholder="10.0.0.5" />
+            <input value={s.host} onChange={(e) => set('host', e.target.value)} placeholder="10.0.0.5 oder server.example.ch" />
           </label>
           <label className="port">
             Port
-            <input
-              type="number"
-              value={s.port}
-              onChange={(e) => set('port', Number(e.target.value))}
-            />
+            <input type="number" value={s.port} onChange={(e) => set('port', Number(e.target.value))} />
           </label>
         </div>
+
+        {s.protocol === 'ssh' && (
+          <div className="seg small-seg">
+            <button type="button" className={s.auth === 'password' ? 'on' : ''} onClick={() => set('auth', 'password')}>
+              Passwort
+            </button>
+            <button type="button" className={s.auth === 'key' ? 'on' : ''} onClick={() => set('auth', 'key')}>
+              SSH-Key
+            </button>
+          </div>
+        )}
+
         <div className="row">
           <label className="grow">
-            Benutzer
+            {userLabel}
             <input value={s.username} onChange={(e) => set('username', e.target.value)} />
           </label>
-          <label className="grow">
-            Passwort
-            <input type="password" value={s.password} onChange={(e) => set('password', e.target.value)} />
-          </label>
+          {!usesKey && (
+            <label className="grow">
+              Passwort
+              <input type="password" value={s.password} onChange={(e) => set('password', e.target.value)} />
+            </label>
+          )}
+          {usesKey && (
+            <label className="grow">
+              Key
+              <select value={s.keyId} onChange={(e) => set('keyId', e.target.value)}>
+                <option value="">– wählen –</option>
+                {keys.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name} ({k.kind})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
+        {usesKey && keys.length === 0 && (
+          <div className="hint">
+            Du hast noch keinen Key.{' '}
+            <button type="button" className="link" onClick={onGoToKeys}>
+              Key hinzufügen
+            </button>
+          </div>
+        )}
+
         <div className="row">
           <label className="grow">
             Gruppe
@@ -132,9 +188,14 @@ export function ServerForm({
             <button
               type="button"
               className="danger"
-              onClick={() => confirm(`"${s.name}" wirklich löschen?`) && onDelete(initial)}
+              onClick={() => confirm(`«${s.name}» wirklich löschen?`) && onDelete(initial)}
             >
               Löschen
+            </button>
+          )}
+          {!isNew && s.protocol === 'ssh' && (
+            <button type="button" className="ghost" title="Falls der Server neu aufgesetzt wurde und die Host-Key-Warnung kommt" onClick={forgetHostKey}>
+              Host-Key zurücksetzen
             </button>
           )}
           <span className="grow" />
