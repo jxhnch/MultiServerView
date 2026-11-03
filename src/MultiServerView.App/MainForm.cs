@@ -168,7 +168,14 @@ public sealed partial class MainForm : Form
     {
         Log("Fenster geschlossen");
         try { _rdp.Dispose(); Log("RDP aufgeräumt"); } catch (Exception ex) { Log("RDP-Fehler: " + ex.Message); }
-        try { _bridge.Dispose(); Log("Bridge aufgeräumt"); } catch (Exception ex) { Log("Bridge-Fehler: " + ex.Message); }
+
+        // Das Aufräumen der Netzwerk-Sitzungen kann bei einer hängenden Verbindung blockieren (SSH-Kanäle schliessen).
+        // Deshalb im Hintergrund und höchstens 3 Sekunden lang - danach wird in jedem Fall beendet.
+        var cleanup = Task.Run(() =>
+        {
+            try { _bridge.Dispose(); Log("Bridge aufgeräumt"); } catch (Exception ex) { Log("Bridge-Fehler: " + ex.Message); }
+        });
+        if (!cleanup.Wait(TimeSpan.FromSeconds(3))) Log("Aufräumen dauerte zu lange - beende trotzdem");
         base.OnFormClosed(e);
 
         // Alles ist gespeichert und aufgeräumt: sofort beenden. So bleibt nach dem Schliessen des Fensters nie ein

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using MultiServerView.Core;
+using MultiServerView.Core.Ssh;
 
 namespace MultiServerView.App;
 
@@ -161,6 +162,16 @@ public sealed partial class MainForm
                     if (s.GetProperty("id").GetString() == id) os = s.GetProperty("os").GetString() ?? "";
             }
             Check("Betriebssystem erkannt", os.Length > 0, "erkannt: " + os);
+
+            // Messung: was liefert ein Windows-OpenSSH-Server auf die OS-Erkennung?
+            var probeServer = new ServerEntry { Name = "probe", Host = host, Port = port, Username = user, Password = pass };
+            using (var probe = new SshTerminalSession(probeServer, null, (_, _, _) => HostKeyTrust.Trusted))
+            {
+                await probe.ConnectAsync(80, 24);
+                var raw = await probe.RunCommandAsync("cat /etc/os-release 2>/dev/null; echo '---'; uname -s 2>/dev/null", TimeSpan.FromSeconds(8));
+                Check("OS-Erkennung: Befehl lieferte Ausgabe", raw != null, Snip(raw ?? "(null)", 200));
+                Check("OS-Erkennung: Windows-Server wird erkannt", OsDetector.Parse(raw ?? "") == "windows", "erkannt: '" + OsDetector.Parse(raw ?? "") + "'");
+            }
 
             // SFTP + lokales Dateisystem unter Windows
             var home = (await Call("sftp.open", new { sessionId = "smoke-sftp-1", serverId = id })).GetProperty("home").GetString()!;
