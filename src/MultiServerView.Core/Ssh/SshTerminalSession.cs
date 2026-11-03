@@ -116,7 +116,9 @@ public sealed class SshTerminalSession : IDisposable
             {
                 using var cmd = client.CreateCommand(command);
                 cmd.CommandTimeout = timeout;
-                return cmd.Execute();
+                var stdout = cmd.Execute();
+                // Fehlerkanal mitlesen: Windows-Server melden dort, dass "cat" unbekannt ist (daran erkennen wir sie).
+                return string.IsNullOrWhiteSpace(cmd.Error) ? stdout : stdout + "\n" + cmd.Error;
             });
         }
         catch (Exception ex) when (ex is SshException or ObjectDisposedException or InvalidOperationException)

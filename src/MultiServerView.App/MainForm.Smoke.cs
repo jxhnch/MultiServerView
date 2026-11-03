@@ -215,6 +215,8 @@ public sealed partial class MainForm
             await Call("forwards.stop", new { id = rule.GetProperty("id").GetString() });
 
             // Dieselbe Verbindung durch die echte Oberfläche (xterm.js in WebView2)
+            Emit(new { @event = "vault.changed" });
+            await WaitFor("[...document.querySelectorAll('.hcard')].some(e => e.textContent.includes('smoke-ssh'))", 10);
             await Js("[...document.querySelectorAll('.hcard')].find(e => e.textContent.includes('smoke-ssh')).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
             var ui = await WaitFor("document.querySelector('.xterm-rows') && document.querySelector('.xterm-rows').innerText.includes('" + user + "')", 25);
             Check("Terminal in der Oberfläche zeigt die Windows-Eingabeaufforderung", ui);
