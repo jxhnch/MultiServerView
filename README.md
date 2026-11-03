@@ -1,6 +1,6 @@
 # MultiServerView
 
-**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows. Source-available: free to use, contributions welcome.
+**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows, open source (MIT).
 
 <table>
   <tr>
@@ -180,14 +180,6 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 | `installer/` | Inno Setup script for the installer wizard |
 | `docs/` | Supabase SQL, comparison with Termius, first-run checklist, screenshots |
 
-### Test status
-
-| Part | Status |
-|---|---|
-| Vault, crypto, merge, sync logic, SSH, SFTP, forwarding, VNC bridge, importers | Automatically tested (170 unit and integration tests) |
-| Windows window (WebView2), **RDP control**, DPAPI, SSH/SFTP/jump/tunnels on Windows | Every build runs a self-test on a real Windows machine: the app starts, is driven by script, takes screenshots and talks to a real OpenSSH server |
-| Real Supabase project, real Proxmox server, RDP/VNC against real targets | Not tested automatically (only against simulations); reports welcome |
-
 ## Known limitations
 
 - While a palette or dialog is open, a running RDP window is hidden briefly (the native window would otherwise cover the UI). The session keeps running.
@@ -196,9 +188,9 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 - No Telnet/Serial/Mosh, no AI autocomplete, no teams. See the [comparison with Termius](docs/comparison-with-termius.md).
 - Windows only.
 
-## License and contributing
+## License
 
-Free to use, build and run for yourself. Pull requests to this repository are welcome. Publishing your own fork, rebuilt binaries or a derived product is not allowed. See [LICENSE](LICENSE) for the exact terms. This is a source-available license, not an OSI "open source" license.
+[MIT](LICENSE). Contributions are welcome: open an issue or a pull request.
 
 ## Inspiration and vibe coding
 

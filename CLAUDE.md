@@ -25,7 +25,7 @@ Environment variables: `MSV_DEV_URL` (load the UI from the Vite dev server), `MS
 ## Owner rules
 - **Commits only under the name jxhnch** (`123569094+jxhnch@users.noreply.github.com`), **no** "Co-Authored-By" / Claude lines in commits or PRs.
 - **No force-push without explicit approval.**
-- UI, messages, comments, tests and docs are written in **English** (the project is public; license: source-available, contributions welcome, no own forks/redistribution, see `LICENSE`).
+- UI, messages, comments, tests and docs are written in **English** (the project is open source, MIT, see `LICENSE`).
 - Report the test status honestly: what ran, what was only compiled, what is untested.
 
 ## Status
