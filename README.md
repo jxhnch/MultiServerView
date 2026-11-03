@@ -62,7 +62,9 @@ Get the latest version from the **[Releases page](https://github.com/jxhnch/Mult
 | `MultiServerView-Setup-x.y.z.exe` | Installer wizard (no admin rights needed, Start menu entry, uninstaller) |
 | `MultiServerView-x.y.z-portable-win-x64.zip` | Portable: unpack anywhere and run `MultiServerView.exe` |
 
-Nothing else has to be installed: .NET is bundled and the WebView2 runtime is part of Windows 10/11. The builds are **not code-signed yet**, so Windows SmartScreen may show a warning on first start ("More info" → "Run anyway").
+Nothing else has to be installed: .NET is bundled and the WebView2 runtime is part of Windows 10/11.
+
+> **"Windows protected your PC" (SmartScreen)?** The downloads are not code-signed yet. Code-signing certificates cost money and are tied to a verified identity, and SmartScreen also distrusts every new, little-downloaded program. It does not mean the file is malware. Click **More info → Run anyway**. To be sure you have the original, download only from this repository's Releases page; the whole source and the build workflow (`.github/workflows/release.yml`) are public, so you can build it yourself as well.
 
 On first start you create a **master password** (at least 8 characters). There is no recovery: if you forget it, nobody can open your vault.
 
