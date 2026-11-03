@@ -973,7 +973,7 @@ label {
   border-radius: 9px;
   background: rgba(11, 32, 51, 0.85);
   backdrop-filter: blur(4px);
-  opacity: 0.25;
+  opacity: 0.8;
   transition: opacity 0.15s;
 }
 .session-body:hover .float-tools,

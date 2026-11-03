@@ -143,7 +143,19 @@ public sealed partial class MainForm
             var id = target.GetProperty("id").GetString()!;
 
             // Terminal: verbinden, Befehl senden, Ausgabe zurückbekommen
-            await Call("ssh.open", new { sessionId = "smoke-ssh-1", serverId = id, cols = 100, rows = 30 });
+            // Beim allerersten Login legt Windows erst das Benutzerprofil an - das kann länger dauern, darum bis zu 3 Versuche.
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await Call("ssh.open", new { sessionId = "smoke-ssh-1", serverId = id, cols = 100, rows = 30 });
+                    break;
+                }
+                catch when (attempt < 3)
+                {
+                    await Task.Delay(5000);
+                }
+            }
             Check("SSH: Verbindung zum OpenSSH-Server aufgebaut (SSH.NET unter Windows)", true);
             await Task.Delay(1500);
             await Call("ssh.input", new { sessionId = "smoke-ssh-1", data = B64("echo SMOKE-%USERNAME%-" + (6 * 7) + "\r\n") });
