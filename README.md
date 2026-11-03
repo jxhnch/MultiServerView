@@ -68,6 +68,31 @@ Nothing else has to be installed: .NET is bundled and the WebView2 runtime is pa
 
 On first start you create a **master password** (at least 8 characters). There is no recovery: if you forget it, nobody can open your vault.
 
+## Where your data lives and how to start from zero
+
+Uninstalling the app does **not** delete your data (so updates and reinstalls never lose your vault):
+
+| What | Location |
+|---|---|
+| Vault, sync settings, connection history, settings | `%APPDATA%\MultiServerView` (`vault.msv`, `sync.json`, `history.json`, ...) |
+| Interface settings (theme, terminal look) | `%LOCALAPPDATA%\MultiServerView\webview` |
+| Your sync file in the shared folder | wherever you chose it (e.g. OneDrive), never touched by the app's uninstaller |
+
+To start completely from scratch (**this permanently deletes your vault, there is no recovery**):
+
+1. Optional: make a backup in *Settings* first.
+2. Close MultiServerView and uninstall it (or just close it if you keep it).
+3. Delete both folders:
+
+```bash
+rmdir /s /q "%APPDATA%\MultiServerView"
+rmdir /s /q "%LOCALAPPDATA%\MultiServerView"
+```
+
+4. Delete the vault file in your sync folder as well (look for `MultiServerView-Vault.msv`), otherwise a new install can load it again. Then reinstall and create a new master password.
+
+Portable ZIP: the same applies. If you only want to wipe the vault, use *Settings → Clear vault* inside the app (it empties the vault but keeps your master password).
+
 ## Keyboard shortcuts
 
 In a terminal, plain Ctrl combinations belong to the shell, so app commands use `Ctrl+Shift`:
