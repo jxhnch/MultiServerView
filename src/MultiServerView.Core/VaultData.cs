@@ -5,9 +5,12 @@ namespace MultiServerView.Core;
 /// <summary>Der komplette (entschlüsselte) Inhalt des Vaults.</summary>
 public sealed class VaultData
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
     public List<ServerEntry> Servers { get; set; } = new();
     public List<KeyEntry> Keys { get; set; } = new();
+    public List<IdentityEntry> Identities { get; set; } = new();
+    public List<SnippetEntry> Snippets { get; set; } = new();
+    public List<PortForwardEntry> Forwards { get; set; } = new();
 
     /// <summary>"host:port" -> SHA256-Fingerprint (Trust on first use).</summary>
     public Dictionary<string, string> KnownHosts { get; set; } = new();
@@ -47,6 +50,9 @@ public static class VaultMerge
             });
 
         result.Keys = MergeById(a.Keys, b.Keys, k => k.Id, k => k.UpdatedAt, result.Tombstones, null);
+        result.Identities = MergeById(a.Identities, b.Identities, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
+        result.Snippets = MergeById(a.Snippets, b.Snippets, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
+        result.Forwards = MergeById(a.Forwards, b.Forwards, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
 
         foreach (var src in new[] { a.KnownHosts, b.KnownHosts })
             foreach (var (host, fp) in src)

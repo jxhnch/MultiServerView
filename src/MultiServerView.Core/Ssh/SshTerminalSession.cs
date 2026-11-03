@@ -1,14 +1,8 @@
-using System.Net.Sockets;
 using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 
 namespace MultiServerView.Core.Ssh;
-
-public sealed class SshConnectException : Exception
-{
-    public SshConnectException(string message, Exception? inner = null) : base(message, inner) { }
-}
 
 /// <summary>
 /// Eine interaktive SSH-Shell (PTY). Daten kommen als rohe Bytes raus und gehen als rohe Bytes rein -
@@ -41,31 +35,9 @@ public sealed class SshTerminalSession : IDisposable
 
     public async Task ConnectAsync(uint columns, uint rows, CancellationToken ct = default)
     {
-        var info = BuildConnectionInfo();
+        var info = SshConnector.BuildConnectionInfo(_server, _key);
         var client = new SshClient(info) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
-        string? hostKeyError = null;
-
-        client.HostKeyReceived += (_, e) =>
-        {
-            var fp = "SHA256:" + e.FingerPrintSHA256;
-            switch (_checkHostKey(_server.Host, _server.Port, fp))
-            {
-                case HostKeyTrust.Trusted:
-                    e.CanTrust = true;
-                    break;
-                case HostKeyTrust.NewlyTrusted:
-                    e.CanTrust = true;
-                    Info?.Invoke($"Neuer Host-Key gespeichert ({e.HostKeyName}) {fp}");
-                    break;
-                default:
-                    e.CanTrust = false;
-                    hostKeyError =
-                        $"WARNUNG: Der Host-Key von {_server.Host} hat sich geändert ({fp}). " +
-                        "Das kann ein Angriff sein oder der Server wurde neu aufgesetzt. " +
-                        "Wenn du das erwartest: im Server-Dialog «Host-Key zurücksetzen».";
-                    break;
-            }
-        };
+        var hostKeyError = SshConnector.HookHostKey(client, _server, _checkHostKey, m => Info?.Invoke(m));
 
         try
         {
@@ -74,7 +46,7 @@ public sealed class SshTerminalSession : IDisposable
         catch (Exception ex)
         {
             client.Dispose();
-            throw new SshConnectException(hostKeyError ?? Describe(ex), ex);
+            throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
         }
 
         _client = client;
@@ -125,63 +97,33 @@ public sealed class SshTerminalSession : IDisposable
         if (Interlocked.Exchange(ref _closedRaised, 1) == 0) Closed?.Invoke(reason);
     }
 
-    private ConnectionInfo BuildConnectionInfo()
+    /// <summary>Führt auf einem zweiten Kanal der laufenden Verbindung einen Befehl aus (z. B. Betriebssystem erkennen).</summary>
+    public async Task<string?> RunCommandAsync(string command, TimeSpan timeout)
     {
-        var user = string.IsNullOrWhiteSpace(_server.Username) ? Environment.UserName : _server.Username;
-        var methods = new List<AuthenticationMethod>();
-
-        if (_server.Auth == AuthMethod.Key)
+        var client = _client;
+        if (client == null) return null;
+        try
         {
-            if (_key == null || string.IsNullOrWhiteSpace(_key.PrivateKey))
-                throw new SshConnectException("Für diesen Server ist kein SSH-Key ausgewählt oder der Key fehlt.");
-            methods.Add(new PrivateKeyAuthenticationMethod(user, LoadKey(_key)));
-        }
-        else
-        {
-            methods.Add(new PasswordAuthenticationMethod(user, _server.Password));
-
-            // Viele Server nehmen das Passwort nur über "keyboard-interactive" an.
-            var kbd = new KeyboardInteractiveAuthenticationMethod(user);
-            kbd.AuthenticationPrompt += (_, e) =>
+            return await Task.Run(() =>
             {
-                foreach (var prompt in e.Prompts) prompt.Response = _server.Password;
-            };
-            methods.Add(kbd);
+                using var cmd = client.CreateCommand(command);
+                cmd.CommandTimeout = timeout;
+                return cmd.Execute();
+            });
         }
-
-        return new ConnectionInfo(_server.Host, _server.Port > 0 ? _server.Port : 22, user, methods.ToArray())
+        catch (Exception ex) when (ex is SshException or ObjectDisposedException or InvalidOperationException)
         {
-            Timeout = TimeSpan.FromSeconds(15)
-        };
+            return null;
+        }
+    }
+
+    /// <summary>Erkennt das Betriebssystem des Servers ("debian", "ubuntu", "linux", "macos", ...) oder "" bei Misserfolg.</summary>
+    public async Task<string> DetectOsAsync()
+    {
+        var output = await RunCommandAsync("cat /etc/os-release 2>/dev/null; echo '---'; uname -s 2>/dev/null", TimeSpan.FromSeconds(5));
+        return output == null ? "" : OsDetector.Parse(output);
     }
 
     /// <summary>Liest einen privaten Key (OpenSSH / PEM). Wirft <see cref="SshConnectException"/> bei Fehlern.</summary>
-    public static PrivateKeyFile LoadKey(KeyEntry key)
-    {
-        try
-        {
-            using var ms = new MemoryStream(Encoding.UTF8.GetBytes(key.PrivateKey.Trim() + "\n"));
-            return string.IsNullOrEmpty(key.Passphrase) ? new PrivateKeyFile(ms) : new PrivateKeyFile(ms, key.Passphrase);
-        }
-        catch (Exception ex) when (ex is SshException or InvalidOperationException or ArgumentException or FormatException
-                                       or System.Security.Cryptography.CryptographicException)
-        {
-            throw new SshConnectException("Der SSH-Key konnte nicht gelesen werden (falsche Passphrase oder nicht unterstütztes Format).", ex);
-        }
-    }
-
-    private static string Describe(Exception ex) => ex switch
-    {
-        SshAuthenticationException => "Anmeldung fehlgeschlagen (Benutzer, Passwort oder Key stimmen nicht).",
-        SshOperationTimeoutException => "Zeitüberschreitung beim Verbinden.",
-        SocketException se => se.SocketErrorCode switch
-        {
-            SocketError.ConnectionRefused => "Verbindung abgelehnt (läuft SSH auf diesem Port?).",
-            SocketError.HostNotFound or SocketError.NoData => "Host nicht gefunden.",
-            SocketError.TimedOut => "Zeitüberschreitung beim Verbinden.",
-            _ => "Netzwerkfehler: " + se.Message
-        },
-        SshConnectionException => "Verbindung fehlgeschlagen: " + ex.Message,
-        _ => ex.Message
-    };
+    public static PrivateKeyFile LoadKey(KeyEntry key) => SshConnector.LoadKey(key);
 }

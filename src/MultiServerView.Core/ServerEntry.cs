@@ -14,7 +14,7 @@ public enum AuthMethod
 }
 
 /// <summary>Ein Server-Eintrag im Vault. Wird 1:1 als JSON mit dem UI ausgetauscht (camelCase).</summary>
-public sealed class ServerEntry
+public sealed class ServerEntry : IVaultItem
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "";
@@ -32,6 +32,12 @@ public sealed class ServerEntry
     /// <summary>Id eines <see cref="KeyEntry"/> (nur bei Auth = Key).</summary>
     public string KeyId { get; set; } = "";
 
+    /// <summary>Optional: Zugangsdaten aus einer <see cref="IdentityEntry"/> (überschreiben Benutzer/Passwort/Key).</summary>
+    public string IdentityId { get; set; } = "";
+
+    /// <summary>Erkanntes Betriebssystem ("debian", "ubuntu", "windows", ...). Wird nach dem ersten SSH-Login gesetzt.</summary>
+    public string Os { get; set; } = "";
+
     public string Group { get; set; } = "";
     public List<string> Tags { get; set; } = new();
     public bool Favorite { get; set; }
@@ -40,6 +46,8 @@ public sealed class ServerEntry
 
     /// <summary>Wird bei jeder Änderung gesetzt. Grundlage für den Cloud-Merge (neuester Stand gewinnt).</summary>
     public DateTimeOffset UpdatedAt { get; set; }
+
+    public ServerEntry Clone() => (ServerEntry)MemberwiseClone();
 
     public static int DefaultPort(Protocol protocol) => protocol switch
     {
@@ -51,7 +59,7 @@ public sealed class ServerEntry
 }
 
 /// <summary>Ein privater SSH-Schlüssel im Vault ("Keychain").</summary>
-public sealed class KeyEntry
+public sealed class KeyEntry : IVaultItem
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "";

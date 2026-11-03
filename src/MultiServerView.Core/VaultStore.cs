@@ -148,6 +148,11 @@ public sealed class VaultStore
         {
             var data = Data();
             if (data.Servers.RemoveAll(s => s.Id == id) > 0) data.Tombstones[id] = DateTimeOffset.UtcNow;
+            foreach (var f in data.Forwards.Where(f => f.ServerId == id).ToList())
+            {
+                data.Forwards.Remove(f);
+                data.Tombstones[f.Id] = DateTimeOffset.UtcNow;
+            }
             Save();
         }
         Changed?.Invoke();
@@ -221,6 +226,126 @@ public sealed class VaultStore
         Changed?.Invoke();
     }
 
+    // ------------------------------------------------------------------ Identities, Snippets, Port-Weiterleitungen
+
+    public IReadOnlyList<IdentityEntry> ListIdentities()
+    {
+        lock (_gate) return Data().Identities.ToList();
+    }
+
+    public IdentityEntry? FindIdentity(string id)
+    {
+        lock (_gate) return Data().Identities.FirstOrDefault(i => i.Id == id);
+    }
+
+    public IdentityEntry UpsertIdentity(IdentityEntry identity) => UpsertItem(d => d.Identities, identity);
+
+    public void DeleteIdentity(string id)
+    {
+        lock (_gate)
+        {
+            var data = Data();
+            if (data.Identities.RemoveAll(i => i.Id == id) > 0) data.Tombstones[id] = DateTimeOffset.UtcNow;
+            foreach (var s in data.Servers.Where(s => s.IdentityId == id))
+            {
+                s.IdentityId = "";
+                s.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            Save();
+        }
+        Changed?.Invoke();
+    }
+
+    public IReadOnlyList<SnippetEntry> ListSnippets()
+    {
+        lock (_gate) return Data().Snippets.ToList();
+    }
+
+    public SnippetEntry UpsertSnippet(SnippetEntry snippet) => UpsertItem(d => d.Snippets, snippet);
+
+    public void DeleteSnippet(string id) => DeleteItem(d => d.Snippets, id);
+
+    public IReadOnlyList<PortForwardEntry> ListForwards()
+    {
+        lock (_gate) return Data().Forwards.ToList();
+    }
+
+    public PortForwardEntry? FindForward(string id)
+    {
+        lock (_gate) return Data().Forwards.FirstOrDefault(f => f.Id == id);
+    }
+
+    public PortForwardEntry UpsertForward(PortForwardEntry forward) => UpsertItem(d => d.Forwards, forward);
+
+    public void DeleteForward(string id) => DeleteItem(d => d.Forwards, id);
+
+    /// <summary>Wendet die Zugangsdaten einer Identity auf eine Kopie des Servers an (Benutzer, Passwort, Auth, Key).</summary>
+    public ServerEntry Resolve(ServerEntry server)
+    {
+        lock (_gate)
+        {
+            if (string.IsNullOrEmpty(server.IdentityId)) return server;
+            var identity = Data().Identities.FirstOrDefault(i => i.Id == server.IdentityId);
+            if (identity == null) return server;
+
+            var copy = server.Clone();
+            copy.Username = identity.Username;
+            copy.Password = identity.Password;
+            copy.Auth = identity.Auth;
+            copy.KeyId = identity.KeyId;
+            return copy;
+        }
+    }
+
+    public ServerEntry? FindResolved(string id)
+    {
+        lock (_gate) return Find(id) is { } s ? Resolve(s) : null;
+    }
+
+    /// <summary>Merkt sich das erkannte Betriebssystem eines Hosts (für das Icon).</summary>
+    public void SetOs(string serverId, string os)
+    {
+        lock (_gate)
+        {
+            var s = Data().Servers.FirstOrDefault(x => x.Id == serverId);
+            if (s == null || s.Os == os) return;
+            s.Os = os;
+            s.UpdatedAt = DateTimeOffset.UtcNow;
+            Save();
+        }
+        Changed?.Invoke();
+    }
+
+    private T UpsertItem<T>(Func<VaultData, List<T>> select, T item) where T : IVaultItem
+    {
+        lock (_gate)
+        {
+            var data = Data();
+            if (string.IsNullOrWhiteSpace(item.Id)) item.Id = Guid.NewGuid().ToString("N");
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            data.Tombstones.Remove(item.Id);
+
+            var list = select(data);
+            var index = list.FindIndex(x => x.Id == item.Id);
+            if (index >= 0) list[index] = item;
+            else list.Add(item);
+            Save();
+        }
+        Changed?.Invoke();
+        return item;
+    }
+
+    private void DeleteItem<T>(Func<VaultData, List<T>> select, string id) where T : IVaultItem
+    {
+        lock (_gate)
+        {
+            var data = Data();
+            if (select(data).RemoveAll(x => x.Id == id) > 0) data.Tombstones[id] = DateTimeOffset.UtcNow;
+            Save();
+        }
+        Changed?.Invoke();
+    }
+
     // ------------------------------------------------------------------ Known Hosts (Trust on first use)
 
     public static string HostKeyId(string host, int port) => $"{host.Trim().ToLowerInvariant()}:{port}";
@@ -244,6 +369,22 @@ public sealed class VaultStore
         }
         if (changed) Changed?.Invoke();
         return result;
+    }
+
+    /// <summary>Alle bekannten Host-Keys ("host:port" -> Fingerprint), alphabetisch.</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> ListKnownHosts()
+    {
+        lock (_gate) return Data().KnownHosts.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
+    }
+
+    public void RemoveKnownHost(string id)
+    {
+        lock (_gate)
+        {
+            if (!Data().KnownHosts.Remove(id)) return;
+            Save();
+        }
+        Changed?.Invoke();
     }
 
     public void ForgetHostKey(string host, int port)
