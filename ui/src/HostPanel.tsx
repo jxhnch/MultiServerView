@@ -1,7 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { api } from './bridge';
-import { IconClose, IconEye, IconCheck, ProtocolIcon } from './Icons';
-import { DEFAULT_PORT, PROTOCOL_LABEL, type KeyInfo, type Protocol, type Server } from './types';
+import { IconClose, IconEye, IconCheck, IconFolder } from './Icons';
+import { HostTile } from './HostTile';
+import { DEFAULT_PORT, PROTOCOL_LABEL, type Identity, type KeyInfo, type Protocol, type Server } from './types';
 
 const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc'];
 
@@ -23,8 +24,10 @@ export function HostPanel({
   drawer,
   groups,
   keys,
+  identities,
   onSave,
   onConnect,
+  onSftp,
   onDelete,
   onClose,
   onGoToKeys,
@@ -34,8 +37,10 @@ export function HostPanel({
   drawer?: boolean;
   groups: string[];
   keys: KeyInfo[];
+  identities: Identity[];
   onSave: (s: Server) => Promise<Server>;
   onConnect: (s: Server) => Promise<void>;
+  onSftp: (s: Server) => Promise<void>;
   onDelete: (s: Server) => Promise<void>;
   onClose: () => void;
   onGoToKeys: () => void;
@@ -74,11 +79,11 @@ export function HostPanel({
 
   function validate(): string {
     if (!s.host.trim()) return 'Bitte eine Adresse eingeben.';
-    if (s.protocol === 'ssh' && s.auth === 'key' && !s.keyId) return 'Bitte einen Key auswählen (oder auf «Passwort» wechseln).';
+    if (!s.identityId && s.protocol === 'ssh' && s.auth === 'key' && !s.keyId) return 'Bitte einen Key auswählen (oder auf «Passwort» wechseln).';
     return '';
   }
 
-  async function run(action: 'save' | 'connect') {
+  async function run(action: 'save' | 'connect' | 'sftp') {
     const problem = validate();
     if (problem) {
       setError(problem);
@@ -89,6 +94,7 @@ export function HostPanel({
     try {
       const data = build();
       if (action === 'connect') await onConnect(data);
+      else if (action === 'sftp') await onSftp(data);
       else {
         await onSave(data);
         toast('Gespeichert');
@@ -141,9 +147,7 @@ export function HostPanel({
         <div className="group-card">
           <h3>Adresse</h3>
           <div className="addr-row">
-            <span className={`tile ${s.protocol}`}>
-              <ProtocolIcon protocol={s.protocol} size={20} />
-            </span>
+            <HostTile server={s} size="md" />
             <input
               autoFocus={isNew && focusField === 'host'}
               value={s.host}
@@ -185,52 +189,70 @@ export function HostPanel({
 
         <div className="group-card">
           <h3>Zugangsdaten</h3>
-          {s.protocol === 'ssh' && (
-            <div className="seg slim">
-              <button type="button" className={s.auth === 'password' ? 'on' : ''} onClick={() => set('auth', 'password')}>
-                Passwort
-              </button>
-              <button type="button" className={s.auth === 'key' ? 'on' : ''} onClick={() => set('auth', 'key')}>
-                SSH-Key
-              </button>
-            </div>
-          )}
-          <Field label={s.protocol === 'rdp' ? 'Benutzer (DOMÄNE\\benutzer)' : 'Benutzer'}>
-            <input autoFocus={isNew && focusField === 'user'} value={s.username} onChange={(e) => set('username', e.target.value)} />
-          </Field>
-          {!usesKey ? (
-            <Field label="Passwort">
-            <div className="pw-wrap">
-              <input
-                autoFocus={isNew && focusField === 'pw'}
-                type={showPw ? 'text' : 'password'}
-                value={s.password}
-                onChange={(e) => set('password', e.target.value)}
-              />
-              <button type="button" className="ghost icon-only" title="Anzeigen / verbergen" onClick={() => setShowPw((v) => !v)}>
-                <IconEye size={16} />
-              </button>
-            </div>
+          {identities.length > 0 && (
+            <Field label="Identity (gemeinsame Zugangsdaten)">
+              <select value={s.identityId} onChange={(e) => set('identityId', e.target.value)}>
+                <option value="">Eigene Zugangsdaten</option>
+                {identities.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
             </Field>
+          )}
+          {s.identityId ? (
+            <p className="hint">Benutzer und Passwort/Key kommen aus der Identity «{identities.find((i) => i.id === s.identityId)?.name ?? '?'}».</p>
           ) : (
             <>
-              <Field label="Key">
-                <select value={s.keyId} onChange={(e) => set('keyId', e.target.value)}>
-                  <option value="">Key wählen…</option>
-                  {keys.map((k) => (
-                    <option key={k.id} value={k.id}>
-                      {k.name} ({k.kind})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {keys.length === 0 && (
-                <div className="hint">
-                  Noch kein Key vorhanden.{' '}
-                  <button type="button" className="link" onClick={onGoToKeys}>
-                    Key hinzufügen
+              {s.protocol === 'ssh' && (
+                <div className="seg slim">
+                  <button type="button" className={s.auth === 'password' ? 'on' : ''} onClick={() => set('auth', 'password')}>
+                    Passwort
+                  </button>
+                  <button type="button" className={s.auth === 'key' ? 'on' : ''} onClick={() => set('auth', 'key')}>
+                    SSH-Key
                   </button>
                 </div>
+              )}
+              <Field label={s.protocol === 'rdp' ? 'Benutzer (DOMÄNE\\benutzer)' : 'Benutzer'}>
+                <input autoFocus={isNew && focusField === 'user'} value={s.username} onChange={(e) => set('username', e.target.value)} />
+              </Field>
+              {!usesKey ? (
+                <Field label="Passwort">
+                  <div className="pw-wrap">
+                    <input
+                      autoFocus={isNew && focusField === 'pw'}
+                      type={showPw ? 'text' : 'password'}
+                      value={s.password}
+                      onChange={(e) => set('password', e.target.value)}
+                    />
+                    <button type="button" className="ghost icon-only" title="Anzeigen / verbergen" onClick={() => setShowPw((v) => !v)}>
+                      <IconEye size={16} />
+                    </button>
+                  </div>
+                </Field>
+              ) : (
+                <>
+                  <Field label="Key">
+                    <select value={s.keyId} onChange={(e) => set('keyId', e.target.value)}>
+                      <option value="">Key wählen…</option>
+                      {keys.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name} ({k.kind})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {keys.length === 0 && (
+                    <div className="hint">
+                      Noch kein Key vorhanden.{' '}
+                      <button type="button" className="link" onClick={onGoToKeys}>
+                        Key hinzufügen
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -245,9 +267,16 @@ export function HostPanel({
       </form>
 
       <div className="panel-foot">
-        <button className="primary big" form="host-form" disabled={busy}>
-          {busy ? 'Moment…' : isNew ? 'Speichern & verbinden' : 'Connect'}
-        </button>
+        <div className="row">
+          <button className="primary big grow" form="host-form" disabled={busy}>
+            {busy ? 'Moment…' : isNew ? 'Speichern & verbinden' : 'Connect'}
+          </button>
+          {s.protocol === 'ssh' && (
+            <button type="button" className="big" title="Dateien dieses Hosts verwalten" disabled={busy} onClick={() => void run('sftp')}>
+              <IconFolder size={16} /> SFTP
+            </button>
+          )}
+        </div>
         {!isNew && (
           <div className="links">
             {s.protocol === 'ssh' ? (

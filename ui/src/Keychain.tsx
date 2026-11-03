@@ -1,15 +1,18 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from './bridge';
 import { IconClose, IconKey, IconLock, IconPlus, IconTrash, IconUpload } from './Icons';
-import type { KeyInfo, Server } from './types';
+import { IdentitiesSection } from './Identities';
+import type { Identity, KeyInfo, Server } from './types';
 
 export function Keychain({
   keys,
+  identities,
   servers,
   onChanged,
   toast,
 }: {
   keys: KeyInfo[];
+  identities: Identity[];
   servers: Server[];
   onChanged: () => Promise<void>;
   toast: (msg: string, kind?: 'ok' | 'error') => void;
@@ -79,6 +82,8 @@ export function Keychain({
           })}
         </div>
       )}
+
+      <IdentitiesSection identities={identities} keys={keys} servers={servers} onChanged={onChanged} toast={toast} />
 
       {adding && (
         <AddKey

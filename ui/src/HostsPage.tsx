@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react';
-import { IconPlus, IconSearch, IconServer, IconStar, IconUpload, ProtocolIcon } from './Icons';
+import { IconPlus, IconSearch, IconServer, IconStar, IconUpload } from './Icons';
+import { HostTile } from './HostTile';
 import { filterServers, parseTarget } from './search';
 import type { Server } from './types';
 
@@ -116,9 +117,7 @@ export function HostsPage({
                     onDoubleClick={(e) => onConnect(s, e.shiftKey)}
                     onKeyDown={(e) => e.key === 'Enter' && onConnect(s, e.shiftKey)}
                   >
-                    <span className={`tile ${s.protocol}`}>
-                      <ProtocolIcon protocol={s.protocol} size={20} />
-                    </span>
+                    <HostTile server={s} />
                     <span className="hcard-text">
                       <span className="hcard-name">{s.name}</span>
                       <span className="hcard-sub">{sub(s)}</span>

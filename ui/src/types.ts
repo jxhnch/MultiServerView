@@ -11,6 +11,8 @@ export interface Server {
   password: string;
   auth: AuthMethod;
   keyId: string;
+  identityId: string;
+  os: string;
   group: string;
   tags: string[];
   favorite: boolean;
@@ -25,6 +27,70 @@ export interface KeyInfo {
   kind: string;
   hasPassphrase: boolean;
   updatedAt: string;
+}
+
+/** Wiederverwendbare Zugangsdaten. Das Passwort selbst bleibt im Host. */
+export interface Identity {
+  id: string;
+  name: string;
+  username: string;
+  hasPassword: boolean;
+  auth: AuthMethod;
+  keyId: string;
+}
+
+export interface Snippet {
+  id: string;
+  name: string;
+  command: string;
+  autoRun: boolean;
+}
+
+export type ForwardType = 'local' | 'remote' | 'dynamic';
+export interface ForwardRule {
+  id: string;
+  name: string;
+  serverId: string;
+  type: ForwardType;
+  bindHost: string;
+  bindPort: number;
+  destHost: string;
+  destPort: number;
+}
+export interface ForwardItem {
+  rule: ForwardRule;
+  running: boolean;
+}
+
+export interface KnownHost {
+  id: string;
+  fingerprint: string;
+}
+
+export interface HistoryEntry {
+  id: string;
+  serverId: string;
+  serverName: string;
+  host: string;
+  kind: 'ssh' | 'sftp' | 'rdp' | 'vnc' | 'forward';
+  startedAt: string;
+  endedAt: string | null;
+  result: 'running' | 'ok' | 'error';
+  message: string;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modified: string;
+  mode: string;
+}
+export interface BrowseResult {
+  path: string;
+  parent: string;
+  entries: FileEntry[];
 }
 
 export interface SyncInfo {
@@ -61,6 +127,8 @@ export function emptyServer(): Server {
     password: '',
     auth: 'password',
     keyId: '',
+    identityId: '',
+    os: '',
     group: '',
     tags: [],
     favorite: false,

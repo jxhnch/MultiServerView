@@ -4,11 +4,15 @@ Eigene Server-Verwaltung für Windows – ein Fenster für **SSH, RDP und VNC**,
 
 | | |
 |---|---|
-| **SSH** | Echtes Terminal (xterm.js), Passwort **oder SSH-Key**, Host-Key-Prüfung, Tabs bleiben beim Wechseln offen |
+| **SSH** | Echtes Terminal (xterm.js), Passwort **oder SSH-Key**, Host-Key-Prüfung, 10 Farbschemata, Schriftart und -grösse, Snippets per Klick |
+| **SFTP** | Zwei Fenster (dieser PC / Server), Drag & Drop, Upload/Download von Dateien und ganzen Ordnern mit Fortschritt und Abbrechen, Ordner anlegen, umbenennen, löschen |
 | **RDP** | Natives Windows-RDP-Control (wie mstsc / mRemoteNG) direkt im Tab |
 | **VNC** | noVNC im Tab, inkl. Strg+Alt+Entf und Zwischenablage |
-| **Schnell wechseln** | Suchzeile oben (auch `ssh user@host` für neue Hosts), `Ctrl+K`, Tabs, Favoriten, Gruppen. Hell/Dunkel umschaltbar |
-| **Keychain** | SSH-Keys einmal importieren, bei mehreren Hosts benutzen |
+| **Port Forwarding** | Lokal (-L), Remote (-R) und SOCKS5 (-D) über SSH-Hosts, Start/Stopp per Klick |
+| **Schnell wechseln** | Suchzeile oben (auch `ssh user@host` für neue Hosts), `Ctrl+K`, Tabs, Favoriten, Gruppen, Betriebssystem-Logos. Hell/Dunkel umschaltbar |
+| **Zugangsdaten** | Keychain für SSH-Keys, Identities (Benutzer + Passwort/Key für mehrere Hosts) |
+| **Snippets** | Häufige Befehle speichern, im Terminal mit einem Klick ausführen |
+| **Known Hosts / Logs** | Gespeicherte Host-Keys ansehen und zurücksetzen; Verbindungsverlauf (nur lokal, ohne Passwörter) |
 | **Cloud** | Ende-zu-Ende verschlüsselter Sync zwischen PCs (Supabase), Merge bei Änderungen auf beiden Seiten |
 | **Import** | mRemoteNG (`confCons.xml`) |
 
@@ -102,8 +106,8 @@ dotnet run --project src/MultiServerView.App
 
 | Teil | Status |
 |---|---|
-| Vault, Crypto, Merge, Sync-Logik, SSH, VNC-Brücke, Import | **Automatisch getestet** (46 Tests, SSH gegen echten sshd, Sync gegen simulierte Supabase-API) |
-| UI (Tabs, Palette, Keychain, Formulare, Terminal) | Im Browser mit Playwright durchgespielt, SSH-Terminal mit Demo-Shell |
+| Vault, Crypto, Merge, Sync-Logik, SSH, SFTP, Port Forwarding, VNC-Brücke, Import | **Automatisch getestet** (76 Tests; SSH, SFTP und alle drei Weiterleitungs-Arten gegen einen echten sshd, Sync gegen simulierte Supabase-API) |
+| UI (Tabs, Palette, Keychain, SFTP, Snippets, Weiterleitungen, Formulare, Terminal) | Im Browser mit Playwright durchgespielt (Demo-Daten und Demo-Shell) |
 | VNC Ende-zu-Ende | Getestet: noVNC → C#-Brücke → echter VNC-Server |
 | Windows-Fenster (WebView2), **RDP-Control**, DPAPI | **Kompiliert, aber noch nie auf Windows gelaufen.** RDP ist der riskanteste Teil (ActiveX-Hosting). Falls es dort hakt: Button «In Windows-RDP öffnen» startet mstsc als Ausweg |
 | Echter Supabase-Server | Noch nicht gegen ein echtes Projekt getestet (nur gegen die Simulation) |
@@ -113,4 +117,5 @@ dotnet run --project src/MultiServerView.App
 - Solange eine Palette oder ein Dialog offen ist, wird ein laufendes RDP-Fenster kurz ausgeblendet (natives Fenster liegt sonst über dem UI). Die Session läuft weiter.
 - PuTTY-Keys (`.ppk`) vorher in PuTTYgen nach OpenSSH exportieren.
 - mRemoteNG-Import übernimmt keine Passwörter (mRemoteNG verschlüsselt sie selber). Einen Termius-Import gibt es nicht.
-- Nur dunkles Design. Kein SFTP, kein Port-Forwarding, keine Jump-Hosts (kommt ggf. später).
+- Keine Jump-Hosts/Host-Chains, kein Split-View, kein Telnet/Serial/Mosh (siehe [`docs/termius-vergleich.md`](docs/termius-vergleich.md)).
+- Die Titelleiste ist die normale Windows-Titelleiste (Tabs sitzen darunter).

@@ -34,7 +34,8 @@ public sealed class MainForm : Form
 
         Controls.Add(_web);
         _rdp = new RdpManager(this, Emit);
-        _bridge = new Bridge(vault, sync, _rdp, Emit);
+        var history = new HistoryStore(Path.Combine(roaming, "history.json"));
+        _bridge = new Bridge(vault, sync, history, _rdp, Emit);
     }
 
     /// <summary>Schickt ein Event ans UI (thread-sicher).</summary>

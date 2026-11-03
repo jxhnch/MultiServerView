@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, isNative, onEvent } from './bridge';
-import { emptyServer, type KeyInfo, type Server, type SessionStatus, type SyncInfo, type SyncStatus } from './types';
+import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SyncInfo, type SyncStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
@@ -10,14 +10,21 @@ import { CloudPanel } from './CloudPanel';
 import { TerminalView } from './TerminalView';
 import { VncView } from './VncView';
 import { RdpView } from './RdpView';
-import { IconClose, IconCloud, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSun, ProtocolIcon } from './Icons';
+import { SftpView } from './SftpView';
+import { SnippetsPage } from './SnippetsPage';
+import { ForwardsPage } from './ForwardsPage';
+import { KnownHostsPage } from './KnownHostsPage';
+import { LogsPage } from './LogsPage';
+import { HostTile } from './HostTile';
+import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconShield, IconSun } from './Icons';
 
 type Phase = 'loading' | 'locked' | 'ready';
-type Section = 'hosts' | 'keys' | 'cloud';
+type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud';
 type Theme = 'light' | 'dark';
 interface Tab {
   id: string;
   serverId: string;
+  kind: 'session' | 'sftp';
   reconnectKey: number;
 }
 interface Toast {
@@ -44,6 +51,7 @@ export function App() {
   const [vaultExists, setVaultExists] = useState(true);
   const [servers, setServers] = useState<Server[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
+  const [identities, setIdentities] = useState<Identity[]>([]);
   const [syncInfo, setSyncInfo] = useState<SyncInfo | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off', message: '' });
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -81,9 +89,10 @@ export function App() {
 
   // ---------------------------------------------------------------- Laden
   const refresh = useCallback(async () => {
-    const [s, k, sync] = await Promise.all([api.serversList(), api.keysList(), api.syncGet()]);
+    const [s, k, ids, sync] = await Promise.all([api.serversList(), api.keysList(), api.identitiesList(), api.syncGet()]);
     setServers(s);
     setKeys(k);
+    setIdentities(ids);
     setSyncInfo(sync);
     setSyncStatus((prev) => (sync.configured ? (prev.state === 'off' ? { state: 'ok', message: 'Verbunden' } : prev) : { state: 'off', message: '' }));
   }, []);
@@ -116,6 +125,7 @@ export function App() {
     await api.vaultLock();
     setServers([]);
     setKeys([]);
+    setIdentities([]);
     setTabs([]);
     setStatuses({});
     setPanel(null);
@@ -132,14 +142,14 @@ export function App() {
   }, []);
 
   const open = useCallback(
-    async (s: Server, forceNew = false) => {
+    async (s: Server, forceNew = false, kind: 'session' | 'sftp' = 'session') => {
       setPaletteOpen(false);
       setPanel(null);
       setQuery('');
-      const existing = forceNew ? undefined : tabs.find((t) => t.serverId === s.id);
+      const existing = forceNew ? undefined : tabs.find((t) => t.serverId === s.id && t.kind === kind);
       if (existing) setActive(existing.id);
       else {
-        const t: Tab = { id: crypto.randomUUID(), serverId: s.id, reconnectKey: 0 };
+        const t: Tab = { id: crypto.randomUUID(), serverId: s.id, kind, reconnectKey: 0 };
         setTabs((prev) => [...prev, t]);
         setActive(t.id);
       }
@@ -176,7 +186,7 @@ export function App() {
     (id: string) => {
       const t = tabs.find((x) => x.id === id);
       const s = t && byId.get(t.serverId);
-      if (s) void open(s, true);
+      if (s) void open(s, true, t.kind);
     },
     [tabs, byId, open],
   );
@@ -254,6 +264,11 @@ export function App() {
     await open(saved);
   }
 
+  async function sftpFromPanel(draft: Server) {
+    const saved = await save(draft);
+    await open(saved, false, 'sftp');
+  }
+
   async function remove(s: Server) {
     await api.serversDelete(s.id);
     setServers((prev) => prev.filter((x) => x.id !== s.id));
@@ -296,8 +311,10 @@ export function App() {
       drawer={active !== HOME}
       groups={groups}
       keys={keys}
+      identities={identities}
       onSave={save}
       onConnect={connectFromPanel}
+      onSftp={sftpFromPanel}
       onDelete={remove}
       onClose={() => setPanel(null)}
       onGoToKeys={() => goTo('keys')}
@@ -323,10 +340,13 @@ export function App() {
               onClick={() => setActive(t.id)}
               onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
             >
-              <span className={`tile sm ${s.protocol}`}>
-                <ProtocolIcon protocol={s.protocol} size={13} />
-              </span>
+              <HostTile server={s} size="sm" />
               <span className="tab-name">{s.name}</span>
+              {t.kind === 'sftp' && (
+                <span className="tab-kind">
+                  <IconFolder size={11} /> SFTP
+                </span>
+              )}
               <span className={`status-dot ${st}`} />
               <span
                 className="x"
@@ -369,6 +389,18 @@ export function App() {
               <button className={'nav-item' + (section === 'keys' ? ' on' : '')} onClick={() => goTo('keys')}>
                 <IconKey size={17} /> Schlüssel
               </button>
+              <button className={'nav-item' + (section === 'snippets' ? ' on' : '')} onClick={() => goTo('snippets')}>
+                <IconCode size={17} /> Snippets
+              </button>
+              <button className={'nav-item' + (section === 'forwards' ? ' on' : '')} onClick={() => goTo('forwards')}>
+                <IconForward size={17} /> Port Forwarding
+              </button>
+              <button className={'nav-item' + (section === 'knownhosts' ? ' on' : '')} onClick={() => goTo('knownhosts')}>
+                <IconShield size={17} /> Known Hosts
+              </button>
+              <button className={'nav-item' + (section === 'logs' ? ' on' : '')} onClick={() => goTo('logs')}>
+                <IconClock size={17} /> Logs
+              </button>
               <button className={'nav-item' + (section === 'cloud' ? ' on' : '')} onClick={() => goTo('cloud')}>
                 <IconCloud size={17} /> Cloud &amp; Sync
               </button>
@@ -394,7 +426,11 @@ export function App() {
                   onImport={importFile}
                 />
               )}
-              {section === 'keys' && <Keychain keys={keys} servers={servers} onChanged={refresh} toast={toast} />}
+              {section === 'keys' && <Keychain keys={keys} identities={identities} servers={servers} onChanged={refresh} toast={toast} />}
+              {section === 'snippets' && <SnippetsPage toast={toast} />}
+              {section === 'forwards' && <ForwardsPage servers={servers} toast={toast} />}
+              {section === 'knownhosts' && <KnownHostsPage toast={toast} />}
+              {section === 'logs' && <LogsPage toast={toast} />}
               {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
             </div>
 
@@ -417,9 +453,12 @@ export function App() {
           };
           return (
             <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
-              {s.protocol === 'ssh' && <TerminalView {...common} />}
-              {s.protocol === 'vnc' && <VncView {...common} />}
-              {s.protocol === 'rdp' && <RdpView {...common} />}
+              {t.kind === 'sftp' && <SftpView {...common} />}
+              {t.kind === 'session' && s.protocol === 'ssh' && (
+                <TerminalView {...common} onOpenSftp={() => void open(s, false, 'sftp')} onManageSnippets={() => goTo('snippets')} />
+              )}
+              {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
+              {t.kind === 'session' && s.protocol === 'rdp' && <RdpView {...common} />}
             </div>
           );
         })}

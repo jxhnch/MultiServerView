@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconCloud, IconKey, IconLock, IconPlus, ProtocolIcon } from './Icons';
+import { IconCloud, IconKey, IconLock, IconPlus } from './Icons';
+import { HostTile } from './HostTile';
 import { filterServers } from './search';
 import type { Server } from './types';
 
@@ -93,9 +94,7 @@ export function CommandPalette({
               onClick={(e) => choose(it, e.shiftKey)}
             >
               {it.server ? (
-                <span className={`tile sm ${it.server.protocol}`}>
-                  <ProtocolIcon protocol={it.server.protocol} size={14} />
-                </span>
+                <HostTile server={it.server} size="sm" />
               ) : (
                 <span className="tile sm action">{actionIcon(it.action)}</span>
               )}

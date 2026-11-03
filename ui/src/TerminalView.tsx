@@ -5,31 +5,10 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { api, binaryToB64, fromB64, onEvent, toB64 } from './bridge';
 import { SessionFrame } from './SessionFrame';
+import { AppearanceMenu, SftpButton, SnippetMenu } from './TerminalTools';
+import { findFont, findTheme, getTermSettings, onTermSettings, toXtermTheme } from './terminalThemes';
 import type { Server, SessionStatus } from './types';
 
-const THEME = {
-  background: '#011627',
-  foreground: '#d6deeb',
-  cursor: '#80a4c2',
-  cursorAccent: '#011627',
-  selectionBackground: 'rgba(128, 164, 194, 0.3)',
-  black: '#011627',
-  red: '#ef5350',
-  green: '#22da6e',
-  yellow: '#c5e478',
-  blue: '#82aaff',
-  magenta: '#c792ea',
-  cyan: '#21c7a8',
-  white: '#ffffff',
-  brightBlack: '#575656',
-  brightRed: '#ef5350',
-  brightGreen: '#22da6e',
-  brightYellow: '#ffeb95',
-  brightBlue: '#82aaff',
-  brightMagenta: '#c792ea',
-  brightCyan: '#7fdbca',
-  brightWhite: '#ffffff',
-};
 
 /**
  * Ein SSH-Terminal (xterm.js). Bleibt gemountet, solange der Tab offen ist - auch wenn man in einen
@@ -44,6 +23,8 @@ export function TerminalView({
   onReconnect,
   onDuplicate,
   onEdit,
+  onOpenSftp,
+  onManageSnippets,
 }: {
   tabId: string;
   server: Server;
@@ -53,6 +34,8 @@ export function TerminalView({
   onReconnect: () => void;
   onDuplicate: () => void;
   onEdit: () => void;
+  onOpenSftp: () => void;
+  onManageSnippets: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -61,6 +44,7 @@ export function TerminalView({
   const activeRef = useRef(active);
   const reconnectRef = useRef(onReconnect);
   const [status, setStatusState] = useState<SessionStatus>('connecting');
+  const [bg, setBg] = useState(() => findTheme(getTermSettings().theme).bg);
   activeRef.current = active;
   reconnectRef.current = onReconnect;
 
@@ -72,15 +56,16 @@ export function TerminalView({
 
   // ---------------------------------------------------------------- Terminal einmal aufbauen
   useEffect(() => {
+    const st = getTermSettings();
     const term = new Terminal({
-      fontFamily: '"Cascadia Code", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace',
-      fontSize: 14,
+      fontFamily: findFont(st.font).css,
+      fontSize: st.fontSize,
       lineHeight: 1.18,
       cursorBlink: true,
       cursorStyle: 'bar',
       scrollback: 10000,
       allowProposedApi: true,
-      theme: THEME,
+      theme: toXtermTheme(findTheme(st.theme)),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -156,8 +141,24 @@ export function TerminalView({
       }
     });
 
+    // Aussehen live ändern (Theme, Schrift, Grösse)
+    const offSettings = onTermSettings((n) => {
+      term.options.theme = toXtermTheme(findTheme(n.theme));
+      term.options.fontFamily = findFont(n.font).css;
+      term.options.fontSize = n.fontSize;
+      setBg(findTheme(n.theme).bg);
+      requestAnimationFrame(() => {
+        try {
+          if (hostRef.current && hostRef.current.clientWidth > 0) fit.fit();
+        } catch {
+          /* ignore */
+        }
+      });
+    });
+
     return () => {
       off();
+      offSettings();
       ro.disconnect();
       cancelAnimationFrame(raf);
       hostRef.current?.removeEventListener('contextmenu', onContext);
@@ -223,8 +224,27 @@ export function TerminalView({
   }, [active]);
 
   return (
-    <SessionFrame server={server} status={status} onReconnect={onReconnect} onDuplicate={onDuplicate} onEdit={onEdit}>
-      <div className="term-wrap">
+    <SessionFrame
+      server={server}
+      status={status}
+      onReconnect={onReconnect}
+      onDuplicate={onDuplicate}
+      onEdit={onEdit}
+      extraActions={
+        <>
+          <SnippetMenu
+            onSend={(text) => {
+              if (statusRef.current === 'connected') void api.sshInput(tabId, toB64(text)).catch(() => undefined);
+              termRef.current?.focus();
+            }}
+            onManage={onManageSnippets}
+          />
+          <AppearanceMenu />
+          <SftpButton onClick={onOpenSftp} />
+        </>
+      }
+    >
+      <div className="term-wrap" style={{ background: bg }}>
         <div className="term-host" ref={hostRef} />
       </div>
     </SessionFrame>
