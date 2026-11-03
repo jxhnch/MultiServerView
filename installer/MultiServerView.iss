@@ -25,6 +25,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
+SetupIconFile=..\src\MultiServerView.App\Assetspp.ico
 UninstallDisplayIcon={app}\MultiServerView.exe
 
 [Languages]

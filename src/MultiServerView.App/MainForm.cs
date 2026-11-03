@@ -23,6 +23,7 @@ public sealed partial class MainForm : Form
     {
         _smokeDir = smokeDir;
         Text = "MultiServerView";
+        Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? Icon;
         Width = 1360;
         Height = 860;
         MinimumSize = new Size(960, 600);
