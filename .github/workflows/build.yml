@@ -62,6 +62,13 @@ jobs:
             # Ohne Gruppenmitgliedschaft fehlt dem Konto das Recht zur Netzwerk-Anmeldung (SSH)
             Add-LocalGroupMember -Group 'Users' -Member msvtest
             Start-Service sshd
+            # Das Runner-Image beschränkt SSH per AllowGroups - die Gruppe des Testbenutzers dazunehmen
+            $cfg = 'C:\ProgramData\ssh\sshd_config'
+            $lines = Get-Content $cfg
+            ($lines | Where-Object { $_ -match '^\s*(AllowGroups|AllowUsers|DenyGroups|DenyUsers|PasswordAuthentication)' }) | ForEach-Object { "sshd_config: $_" }
+            $lines = $lines | ForEach-Object { if ($_ -match '^\s*AllowGroups') { $_ + ' users' } else { $_ } }
+            Set-Content $cfg $lines
+            Restart-Service sshd
             "sshd: " + (Get-Service sshd).Status
             "MSV_SMOKE_SSH=127.0.0.1:22:msvtest:$pw" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           } catch { "OpenSSH-Server nicht verfügbar: $_" }
