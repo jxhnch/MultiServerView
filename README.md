@@ -2,7 +2,28 @@
 
 **One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows. Source-available: free to use, contributions welcome.
 
-![Hosts](docs/screenshots/hosts.png)
+<table>
+  <tr>
+    <td><a href="docs/screenshots/hosts.png"><img src="docs/screenshots/hosts.png" alt="Hosts" width="300"></a></td>
+    <td><a href="docs/screenshots/terminal.png"><img src="docs/screenshots/terminal.png" alt="Terminal" width="300"></a></td>
+    <td><a href="docs/screenshots/sftp.png"><img src="docs/screenshots/sftp.png" alt="SFTP" width="300"></a></td>
+  </tr>
+  <tr>
+    <td align="center">Hosts and workspaces</td>
+    <td align="center">SSH terminal</td>
+    <td align="center">SFTP</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/import.png"><img src="docs/screenshots/import.png" alt="Import" width="300"></a></td>
+    <td><a href="docs/screenshots/forwards.png"><img src="docs/screenshots/forwards.png" alt="Port forwarding" width="300"></a></td>
+    <td><a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Settings" width="300"></a></td>
+  </tr>
+  <tr>
+    <td align="center">Import</td>
+    <td align="center">Port forwarding</td>
+    <td align="center">Settings</td>
+  </tr>
+</table>
 
 ## Features
 
@@ -14,10 +35,6 @@
 - **Jump hosts** – chain one or more SSH hosts for SSH, SFTP, tunnels, VNC and RDP.
 - **Port forwarding** – local (-L), remote (-R) and SOCKS5 (-D), start/stop with one click.
 - **Split view** – several terminals side by side in one tab, with broadcast (type once, send to all).
-
-![Terminal](docs/screenshots/terminal.png)
-
-![SFTP](docs/screenshots/sftp.png)
 
 ### Organize
 - **Workspaces** – one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
@@ -31,14 +48,10 @@ Bring your servers with you. Duplicates are skipped, existing hosts stay untouch
 - **VMware Workstation** – reads your VM library, including addresses from running VMs and the VMware DHCP leases.
 - **mRemoteNG**, **OpenSSH config** (`~/.ssh/config`), **PuTTY** (directly from Windows or a `.reg` file) and **CSV**.
 
-![Import](docs/screenshots/import.png)
-
 ### Protect and sync
 - **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
 - **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
 - **Clear vault** – wipe everything with three confirmation steps. Change the master password, set an auto-lock, back up the vault.
-
-![Settings](docs/screenshots/settings.png)
 
 ## Download and install
 
