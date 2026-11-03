@@ -1,0 +1,26 @@
+MultiServerView Source-Available License
+
+Copyright (c) 2026 jxhnch. All rights reserved.
+
+1. You may download, build and run MultiServerView for your own personal or
+   internal business use, free of charge.
+
+2. You may read the source code and contribute changes to the official
+   repository (https://github.com/jxhnch/MultiServerView) through pull
+   requests. By submitting a contribution you grant the copyright holder the
+   right to use, modify and distribute it as part of MultiServerView.
+
+3. You may NOT, without prior written permission of the copyright holder:
+   a) publish, host or distribute MultiServerView or modified versions of it
+      (including forks, rebuilt binaries, installers or derived products),
+      except for the technical forks GitHub itself creates in order to prepare
+      a pull request to the official repository;
+   b) sell, sublicense or offer it as a service;
+   c) remove or alter this license or the copyright notice.
+
+4. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE
+   COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY
+   ARISING FROM THE USE OF THE SOFTWARE.
+
+Third-party components (SSH.NET, xterm.js, noVNC, React and others) are
+licensed under their own terms.

@@ -1,6 +1,6 @@
 # MultiServerView
 
-**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows, open source.
+**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows. Source-available: free to use, contributions welcome.
 
 ![Hosts](docs/screenshots/hosts.png)
 
@@ -155,6 +155,10 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 - The mRemoteNG import does not take over passwords (mRemoteNG encrypts them itself). There is no Termius import.
 - No Telnet/Serial/Mosh, no AI autocomplete, no teams. See the [comparison with Termius](docs/comparison-with-termius.md).
 - Windows only.
+
+## License and contributing
+
+Free to use, build and run for yourself. Pull requests to this repository are welcome. Publishing your own fork, rebuilt binaries or a derived product is not allowed. See [LICENSE](LICENSE) for the exact terms. This is a source-available license, not an OSI "open source" license.
 
 ## Inspiration and vibe coding
 
