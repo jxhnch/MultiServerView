@@ -425,7 +425,7 @@ function Sidebar(props: {
   const favorites = shown.filter((s) => s.favorite);
   const grouped = useMemo(() => {
     const m = new Map<string, Server[]>();
-    for (const s of [...shown].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const s of [...shown].filter((x) => !x.favorite).sort((a, b) => a.name.localeCompare(b.name))) {
       const g = s.group || 'Ohne Gruppe';
       m.set(g, [...(m.get(g) ?? []), s]);
     }

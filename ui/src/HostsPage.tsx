@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { IconEdit, IconPlus, IconServer, IconStar, IconUpload, ProtocolIcon } from './Icons';
-import { filterServers, recency, timeAgo } from './search';
+import { filterServers, timeAgo } from './search';
 import { PROTOCOL_LABEL, type Protocol, type Server } from './types';
 
 export function HostsPage({
@@ -28,10 +28,15 @@ export function HostsPage({
     return proto === 'all' ? base : base.filter((s) => s.protocol === proto);
   }, [servers, query, proto]);
 
-  const recent = useMemo(
-    () => (query || proto !== 'all' ? [] : [...servers].filter((s) => s.lastUsed).sort((a, b) => recency(b) - recency(a)).slice(0, 4)),
-    [servers, query, proto],
-  );
+  // Jeder Host genau einmal, gruppiert (wie Ordner). "Ohne Gruppe" kommt zuletzt.
+  const grouped = useMemo(() => {
+    const m = new Map<string, Server[]>();
+    for (const s of filtered) {
+      const g = s.group || 'Ohne Gruppe';
+      m.set(g, [...(m.get(g) ?? []), s]);
+    }
+    return [...m.entries()].sort(([a], [b]) => (a === 'Ohne Gruppe' ? 1 : b === 'Ohne Gruppe' ? -1 : a.localeCompare(b)));
+  }, [filtered]);
 
   const counts = useMemo(
     () => ({
@@ -126,15 +131,15 @@ export function HostsPage({
             ))}
           </div>
 
-          {recent.length > 0 && (
-            <>
-              <h2 className="sec">Zuletzt benutzt</h2>
-              <div className="grid">{recent.map(card)}</div>
-            </>
-          )}
-
-          <h2 className="sec">{query ? `Treffer für «${query}»` : 'Alle Hosts'}</h2>
-          {filtered.length === 0 ? <p className="muted">Kein Host gefunden.</p> : <div className="grid">{filtered.map(card)}</div>}
+          {filtered.length === 0 && <p className="muted">Kein Host gefunden.</p>}
+          {grouped.map(([g, list]) => (
+            <section key={g} className="group-block">
+              <h2 className="sec">
+                {g} <span className="count">{list.length}</span>
+              </h2>
+              <div className="grid">{list.map(card)}</div>
+            </section>
+          ))}
         </>
       )}
     </div>
