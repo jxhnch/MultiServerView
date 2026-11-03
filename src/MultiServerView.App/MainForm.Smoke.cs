@@ -348,6 +348,22 @@ public sealed partial class MainForm
         // 8b. Echter SSH-Server (OpenSSH unter Windows): Terminal, SFTP, Jump Host, Port Forwarding durch die komplette C#-Schicht
         await SmokeSshAsync();
 
+        // 8c. RDP-Control schliessen, während es noch verbindet (typischer Fall: Tab vorschnell zumachen) - wie lange blockiert die Oberfläche?
+        try
+        {
+            var rdp2 = await Call("servers.save", new { name = "smoke-rdp2", host = "127.0.0.1", port = 3389, protocol = "rdp", username = "admin", password = "x" });
+            await Call("rdp.open", new { sessionId = "smoke-rdp-2", serverId = rdp2.GetProperty("id").GetString(), x = 0, y = 100, w = 800, h = 500 });
+            await Task.Delay(400);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await Call("rdp.close", new { sessionId = "smoke-rdp-2" });
+            sw.Stop();
+            Check("RDP: Schliessen während des Verbindens blockiert nicht lange", sw.ElapsedMilliseconds < 2500, $"{sw.ElapsedMilliseconds} ms gesamt ({_rdp.LastCloseTimings})");
+        }
+        catch (Exception ex)
+        {
+            Check("RDP: Schliessen während des Verbindens", false, ex.Message);
+        }
+
         // 9. Zurück, Fenster bleibt bedienbar
         await Js("[...document.querySelectorAll('.tab')].find(e => e.textContent.includes('Hosts')).click()");
         Check("Zurück zur Hosts-Ansicht", await WaitFor("document.querySelector('.searchbar')"));

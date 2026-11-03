@@ -22,6 +22,9 @@ internal sealed class RdpManager : IRdpController, IDisposable
     private readonly System.Windows.Forms.Timer _poll = new() { Interval = 500 };
     private bool _suspended;
 
+    /// <summary>Messwerte des letzten Schliessens (für den Selbsttest).</summary>
+    public string LastCloseTimings { get; private set; } = "";
+
     public RdpManager(Control owner, Action<object> emit, Func<AppSettings> settings)
     {
         _owner = owner;
@@ -196,9 +199,13 @@ internal sealed class RdpManager : IRdpController, IDisposable
         if (!_sessions.Remove(id, out var s)) return;
         s.ResizeTimer?.Stop();
         s.ResizeTimer?.Dispose();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         if (disconnect) Try(() => { if (Convert.ToInt32(s.Ocx.Connected) != 0) s.Ocx.Disconnect(); });
+        var tDisconnect = sw.ElapsedMilliseconds;
+        s.Host.Visible = false;
         _owner.Controls.Remove(s.Host);
         s.Host.Dispose();
+        LastCloseTimings = $"Abmelden {tDisconnect} ms, Freigeben {sw.ElapsedMilliseconds - tDisconnect} ms";
     }
 
     private void Poll()
