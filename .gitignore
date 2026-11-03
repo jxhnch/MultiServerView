@@ -1,0 +1,13 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# UI
+ui/node_modules/
+src/MultiServerView.App/wwwroot/
+
+# lokale Vault-Dateien nie committen
+*.msv
+*.msv.tmp

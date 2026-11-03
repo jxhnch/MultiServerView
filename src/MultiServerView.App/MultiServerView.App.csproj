@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>MultiServerView</AssemblyName>
+    <RootNamespace>MultiServerView.App</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+    <ProjectReference Include="..\MultiServerView.Core\MultiServerView.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Das gebaute UI (ui/ -> wwwroot) wird mit in den Output kopiert. -->
+  <ItemGroup>
+    <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Baut das React-UI automatisch, falls wwwroot noch fehlt (braucht Node.js >= 18). -->
+  <Target Name="BuildUi" BeforeTargets="BeforeBuild" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')">
+    <Message Importance="high" Text="wwwroot fehlt - baue UI (npm ci + npm run build)..." />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\..\ui" Command="npm ci" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\..\ui" Command="npm run build" />
+    <ItemGroup>
+      <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
+</Project>
