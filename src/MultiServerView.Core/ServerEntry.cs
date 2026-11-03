@@ -7,6 +7,12 @@ public enum Protocol
     Vnc
 }
 
+public enum AuthMethod
+{
+    Password,
+    Key
+}
+
 /// <summary>Ein Server-Eintrag im Vault. Wird 1:1 als JSON mit dem UI ausgetauscht (camelCase).</summary>
 public sealed class ServerEntry
 {
@@ -20,11 +26,20 @@ public sealed class ServerEntry
     /// <summary>Liegt nur verschlüsselt im Vault (nie im Klartext auf der Platte oder in der Cloud).</summary>
     public string Password { get; set; } = "";
 
+    /// <summary>Nur SSH: Passwort oder Key.</summary>
+    public AuthMethod Auth { get; set; } = AuthMethod.Password;
+
+    /// <summary>Id eines <see cref="KeyEntry"/> (nur bei Auth = Key).</summary>
+    public string KeyId { get; set; } = "";
+
     public string Group { get; set; } = "";
     public List<string> Tags { get; set; } = new();
     public bool Favorite { get; set; }
     public DateTimeOffset? LastUsed { get; set; }
     public string Notes { get; set; } = "";
+
+    /// <summary>Wird bei jeder Änderung gesetzt. Grundlage für den Cloud-Merge (neuester Stand gewinnt).</summary>
+    public DateTimeOffset UpdatedAt { get; set; }
 
     public static int DefaultPort(Protocol protocol) => protocol switch
     {
@@ -33,4 +48,21 @@ public sealed class ServerEntry
         Protocol.Vnc => 5900,
         _ => 0
     };
+}
+
+/// <summary>Ein privater SSH-Schlüssel im Vault ("Keychain").</summary>
+public sealed class KeyEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "";
+
+    /// <summary>Privater Schlüssel im Klartext (PEM / OpenSSH). Nur im verschlüsselten Vault.</summary>
+    public string PrivateKey { get; set; } = "";
+
+    public string Passphrase { get; set; } = "";
+
+    /// <summary>Anzeigehilfe, z. B. "ED25519", "RSA".</summary>
+    public string Kind { get; set; } = "";
+
+    public DateTimeOffset UpdatedAt { get; set; }
 }

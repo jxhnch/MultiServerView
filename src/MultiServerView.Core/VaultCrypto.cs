@@ -17,6 +17,12 @@ public sealed class VaultKey
     public int Iterations { get; }
 }
 
+/// <summary>Der Blob wurde mit einem anderen Salt verschlüsselt (anderer Vault).</summary>
+public sealed class VaultMismatchException : CryptographicException
+{
+    public VaultMismatchException() : base("Dieser Vault gehört zu einer anderen Installation (anderer Salt).") { }
+}
+
 /// <summary>
 /// Verschlüsselung des Vaults: PBKDF2-SHA256 (Passwort -> Key) + AES-256-GCM.
 /// Dateiformat: "MSV1" | iterations(int32 LE) | salt(16) | nonce(12) | tag(16) | ciphertext.
@@ -62,6 +68,25 @@ public static class VaultCrypto
     /// <summary>Entschlüsselt. Wirft <see cref="CryptographicException"/> bei falschem Passwort oder manipulierter Datei.</summary>
     public static byte[] Open(byte[] blob, string password, out VaultKey key)
     {
+        var (iterations, salt) = ReadHeader(blob);
+        key = Derive(password, salt, iterations);
+        return Decrypt(blob, key);
+    }
+
+    /// <summary>
+    /// Entschlüsselt mit einem schon abgeleiteten Key (z. B. für Cloud-Blobs).
+    /// Wirft <see cref="VaultMismatchException"/>, wenn Salt/Iterationen nicht zum Key passen.
+    /// </summary>
+    public static byte[] OpenWithKey(byte[] blob, VaultKey key)
+    {
+        var (iterations, salt) = ReadHeader(blob);
+        if (iterations != key.Iterations || !salt.AsSpan().SequenceEqual(key.Salt))
+            throw new VaultMismatchException();
+        return Decrypt(blob, key);
+    }
+
+    private static (int iterations, byte[] salt) ReadHeader(byte[] blob)
+    {
         if (blob.Length < HeaderSize + NonceSize + TagSize || !blob.AsSpan(0, 4).SequenceEqual(Magic))
             throw new CryptographicException("Keine gültige Vault-Datei.");
 
@@ -69,9 +94,11 @@ public static class VaultCrypto
         if (iterations < 100_000 || iterations > 10_000_000)
             throw new CryptographicException("Ungültige Vault-Datei (Iterationen).");
 
-        var salt = blob.AsSpan(8, SaltSize).ToArray();
-        key = Derive(password, salt, iterations);
+        return (iterations, blob.AsSpan(8, SaltSize).ToArray());
+    }
 
+    private static byte[] Decrypt(byte[] blob, VaultKey key)
+    {
         var header = blob.AsSpan(0, HeaderSize).ToArray();
         var nonce = blob.AsSpan(HeaderSize, NonceSize);
         var tag = blob.AsSpan(HeaderSize + NonceSize, TagSize);
