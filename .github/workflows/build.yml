@@ -59,6 +59,8 @@ jobs:
             if ($cap.State -ne 'Installed') { Add-WindowsCapability -Online -Name $cap.Name | Out-Null }
             $pw = 'Smoke-Test-Pw-123!'
             New-LocalUser -Name msvtest -Password (ConvertTo-SecureString $pw -AsPlainText -Force) -PasswordNeverExpires | Out-Null
+            # Ohne Gruppenmitgliedschaft fehlt dem Konto das Recht zur Netzwerk-Anmeldung (SSH)
+            Add-LocalGroupMember -Group 'Users' -Member msvtest
             Start-Service sshd
             "sshd: " + (Get-Service sshd).Status
             "MSV_SMOKE_SSH=127.0.0.1:22:msvtest:$pw" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -89,6 +91,13 @@ jobs:
             for ($i = 0; $i -lt $b64.Length; $i += 3000) { "PNGDATA " + $b64.Substring($i, [Math]::Min(3000, $b64.Length - $i)) }
             "===ENDPNG==="
           }
+
+      - name: Diagnose OpenSSH (nur bei Fehler)
+        if: failure()
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object { "$($_.TimeCreated) $($_.Message)" }
 
       - uses: actions/upload-artifact@v4
         if: always()
