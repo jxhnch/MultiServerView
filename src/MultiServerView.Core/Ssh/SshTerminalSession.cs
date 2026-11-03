@@ -13,6 +13,8 @@ public sealed class SshTerminalSession : IDisposable
     private readonly ServerEntry _server;
     private readonly KeyEntry? _key;
     private readonly Func<string, int, string, HostKeyTrust> _checkHostKey;
+    private readonly JumpResolver? _jumps;
+    private JumpTunnel? _tunnel;
     private SshClient? _client;
     private ShellStream? _shell;
     private int _closedRaised;
@@ -26,8 +28,9 @@ public sealed class SshTerminalSession : IDisposable
     /// <summary>Wird einmalig beim ersten Kontakt mit einem Host gemeldet (Info für den Benutzer).</summary>
     public event Action<string>? Info;
 
-    public SshTerminalSession(ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> checkHostKey)
+    public SshTerminalSession(ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> checkHostKey, JumpResolver? jumps = null)
     {
+        _jumps = jumps;
         _server = server;
         _key = key;
         _checkHostKey = checkHostKey;
@@ -35,8 +38,9 @@ public sealed class SshTerminalSession : IDisposable
 
     public async Task ConnectAsync(uint columns, uint rows, CancellationToken ct = default)
     {
-        var info = SshConnector.BuildConnectionInfo(_server, _key);
-        var client = new SshClient(info) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+        var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _checkHostKey, ct);
+        var info = SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port);
+        var client = new SshClient(info) { KeepAliveInterval = SshConnector.KeepAlive };
         var hostKeyError = SshConnector.HookHostKey(client, _server, _checkHostKey, m => Info?.Invoke(m));
 
         try
@@ -46,8 +50,10 @@ public sealed class SshTerminalSession : IDisposable
         catch (Exception ex)
         {
             client.Dispose();
+            tunnel?.Dispose();
             throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
         }
+        _tunnel = tunnel;
 
         _client = client;
         _shell = client.CreateShellStream("xterm-256color", columns, rows, 0, 0, 16384);
@@ -88,8 +94,10 @@ public sealed class SshTerminalSession : IDisposable
     {
         try { _shell?.Dispose(); } catch { /* egal beim Aufräumen */ }
         try { _client?.Dispose(); } catch { /* egal beim Aufräumen */ }
+        try { _tunnel?.Dispose(); } catch { /* egal beim Aufräumen */ }
         _shell = null;
         _client = null;
+        _tunnel = null;
     }
 
     private void RaiseClosed(string? reason)

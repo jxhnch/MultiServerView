@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MultiServerView.Core.Sync;
 
 public enum SyncOutcome
@@ -90,7 +92,8 @@ public sealed class SyncService
         {
             throw new SyncException(
                 "Der Vault in der Cloud passt nicht zu diesem Gerät (anderes Master-Passwort oder getrennt erstellt). " +
-                "Auf einem neuen Gerät: «Aus Cloud laden» statt einen neuen Vault zu erstellen.");
+                "Auf einem neuen Gerät: «Aus Cloud laden» statt einen neuen Vault zu erstellen. " +
+                "Falls du das Master-Passwort auf einem anderen Gerät geändert hast: «Neues Master-Passwort übernehmen» (Cloud-Seite).");
         }
 
         var local = _store.Snapshot();
@@ -124,6 +127,65 @@ public sealed class SyncService
         _store.InstallBlob(remote.Blob);
         cfg.LastSync = DateTimeOffset.UtcNow;
         _settings.Save(cfg);
+    }
+
+    /// <summary>
+    /// Überschreibt den Cloud-Vault mit dem lokalen Stand (nötig nach einem Wechsel des Master-Passworts, weil der
+    /// Cloud-Blob dann mit dem alten Schlüssel verschlüsselt ist). Andere Geräte müssen das neue Passwort übernehmen.
+    /// </summary>
+    public async Task ForceUploadAsync(CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var cfg = _settings.Load();
+            if (!cfg.IsConfigured) throw new SyncException("Die Cloud ist noch nicht eingerichtet.");
+            var client = _clientFactory(cfg);
+            var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
+            var remote = await client.GetVaultAsync(token, ct);
+            if (remote == null) await client.InsertVaultAsync(token, _store.ExportBlob(), ct);
+            else if (await client.UpdateVaultAsync(token, remote.Version, _store.ExportBlob(), ct) == null)
+                throw new SyncException("Die Cloud wurde gerade von einem anderen Gerät geändert. Bitte nochmal versuchen.");
+            cfg.LastSync = DateTimeOffset.UtcNow;
+            _settings.Save(cfg);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Für Geräte, die noch das alte Master-Passwort haben: lädt den Cloud-Vault, öffnet ihn mit dem NEUEN Passwort,
+    /// führt ihn mit dem lokalen Stand zusammen und übernimmt den neuen Schlüssel.
+    /// </summary>
+    public async Task AdoptCloudPasswordAsync(string newPassword, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var cfg = _settings.Load();
+            if (!cfg.IsConfigured) throw new SyncException("Die Cloud ist noch nicht eingerichtet.");
+            var client = _clientFactory(cfg);
+            var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
+            var remote = await client.GetVaultAsync(token, ct) ?? throw new SyncException("In der Cloud liegt noch kein Vault.");
+
+            VaultData remoteData;
+            VaultKey key;
+            try
+            {
+                remoteData = JsonSerializer.Deserialize<VaultData>(VaultCrypto.Open(remote.Blob, newPassword, out key), Json.Options) ?? new VaultData();
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                throw new WrongPasswordException();
+            }
+            _store.Rekey(key, VaultMerge.Merge(_store.Snapshot(), remoteData));
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     /// <summary>Prüft nur, ob die Zugangsdaten stimmen und die Tabelle existiert.</summary>

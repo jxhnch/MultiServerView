@@ -10,14 +10,17 @@ public sealed class ForwardRunner : IDisposable
     private readonly ServerEntry _server;
     private readonly KeyEntry? _key;
     private readonly Func<string, int, string, HostKeyTrust> _check;
+    private readonly JumpResolver? _jumps;
+    private JumpTunnel? _tunnel;
     private SshClient? _client;
     private int _stopped;
 
     /// <summary>Weiterleitung wurde beendet (Grund oder null bei normalem Stopp).</summary>
     public event Action<string?>? Stopped;
 
-    public ForwardRunner(PortForwardEntry rule, ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check)
+    public ForwardRunner(PortForwardEntry rule, ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check, JumpResolver? jumps = null)
     {
+        _jumps = jumps;
         _rule = rule;
         _server = server;
         _key = key;
@@ -30,7 +33,8 @@ public sealed class ForwardRunner : IDisposable
         if (_rule.Type != ForwardType.Dynamic && (string.IsNullOrWhiteSpace(_rule.DestHost) || _rule.DestPort is < 1 or > 65535))
             throw new ArgumentException("Ziel-Adresse und Ziel-Port fehlen.");
 
-        var client = new SshClient(SshConnector.BuildConnectionInfo(_server, _key)) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+        var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check);
+        var client = new SshClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
         var hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
         try
         {
@@ -39,8 +43,10 @@ public sealed class ForwardRunner : IDisposable
         catch (Exception ex)
         {
             client.Dispose();
+            tunnel?.Dispose();
             throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
         }
+        _tunnel = tunnel;
 
         var bind = string.IsNullOrWhiteSpace(_rule.BindHost) ? "127.0.0.1" : _rule.BindHost.Trim();
         ForwardedPort port = _rule.Type switch
@@ -69,6 +75,7 @@ public sealed class ForwardRunner : IDisposable
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
         try { _client?.Dispose(); } catch { /* egal beim Aufräumen */ }
+        try { _tunnel?.Dispose(); } catch { /* egal beim Aufräumen */ }
         Stopped?.Invoke(reason);
     }
 
@@ -87,11 +94,11 @@ public sealed class PortForwardManager : IDisposable
 
     public IReadOnlyCollection<string> RunningIds => _running.Keys.ToList();
 
-    public async Task StartAsync(PortForwardEntry rule, ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check)
+    public async Task StartAsync(PortForwardEntry rule, ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check, JumpResolver? jumps = null)
     {
         if (_running.ContainsKey(rule.Id)) return;
 
-        var runner = new ForwardRunner(rule, server, key, check);
+        var runner = new ForwardRunner(rule, server, key, check, jumps);
         runner.Stopped += reason =>
         {
             if (_running.TryGetValue(rule.Id, out var current) && ReferenceEquals(current, runner)) _running.TryRemove(rule.Id, out _);

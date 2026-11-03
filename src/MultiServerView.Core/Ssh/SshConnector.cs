@@ -13,7 +13,11 @@ public sealed class SshConnectException : Exception
 /// <summary>Gemeinsame Bausteine für alles, was eine SSH-Verbindung aufbaut (Terminal, SFTP, Port-Weiterleitung).</summary>
 public static class SshConnector
 {
-    public static ConnectionInfo BuildConnectionInfo(ServerEntry server, KeyEntry? key)
+    /// <summary>Globale Verbindungs-Einstellungen (aus den App-Einstellungen).</summary>
+    public static TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(15);
+    public static TimeSpan KeepAlive { get; set; } = TimeSpan.FromSeconds(30);
+
+    public static ConnectionInfo BuildConnectionInfo(ServerEntry server, KeyEntry? key, string? hostOverride = null, int? portOverride = null)
     {
         var user = string.IsNullOrWhiteSpace(server.Username) ? Environment.UserName : server.Username;
         var methods = new List<AuthenticationMethod>();
@@ -37,9 +41,9 @@ public static class SshConnector
             methods.Add(kbd);
         }
 
-        return new ConnectionInfo(server.Host, server.Port > 0 ? server.Port : 22, user, methods.ToArray())
+        return new ConnectionInfo(hostOverride ?? server.Host, portOverride ?? (server.Port > 0 ? server.Port : 22), user, methods.ToArray())
         {
-            Timeout = TimeSpan.FromSeconds(15)
+            Timeout = ConnectTimeout
         };
     }
 

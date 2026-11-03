@@ -10,10 +10,13 @@ public sealed class SftpSession : IDisposable
     private readonly ServerEntry _server;
     private readonly KeyEntry? _key;
     private readonly Func<string, int, string, HostKeyTrust> _check;
+    private readonly JumpResolver? _jumps;
+    private JumpTunnel? _tunnel;
     private SftpClient? _client;
 
-    public SftpSession(ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check)
+    public SftpSession(ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check, JumpResolver? jumps = null)
     {
+        _jumps = jumps;
         _server = server;
         _key = key;
         _check = check;
@@ -23,7 +26,8 @@ public sealed class SftpSession : IDisposable
 
     public async Task<string> ConnectAsync()
     {
-        var client = new SftpClient(SshConnector.BuildConnectionInfo(_server, _key)) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+        var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check);
+        var client = new SftpClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
         var hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
         try
         {
@@ -32,9 +36,11 @@ public sealed class SftpSession : IDisposable
         catch (Exception ex)
         {
             client.Dispose();
+            tunnel?.Dispose();
             throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
         }
         _client = client;
+        _tunnel = tunnel;
         return client.WorkingDirectory;
     }
 
@@ -208,6 +214,8 @@ public sealed class SftpSession : IDisposable
     public void Dispose()
     {
         try { _client?.Dispose(); } catch { /* egal beim Aufräumen */ }
+        try { _tunnel?.Dispose(); } catch { /* egal beim Aufräumen */ }
         _client = null;
+        _tunnel = null;
     }
 }

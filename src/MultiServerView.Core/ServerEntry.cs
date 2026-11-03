@@ -32,6 +32,9 @@ public sealed class ServerEntry : IVaultItem
     /// <summary>Id eines <see cref="KeyEntry"/> (nur bei Auth = Key).</summary>
     public string KeyId { get; set; } = "";
 
+    /// <summary>Optional: Verbindung läuft über diesen SSH-Host (Jump Host / Host-Chain). Der Jump-Host kann selbst wieder einen haben.</summary>
+    public string JumpHostId { get; set; } = "";
+
     /// <summary>Optional: Zugangsdaten aus einer <see cref="IdentityEntry"/> (überschreiben Benutzer/Passwort/Key).</summary>
     public string IdentityId { get; set; } = "";
 

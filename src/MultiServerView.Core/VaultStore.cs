@@ -84,6 +84,53 @@ public sealed class VaultStore
         }
     }
 
+    /// <summary>
+    /// Ändert das Master-Passwort (neuer Salt, neuer Schlüssel). Der Vault muss entsperrt sein.
+    /// Wirft <see cref="WrongPasswordException"/>, wenn das alte Passwort nicht stimmt.
+    /// </summary>
+    public void ChangePassword(string oldPassword, string newPassword)
+    {
+        if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 8)
+            throw new ArgumentException("Das neue Master-Passwort muss mindestens 8 Zeichen haben.");
+
+        lock (_gate)
+        {
+            Data();
+            try
+            {
+                VaultCrypto.Open(File.ReadAllBytes(_path), oldPassword, out _);
+            }
+            catch (AuthenticationTagMismatchException)
+            {
+                throw new WrongPasswordException();
+            }
+            _key = VaultCrypto.Derive(newPassword);
+            Save();
+        }
+    }
+
+    /// <summary>Ersetzt Schlüssel und Inhalt (z. B. wenn ein anderes Gerät das Master-Passwort geändert hat).</summary>
+    public void Rekey(VaultKey key, VaultData data)
+    {
+        lock (_gate)
+        {
+            Data();
+            _key = key;
+            _data = data;
+            Save();
+        }
+    }
+
+    /// <summary>Kopiert die verschlüsselte Vault-Datei als Backup. Enthält nur verschlüsselte Daten.</summary>
+    public void ExportTo(string path)
+    {
+        lock (_gate)
+        {
+            Data();
+            File.Copy(_path, path, overwrite: true);
+        }
+    }
+
     /// <summary>Schreibt einen aus der Cloud geladenen Blob als lokalen Vault (nur wenn noch keiner existiert).</summary>
     public void InstallBlob(byte[] blob)
     {
