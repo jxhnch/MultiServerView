@@ -5,8 +5,8 @@ using Renci.SshNet.Common;
 namespace MultiServerView.Core.Ssh;
 
 /// <summary>
-/// Eine interaktive SSH-Shell (PTY). Daten kommen als rohe Bytes raus und gehen als rohe Bytes rein -
-/// das Terminal selbst (xterm.js) sitzt im UI.
+/// An interactive SSH shell (PTY). Data comes out as raw bytes and goes in as raw bytes -
+/// the terminal itself (xterm.js) lives in the UI.
 /// </summary>
 public sealed class SshTerminalSession : IDisposable
 {
@@ -19,13 +19,13 @@ public sealed class SshTerminalSession : IDisposable
     private ShellStream? _shell;
     private int _closedRaised;
 
-    /// <summary>Neue Ausgabe vom Server.</summary>
+    /// <summary>New output from the server.</summary>
     public event Action<byte[]>? Data;
 
-    /// <summary>Sitzung wurde beendet (Grund oder null bei normalem Ende).</summary>
+    /// <summary>The session ended (reason, or null on a normal end).</summary>
     public event Action<string?>? Closed;
 
-    /// <summary>Wird einmalig beim ersten Kontakt mit einem Host gemeldet (Info für den Benutzer).</summary>
+    /// <summary>Reported once on first contact with a host (info for the user).</summary>
     public event Action<string>? Info;
 
     public SshTerminalSession(ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> checkHostKey, JumpResolver? jumps = null)
@@ -86,15 +86,15 @@ public sealed class SshTerminalSession : IDisposable
         }
         catch (Exception ex) when (ex is ObjectDisposedException or SshException or InvalidOperationException)
         {
-            // Fenstergrösse ändern ist nicht kritisch
+            // Resizing the window is not critical
         }
     }
 
     public void Dispose()
     {
-        try { _shell?.Dispose(); } catch { /* egal beim Aufräumen */ }
-        try { _client?.Dispose(); } catch { /* egal beim Aufräumen */ }
-        try { _tunnel?.Dispose(); } catch { /* egal beim Aufräumen */ }
+        try { _shell?.Dispose(); } catch { /* does not matter during cleanup */ }
+        try { _client?.Dispose(); } catch { /* does not matter during cleanup */ }
+        try { _tunnel?.Dispose(); } catch { /* does not matter during cleanup */ }
         _shell = null;
         _client = null;
         _tunnel = null;
@@ -105,7 +105,7 @@ public sealed class SshTerminalSession : IDisposable
         if (Interlocked.Exchange(ref _closedRaised, 1) == 0) Closed?.Invoke(reason);
     }
 
-    /// <summary>Führt auf einem zweiten Kanal der laufenden Verbindung einen Befehl aus (z. B. Betriebssystem erkennen).</summary>
+    /// <summary>Runs a command on a second channel of the running connection (e.g. to detect the operating system).</summary>
     public async Task<string?> RunCommandAsync(string command, TimeSpan timeout)
     {
         var client = _client;
@@ -117,7 +117,7 @@ public sealed class SshTerminalSession : IDisposable
                 using var cmd = client.CreateCommand(command);
                 cmd.CommandTimeout = timeout;
                 var stdout = cmd.Execute();
-                // Fehlerkanal mitlesen: Windows-Server melden dort, dass "cat" unbekannt ist (daran erkennen wir sie).
+                // Also read the error channel: Windows servers report there that "cat" is unknown (that is how we recognize them).
                 return string.IsNullOrWhiteSpace(cmd.Error) ? stdout : stdout + "\n" + cmd.Error;
             });
         }
@@ -127,13 +127,13 @@ public sealed class SshTerminalSession : IDisposable
         }
     }
 
-    /// <summary>Erkennt das Betriebssystem des Servers ("debian", "ubuntu", "linux", "macos", ...) oder "" bei Misserfolg.</summary>
+    /// <summary>Detects the operating system of the server ("debian", "ubuntu", "linux", "macos", ...) or "" on failure.</summary>
     public async Task<string> DetectOsAsync()
     {
         var output = await RunCommandAsync(OsDetector.ProbeCommand, TimeSpan.FromSeconds(5));
         return output == null ? "" : OsDetector.Parse(output);
     }
 
-    /// <summary>Liest einen privaten Key (OpenSSH / PEM). Wirft <see cref="SshConnectException"/> bei Fehlern.</summary>
+    /// <summary>Reads a private key (OpenSSH / PEM). Throws <see cref="SshConnectException"/> on errors.</summary>
     public static PrivateKeyFile LoadKey(KeyEntry key) => SshConnector.LoadKey(key);
 }

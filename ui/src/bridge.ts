@@ -1,3 +1,4 @@
+import type { Credentials } from './PasswordPrompt';
 import {
   DEFAULT_PORT,
   type BrowseResult,
@@ -12,15 +13,19 @@ import {
   type Server,
   type Snippet,
   type SyncInfo,
+  type ProxmoxCert,
+  type ProxmoxInfo,
+  type ProxmoxVmInfo,
+  type VmwareVmInfo,
 } from './types';
 
 /**
- * Verbindung zum C#-Host (WebView2). Im normalen Browser (npm run dev) gibt es den Host nicht -
- * dann läuft eine Mock-Version mit localStorage und einer Demo-Shell, damit man das UI ohne Windows
- * entwickeln kann. ACHTUNG: Der Mock speichert unverschlüsselt und ist nur für die Entwicklung gedacht.
+ * Connection to the C# host (WebView2). In a normal browser (npm run dev) there is no host -
+ * so a mock version with localStorage and a demo shell runs instead, which lets you develop the UI without Windows.
+ * WARNING: the mock stores data unencrypted and is meant for development only.
  */
 
-// ---------------------------------------------------------------- Events vom Host
+// ---------------------------------------------------------------- Events from the host
 
 export type HostEvent =
   | { event: 'ssh.data'; sessionId: string; data: string }
@@ -30,18 +35,19 @@ export type HostEvent =
   | { event: 'sync.status'; state: 'off' | 'syncing' | 'ok' | 'error'; message: string; at?: string }
   | { event: 'forward.status'; ruleId: string; running: boolean; error: string | null }
   | { event: 'sftp.progress'; sessionId: string; transferId: string; name: string; done: number; total: number; finished: boolean }
+  | { event: 'window.state'; maximized: boolean }
   | { event: 'vault.changed' };
 
 const listeners = new Set<(e: HostEvent) => void>();
 
-/** Hört auf Events vom Host. Gibt die Abmelde-Funktion zurück. */
+/** Listens to events from the host. Returns the unsubscribe function. */
 export function onEvent(fn: (e: HostEvent) => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 const dispatch = (e: HostEvent) => listeners.forEach((l) => l(e));
 
-// ---------------------------------------------------------------- Base64-Helfer (Bytes <-> Text)
+// ---------------------------------------------------------------- Base64 helpers (bytes <-> text)
 
 export function toB64(text: string): string {
   const bytes = new TextEncoder().encode(text);
@@ -50,7 +56,7 @@ export function toB64(text: string): string {
   return btoa(bin);
 }
 
-/** Für xterm onBinary: jedes Zeichen ist ein Byte (0-255). */
+/** For xterm onBinary: every character is one byte (0-255). */
 export function binaryToB64(text: string): string {
   let bin = '';
   for (let i = 0; i < text.length; i++) bin += String.fromCharCode(text.charCodeAt(i) & 0xff);
@@ -101,7 +107,7 @@ function callNative<T>(method: string, params?: unknown): Promise<T> {
   });
 }
 
-// ---------------------------------------------------------------- Mock (nur Browser-Dev)
+// ---------------------------------------------------------------- Mock (browser dev only)
 
 interface MockState {
   password: string | null;
@@ -120,7 +126,11 @@ const MOCK_KEY = 'msv-mock-v3';
 function loadMock(): MockState {
   try {
     const raw = localStorage.getItem(MOCK_KEY);
-    if (raw) return { ...(JSON.parse(raw) as MockState), unlocked: false };
+    if (raw) {
+      const old = JSON.parse(raw) as MockState;
+      // Older demo data does not know "workspace" yet.
+      return { ...old, servers: old.servers.map((s) => ({ ...s, workspace: s.workspace ?? '', proxmoxRef: s.proxmoxRef ?? '', vmwareRef: s.vmwareRef ?? '' })), unlocked: false };
+    }
   } catch {
     /* ignore */
   }
@@ -134,7 +144,7 @@ function loadMock(): MockState {
     forwards: [],
     history: [],
     settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false },
-    sync: { configured: false, url: '', anonKey: '', email: '', hasPassword: false, lastSync: null },
+    sync: { configured: false, mode: 'folder', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSync: null },
   };
 }
 const mock = loadMock();
@@ -157,6 +167,9 @@ function demoServers(): Server[] {
     identityId: '',
     jumpHostId: '',
     os: '',
+    workspace: '',
+    proxmoxRef: '',
+    vmwareRef: '',
     group: '',
     tags: [],
     favorite: false,
@@ -166,9 +179,9 @@ function demoServers(): Server[] {
   });
   const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
   return [
-    mk({ name: 'web-prod-01', host: '10.0.10.11', protocol: 'ssh', username: 'deploy', group: 'Produktion', tags: ['nginx'], favorite: true, lastUsed: ago(5), os: 'debian' }),
-    mk({ name: 'db-prod-01', host: '10.0.10.21', protocol: 'ssh', username: 'postgres', group: 'Produktion', tags: ['postgres'], favorite: true, lastUsed: ago(90), os: 'ubuntu' }),
-    mk({ name: 'win-ad-01', host: '10.0.20.5', protocol: 'rdp', username: 'CORP\\Administrator', group: 'Produktion', tags: ['windows', 'ad'], lastUsed: ago(300) }),
+    mk({ name: 'web-prod-01', host: '10.0.10.11', protocol: 'ssh', username: 'deploy', group: 'Production', tags: ['nginx'], favorite: true, lastUsed: ago(5), os: 'debian' }),
+    mk({ name: 'db-prod-01', host: '10.0.10.21', protocol: 'ssh', username: 'postgres', group: 'Production', tags: ['postgres'], favorite: true, lastUsed: ago(90), os: 'ubuntu' }),
+    mk({ name: 'win-ad-01', host: '10.0.20.5', protocol: 'rdp', username: 'CORP\\Administrator', group: 'Production', tags: ['windows', 'ad'], lastUsed: ago(300) }),
     mk({ name: 'staging-web', host: 'staging.example.ch', protocol: 'ssh', username: 'ubuntu', group: 'Staging', tags: ['nginx'], os: 'alpine' }),
     mk({ name: 'staging-desktop', host: '10.0.30.8', protocol: 'vnc', group: 'Staging', tags: ['linux', 'xfce'] }),
     mk({ name: 'homelab-proxmox', host: '192.168.1.10', protocol: 'ssh', username: 'root', group: 'Homelab', favorite: true, lastUsed: ago(2000), os: 'proxmox' }),
@@ -177,7 +190,7 @@ function demoServers(): Server[] {
   ];
 }
 
-// Demo-Shell, damit man im Browser ein "Terminal" sieht
+// Demo shell so a "terminal" is visible in the browser
 const mockShells = new Map<string, { line: string; host: string }>();
 const PROMPT = '\x1b[1;32mdemo@msv\x1b[0m:\x1b[1;34m~\x1b[0m$ ';
 
@@ -210,7 +223,7 @@ function mockCommand(cmd: string, sessionId: string, host: string): string {
     case '':
       return '';
     case 'ls':
-      return '\x1b[1;34mprojekte\x1b[0m  \x1b[1;34mbackups\x1b[0m  notizen.txt  \x1b[1;32mdeploy.sh\x1b[0m\r\n';
+      return '\x1b[1;34mprojects\x1b[0m  \x1b[1;34mbackups\x1b[0m  notes.txt  \x1b[1;32mdeploy.sh\x1b[0m\r\n';
     case 'whoami':
       return 'demo\r\n';
     case 'hostname':
@@ -226,12 +239,12 @@ function mockCommand(cmd: string, sessionId: string, host: string): string {
       }, 50);
       return 'logout\r\n';
     default:
-      return `bash: ${cmd}: Befehl nicht gefunden (Demo-Shell: ls, whoami, hostname, colors, clear, exit)\r\n`;
+      return `bash: ${cmd}: command not found (demo shell: ls, whoami, hostname, colors, clear, exit)\r\n`;
   }
 }
 
 
-// ---- Demo-Dateisysteme für SFTP (nur Browser-Mock)
+// ---- Demo file systems for SFTP (browser mock only)
 type MockFs = Map<string, FileEntry>;
 const mkFs = (sep: string, items: [string, number | null][]): MockFs => {
   const m: MockFs = new Map();
@@ -242,13 +255,13 @@ const mkFs = (sep: string, items: [string, number | null][]): MockFs => {
   return m;
 };
 const remoteFs = mkFs('/', [
-  ['/home', null], ['/home/demo', null], ['/home/demo/projekte', null], ['/home/demo/backups', null],
-  ['/home/demo/projekte/app.py', 4210], ['/home/demo/projekte/README.md', 1288], ['/home/demo/notizen.txt', 612],
+  ['/home', null], ['/home/demo', null], ['/home/demo/projects', null], ['/home/demo/backups', null],
+  ['/home/demo/projects/app.py', 4210], ['/home/demo/projects/README.md', 1288], ['/home/demo/notes.txt', 612],
   ['/home/demo/deploy.sh', 934], ['/home/demo/backups/db-2026-11-01.sql.gz', 52_428_800], ['/home/demo/.bashrc', 3771],
 ]);
 const localFs = mkFs('\\', [
   ['C:\\Users', null], ['C:\\Users\\demo', null], ['C:\\Users\\demo\\Documents', null], ['C:\\Users\\demo\\Downloads', null],
-  ['C:\\Users\\demo\\Documents\\angebot.pdf', 184_320], ['C:\\Users\\demo\\Documents\\konfig.yaml', 2048],
+  ['C:\\Users\\demo\\Documents\\quote.pdf', 184_320], ['C:\\Users\\demo\\Documents\\config.yaml', 2048],
   ['C:\\Users\\demo\\Downloads\\release.zip', 12_582_912],
 ]);
 const parentOf = (path: string, sep: string) => {
@@ -257,7 +270,7 @@ const parentOf = (path: string, sep: string) => {
 };
 function fsList(fs: MockFs, dir: string, sep: string): BrowseResult {
   const norm = dir.length > 1 && dir.endsWith(sep) && !(sep === '\\' && /^[A-Z]:\\$/.test(dir)) ? dir.slice(0, -1) : dir;
-  if (norm !== '/' && !fs.get(norm)?.isDir) throw new Error('Pfad nicht gefunden.');
+  if (norm !== '/' && !fs.get(norm)?.isDir) throw new Error('Path not found.');
   const entries = [...fs.values()].filter((e) => parentOf(e.path, sep) === norm && e.path !== norm);
   entries.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
   return { path: norm, parent: norm === '/' ? '' : parentOf(norm, sep), entries };
@@ -288,6 +301,7 @@ function fsCopy(src: MockFs, dst: MockFs, path: string, targetDir: string, srcSe
     }
   }
 }
+const mockFileText = new Map<string, string>();
 const mockRunning = new Set<string>();
 let mockKnownHosts: KnownHost[] = [
   { id: 'web-prod-01.example.ch:22', fingerprint: 'SHA256:Gz8m1q0kXb1Tn5oV7mP2sA9fHc3dRyUeWl4JvNkQ0oE' },
@@ -297,24 +311,24 @@ let mockKnownHosts: KnownHost[] = [
 async function callMock(method: string, params: any): Promise<unknown> {
   await new Promise((r) => setTimeout(r, 30));
   const need = () => {
-    if (!mock.unlocked) throw new Error('Der Vault ist gesperrt.');
+    if (!mock.unlocked) throw new Error('The vault is locked.');
   };
   const onlyNative = (what: string) => {
-    throw new Error(`${what} gibt es nur in der Windows-App (im Browser siehst du nur die Oberfläche mit Demo-Daten).`);
+    throw new Error(`${what} is only available in the Windows app (in the browser you only see the interface with demo data).`);
   };
 
   switch (method) {
     case 'vault.status':
       return { exists: mock.password !== null, unlocked: mock.unlocked };
     case 'vault.create':
-      if (!params.password || params.password.length < 8) throw new Error('Das Master-Passwort muss mindestens 8 Zeichen haben.');
+      if (!params.password || params.password.length < 8) throw new Error('The master password must be at least 8 characters.');
       mock.password = params.password;
       mock.unlocked = true;
       mock.servers = demoServers();
       persistMock();
       return null;
     case 'vault.unlock':
-      if (params.password !== mock.password) throw new Error('Falsches Passwort.');
+      if (params.password !== mock.password) throw new Error('Wrong password.');
       mock.unlocked = true;
       return null;
     case 'vault.lock':
@@ -343,7 +357,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'servers.touch': {
       need();
       const s = mock.servers.find((x) => x.id === params.id);
-      if (!s) throw new Error('Server nicht gefunden.');
+      if (!s) throw new Error('Server not found.');
       s.lastUsed = new Date().toISOString();
       persistMock();
       return s;
@@ -358,21 +372,43 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return mock.keys;
     case 'keys.save': {
       need();
-      if (!params.name?.trim()) throw new Error('Bitte dem Key einen Namen geben.');
+      if (!params.name?.trim()) throw new Error('Please give the key a name.');
       const existing = mock.keys.find((k) => k.id === params.id);
       if (!existing && !String(params.privateKey ?? '').includes('PRIVATE KEY'))
-        throw new Error('Das sieht nicht nach einem privaten SSH-Key aus (Zeile «BEGIN … PRIVATE KEY» fehlt).');
+        throw new Error('This does not look like a private SSH key (the line "BEGIN … PRIVATE KEY" is missing).');
       const info: KeyInfo = {
         id: existing?.id ?? crypto.randomUUID(),
         name: params.name,
         kind: existing?.kind ?? (String(params.privateKey).includes('OPENSSH') ? 'ED25519' : 'RSA'),
         hasPassphrase: existing?.hasPassphrase ?? !!params.passphrase,
+        publicKey: existing?.publicKey ?? '',
+        fingerprint: existing?.fingerprint ?? '',
         updatedAt: new Date().toISOString(),
       };
       mock.keys = existing ? mock.keys.map((k) => (k.id === info.id ? info : k)) : [...mock.keys, info];
       persistMock();
       return info;
     }
+    case 'keys.generate': {
+      need();
+      if (!params.name?.trim()) throw new Error('Please give the key a name.');
+      const blob = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(51)))).replace(/=+$/, '');
+      const info: KeyInfo = {
+        id: crypto.randomUUID(),
+        name: params.name.trim(),
+        kind: params.type === 'rsa' ? 'RSA' : 'ED25519',
+        hasPassphrase: false,
+        publicKey: `${params.type === 'rsa' ? 'ssh-rsa' : 'ssh-ed25519'} ${blob} ${params.comment || ''}`.trim(),
+        fingerprint: 'SHA256:' + blob.slice(0, 43),
+        updatedAt: new Date().toISOString(),
+      };
+      mock.keys = [...mock.keys, info];
+      persistMock();
+      return info;
+    }
+    case 'keys.install':
+      need();
+      return null;
     case 'keys.delete':
       need();
       mock.keys = mock.keys.filter((k) => k.id !== params.id);
@@ -383,15 +419,15 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'ssh.open': {
       need();
       const server = mock.servers.find((s) => s.id === params.serverId);
-      if (!server) throw new Error('Server nicht gefunden.');
+      if (!server) throw new Error('Server not found.');
       mockShells.set(params.sessionId, { line: '', host: server.name });
       mock.history.push({ id: crypto.randomUUID(), serverId: server.id, serverName: server.name, host: `${server.host}:${server.port}`, kind: 'ssh', startedAt: new Date().toISOString(), endedAt: null, result: 'running', message: '' });
       persistMock();
       setTimeout(() => {
         mockShellWrite(
           params.sessionId,
-          `\x1b[2mDemo-Shell (Browser-Mock) – verbunden mit ${server.username || 'user'}@${server.host}\x1b[0m\r\n` +
-            'Probier: ls, whoami, colors, clear, exit\r\n\r\n' +
+          `\x1b[2mDemo shell (browser mock) – connected to ${server.username || 'user'}@${server.host}\x1b[0m\r\n` +
+            'Try: ls, whoami, colors, clear, exit\r\n\r\n' +
             PROMPT,
         );
       }, 150);
@@ -407,7 +443,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return null;
 
     case 'vnc.open': {
-      // Nur für Entwicklung/Tests: localStorage.setItem('msv-dev-vnc-url', 'ws://127.0.0.1:PORT/TOKEN')
+      // For development/tests only: localStorage.setItem('msv-dev-vnc-url', 'ws://127.0.0.1:PORT/TOKEN')
       const devUrl = localStorage.getItem('msv-dev-vnc-url');
       if (devUrl) return { url: devUrl, username: '', password: '' };
       return onlyNative('VNC');
@@ -421,11 +457,91 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'rdp.external':
       return onlyNative('RDP');
 
+    case 'dialog.pickFolder':
+      return { path: null };
+    case 'vmware.scan':
+      return {
+        vmrun: true,
+        vms: MOCK_VMWARE.map((v) => ({ ...v, imported: mock.servers.some((s) => s.vmwareRef === v.vmx.toLowerCase()) })),
+      };
+    case 'vmware.import': {
+      const wanted = MOCK_VMWARE.filter((v) => params.vms.includes(v.vmx));
+      for (const v of wanted)
+        mock.servers.push({
+          ...demoServers()[0],
+          id: crypto.randomUUID(),
+          name: v.name,
+          host: v.ip ?? v.name,
+          protocol: v.protocol,
+          workspace: params.workspace,
+          vmwareRef: v.vmx.toLowerCase(),
+          favorite: false,
+        });
+      persistMock();
+      return { imported: wanted.length, noIp: wanted.filter((v) => !v.ip).length, skipped: 0 };
+    }
+    case 'vmware.removeImported': {
+      const before = mock.servers.length;
+      mock.servers = mock.servers.filter((s) => !s.vmwareRef);
+      persistMock();
+      return { removed: before - mock.servers.length };
+    }
+    case 'proxmox.list':
+      return mockProxmox;
+    case 'proxmox.probe':
+      return { fingerprint: 'AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89', subject: 'CN=pve', notAfter: new Date().toISOString(), trusted: false };
+    case 'proxmox.test':
+      return { version: '9.2.3', vms: MOCK_PVE_VMS.length };
+    case 'proxmox.save': {
+      const info: ProxmoxInfo = {
+        id: params.id || crypto.randomUUID(),
+        name: params.name || 'pve',
+        url: params.url,
+        tokenId: params.tokenId,
+        hasSecret: true,
+        certFingerprint: params.certFingerprint ?? '',
+        updatedAt: new Date().toISOString(),
+      };
+      mockProxmox = [...mockProxmox.filter((p) => p.id !== info.id), info];
+      return info;
+    }
+    case 'proxmox.removeImported': {
+      const before = mock.servers.length;
+      mock.servers = mock.servers.filter((s) => !s.proxmoxRef.startsWith(params.id + ':'));
+      persistMock();
+      return { removed: before - mock.servers.length };
+    }
+    case 'proxmox.delete':
+      mockProxmox = mockProxmox.filter((p) => p.id !== params.id);
+      return null;
+    case 'proxmox.vms':
+      return MOCK_PVE_VMS.map((v) => ({ ...v, imported: mock.servers.some((s) => s.proxmoxRef === `${params.id}:${v.node}:${v.vmid}`) }));
+    case 'proxmox.import': {
+      const wanted = MOCK_PVE_VMS.filter((v) => params.vms.some((x: { node: string; vmid: number }) => x.node === v.node && x.vmid === v.vmid));
+      for (const v of wanted)
+        mock.servers.push({
+          ...demoServers()[0],
+          id: crypto.randomUUID(),
+          name: v.name,
+          host: v.name,
+          group: params.groupBy === 'node' ? v.node : params.groupBy === 'pool' ? v.pool : '',
+          workspace: params.workspaceFromPool && v.pool ? v.pool : params.workspace,
+          proxmoxRef: `${params.id}:${v.node}:${v.vmid}`,
+          favorite: false,
+        });
+      persistMock();
+      return { imported: wanted.length, noIp: wanted.length, skipped: 0 };
+    }
     case 'sync.get':
       return mock.sync;
     case 'sync.save': {
       mock.sync = {
-        configured: !!(params.url && params.anonKey && params.email && (params.password || mock.sync.hasPassword)),
+        configured:
+          params.mode === 'folder'
+            ? !!params.folder
+            : !!(params.url && params.anonKey && params.email && (params.password || mock.sync.hasPassword)),
+        mode: params.mode,
+        folder: params.folder ?? '',
         url: params.url,
         anonKey: params.anonKey,
         email: params.email,
@@ -435,19 +551,22 @@ async function callMock(method: string, params: any): Promise<unknown> {
       persistMock();
       return mock.sync;
     }
+    case 'window.command':
+      return { maximized: false };
+    case 'sync.pickFolder':
     case 'sync.test':
     case 'sync.signUp':
     case 'sync.now':
     case 'sync.downloadInitial':
-      return onlyNative('Die Cloud-Synchronisation');
+      return onlyNative('Sync');
     case 'sync.disconnect':
-      mock.sync = { configured: false, url: '', anonKey: '', email: '', hasPassword: false, lastSync: null };
+      mock.sync = { configured: false, mode: 'folder', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSync: null };
       persistMock();
       return null;
 
 
 
-    // ---- Einstellungen, Passwort, Backup
+    // ---- Settings, password, backup
     case 'settings.get':
       return mock.settings;
     case 'settings.save':
@@ -456,11 +575,26 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return mock.settings;
     case 'vault.changePassword':
       need();
-      if (params.oldPassword !== mock.password) throw new Error('Falsches Passwort.');
-      if (!params.newPassword || params.newPassword.length < 8) throw new Error('Das neue Master-Passwort muss mindestens 8 Zeichen haben.');
+      if (params.oldPassword !== mock.password) throw new Error('Wrong password.');
+      if (!params.newPassword || params.newPassword.length < 8) throw new Error('The new master password must be at least 8 characters.');
       mock.password = params.newPassword;
       persistMock();
       return { cloud: 'none' };
+    case 'vault.summary':
+      need();
+      return { servers: mock.servers.length, keys: mock.keys.length, identities: mock.identities.length, snippets: mock.snippets.length, forwards: mock.forwards.length, proxmox: mockProxmox.length, knownHosts: mockKnownHosts.length };
+    case 'vault.clear':
+      need();
+      if (params.password !== mock.password) throw new Error('Wrong password.');
+      mock.servers = [];
+      mock.keys = [];
+      mock.identities = [];
+      mock.snippets = [];
+      mock.forwards = [];
+      mockProxmox = [];
+      mockKnownHosts = [];
+      persistMock();
+      return null;
     case 'vault.export':
       return { saved: true, path: 'C:\\Users\\demo\\Documents\\MultiServerView-Backup.msv' };
     case 'vault.info':
@@ -472,7 +606,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'import.sshconfig':
     case 'import.putty':
     case 'import.csv':
-      return onlyNative('Diese Funktion');
+      return onlyNative('This feature');
     case 'vnc.close':
       return null;
 
@@ -482,7 +616,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return mock.identities;
     case 'identities.save': {
       need();
-      if (!params.name?.trim()) throw new Error('Bitte der Identity einen Namen geben.');
+      if (!params.name?.trim()) throw new Error('Please give the identity a name.');
       const existing = mock.identities.find((i) => i.id === params.id);
       const info: Identity = {
         id: existing?.id ?? crypto.randomUUID(),
@@ -509,7 +643,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return mock.snippets;
     case 'snippets.save': {
       need();
-      if (!params.name?.trim() || !params.command?.trim()) throw new Error('Name und Befehl sind Pflicht.');
+      if (!params.name?.trim() || !params.command?.trim()) throw new Error('Name and command are required.');
       const sn: Snippet = { id: params.id || crypto.randomUUID(), name: params.name, command: params.command, autoRun: !!params.autoRun };
       mock.snippets = mock.snippets.some((x) => x.id === sn.id) ? mock.snippets.map((x) => (x.id === sn.id ? sn : x)) : [...mock.snippets, sn];
       persistMock();
@@ -521,15 +655,15 @@ async function callMock(method: string, params: any): Promise<unknown> {
       persistMock();
       return null;
 
-    // ---- Port-Weiterleitungen
+    // ---- Port forwarding
     case 'forwards.list':
       need();
       return mock.forwards.map((rule): ForwardItem => ({ rule, running: mockRunning.has(rule.id) }));
     case 'forwards.save': {
       need();
-      if (!mock.servers.some((s) => s.id === params.serverId)) throw new Error('Bitte einen SSH-Host auswählen.');
-      if (!(params.bindPort >= 1 && params.bindPort <= 65535)) throw new Error('Der Port muss zwischen 1 und 65535 liegen.');
-      if (params.type !== 'dynamic' && (!params.destHost?.trim() || !(params.destPort >= 1))) throw new Error('Ziel-Adresse und Ziel-Port fehlen.');
+      if (!mock.servers.some((s) => s.id === params.serverId)) throw new Error('Please choose an SSH host.');
+      if (!(params.bindPort >= 1 && params.bindPort <= 65535)) throw new Error('The port must be between 1 and 65535.');
+      if (params.type !== 'dynamic' && (!params.destHost?.trim() || !(params.destPort >= 1))) throw new Error('Destination address and port are missing.');
       const rule: ForwardRule = { ...params, id: params.id || crypto.randomUUID(), name: params.name || `${params.type} ${params.bindPort}` };
       mockRunning.delete(rule.id);
       mock.forwards = mock.forwards.some((x) => x.id === rule.id) ? mock.forwards.map((x) => (x.id === rule.id ? rule : x)) : [...mock.forwards, rule];
@@ -552,7 +686,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
       setTimeout(() => dispatch({ event: 'forward.status', ruleId: params.id, running: false, error: null }), 0);
       return null;
 
-    // ---- Known Hosts / Verlauf
+    // ---- Known hosts / history
     case 'knownhosts.list':
       need();
       return mockKnownHosts;
@@ -567,11 +701,20 @@ async function callMock(method: string, params: any): Promise<unknown> {
       persistMock();
       return null;
 
-    // ---- SFTP (Demo-Dateisystem im Speicher)
+    // ---- SFTP (demo file system in memory)
     case 'sftp.open':
       need();
-      if (!mock.servers.some((s) => s.id === params.serverId)) throw new Error('Server nicht gefunden.');
+      if (!mock.servers.some((s) => s.id === params.serverId)) throw new Error('Server not found.');
       return { home: '/home/demo' };
+    case 'sftp.readText': {
+      const entry = remoteFs.get(params.path);
+      if (!entry || entry.isDir) throw new Error('Path not found.');
+      const content = mockFileText.get(params.path) ?? `# ${entry.name}\n# (demo content; nothing is written to a server in browser mode)\n`;
+      return { content, lineEnding: 'lf', bom: false, size: content.length, modified: 1 };
+    }
+    case 'sftp.writeText':
+      mockFileText.set(params.path, params.content);
+      return { modified: 2, size: params.content.length };
     case 'sftp.list':
       return fsList(remoteFs, params.path || '/home/demo', '/');
     case 'sftp.mkdir':
@@ -591,7 +734,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
       const target: string = upload ? params.remoteDir : params.localDir;
       for (const path of paths) {
         const entry = src.get(path);
-        if (!entry) throw new Error('Datei nicht gefunden: ' + path);
+        if (!entry) throw new Error('File not found: ' + path);
         const total = Math.max(entry.size, 1);
         for (const step of [0.3, 0.7, 1]) {
           await new Promise((r) => setTimeout(r, 120));
@@ -613,11 +756,11 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return null;
 
     default:
-      throw new Error('Unbekannte Methode: ' + method);
+      throw new Error('Unknown method: ' + method);
   }
 }
 
-// ---------------------------------------------------------------- öffentliche API
+// ---------------------------------------------------------------- public API
 
 const call = <T>(method: string, params?: unknown): Promise<T> =>
   isNative ? callNative<T>(method, params) : (callMock(method, params) as Promise<T>);
@@ -635,12 +778,37 @@ export interface ImportOutcome {
   duplicates?: number;
 }
 
+export interface ProxmoxInput {
+  id?: string;
+  name: string;
+  url: string;
+  tokenId: string;
+  tokenSecret: string;
+  certFingerprint?: string;
+}
+
 export interface SyncConfigInput {
+  mode: 'folder' | 'supabase';
+  folder: string;
   url: string;
   anonKey: string;
   email: string;
   password: string;
 }
+
+/** Demo data for browser mode (development only). */
+let mockProxmox: ProxmoxInfo[] = [{ id: 'demo-pve', name: 'Demo-Proxmox', url: 'https://pve.example.com:8006', tokenId: 'root@pam!msv', hasSecret: true, certFingerprint: 'AB:CD', updatedAt: new Date().toISOString() }];
+const MOCK_PVE_VMS: ProxmoxVmInfo[] = [
+  { node: 'pve', vmid: 100, type: 'qemu', name: 'win11-smith', status: 'running', pool: 'Smith', tags: ['school'], template: false, imported: false },
+  { node: 'pve', vmid: 101, type: 'qemu', name: 'debian-smith', status: 'running', pool: 'Smith', tags: [], template: false, imported: false },
+  { node: 'pve', vmid: 102, type: 'qemu', name: 'ubuntu-jones', status: 'stopped', pool: 'Jones', tags: [], template: false, imported: false },
+  { node: 'pve', vmid: 200, type: 'lxc', name: 'web', status: 'running', pool: '', tags: [], template: false, imported: false },
+];
+
+const MOCK_VMWARE: Omit<VmwareVmInfo, 'imported'>[] = [
+  { vmx: 'C:\\VMs\\Windows 11 x64\\Windows 11 x64.vmx', name: 'Windows 11 x64', guestOs: 'windows11-64', os: 'windows', protocol: 'rdp', connection: 'nat', running: true, ip: '192.168.40.128' },
+  { vmx: 'C:\\VMs\\ubuntu\\ubuntu.vmx', name: 'ubuntu', guestOs: 'ubuntu-64', os: 'ubuntu', protocol: 'ssh', connection: 'nat', running: false, ip: null },
+];
 
 export const api = {
   vaultStatus: () => call<{ exists: boolean; unlocked: boolean }>('vault.status'),
@@ -653,14 +821,16 @@ export const api = {
   serversDelete: (id: string) => call<void>('servers.delete', { id }),
   serversTouch: (id: string) => call<Server>('servers.touch', { id }),
   hostsForget: (id: string) => call<void>('hosts.forget', { id }),
-  importMremoteng: (xml: string) => call<ImportOutcome>('import.mremoteng', { xml }),
+  importMremoteng: (xml: string, workspace?: string) => call<ImportOutcome>('import.mremoteng', { xml, workspace }),
 
   keysList: () => call<KeyInfo[]>('keys.list'),
   keysSave: (k: { id?: string; name: string; privateKey?: string; passphrase?: string }) => call<KeyInfo>('keys.save', k),
   keysDelete: (id: string) => call<void>('keys.delete', { id }),
+  keysGenerate: (k: { name: string; type: 'ed25519' | 'rsa'; bits?: number; comment?: string }) => call<KeyInfo>('keys.generate', k),
+  keysInstall: (k: { keyId: string; serverId: string; switchHost?: boolean } & Credentials) => call<void>('keys.install', k),
 
-  sshOpen: (sessionId: string, serverId: string, cols: number, rows: number) =>
-    call<void>('ssh.open', { sessionId, serverId, cols, rows }),
+  sshOpen: (sessionId: string, serverId: string, cols: number, rows: number, cred?: Credentials) =>
+    call<void>('ssh.open', { sessionId, serverId, cols, rows, ...cred }),
   sshInput: (sessionId: string, data: string) => call<void>('ssh.input', { sessionId, data }),
   sshResize: (sessionId: string, cols: number, rows: number) => call<void>('ssh.resize', { sessionId, cols, rows }),
   sshClose: (sessionId: string) => call<void>('ssh.close', { sessionId }),
@@ -694,7 +864,19 @@ export const api = {
   historyList: () => call<HistoryEntry[]>('history.list'),
   historyClear: () => call<void>('history.clear'),
 
-  sftpOpen: (sessionId: string, serverId: string) => call<{ home: string }>('sftp.open', { sessionId, serverId }),
+  sftpOpen: (sessionId: string, serverId: string, cred?: Credentials) => call<{ home: string }>('sftp.open', { sessionId, serverId, ...cred }),
+  sftpReadText: (sessionId: string, path: string) =>
+    call<{ content: string; lineEnding: 'lf' | 'crlf'; bom: boolean; size: number; modified: number }>('sftp.readText', { sessionId, path }),
+  sftpWriteText: (a: {
+    sessionId: string;
+    path: string;
+    content: string;
+    lineEnding: 'lf' | 'crlf';
+    bom: boolean;
+    expectedModified: number;
+    expectedSize: number;
+    force: boolean;
+  }) => call<{ modified: number; size: number }>('sftp.writeText', a),
   sftpList: (sessionId: string, path: string) => call<BrowseResult>('sftp.list', { sessionId, path }),
   sftpMkdir: (sessionId: string, path: string) => call<void>('sftp.mkdir', { sessionId, path }),
   sftpRename: (sessionId: string, from: string, to: string) => call<void>('sftp.rename', { sessionId, from, to }),
@@ -714,19 +896,37 @@ export const api = {
   vaultChangePassword: (oldPassword: string, newPassword: string) =>
     call<{ cloud: 'none' | 'updated' | 'failed'; message?: string }>('vault.changePassword', { oldPassword, newPassword }),
   vaultExport: () => call<{ saved: boolean; path?: string }>('vault.export'),
+  vaultSummary: () =>
+    call<{ servers: number; keys: number; identities: number; snippets: number; forwards: number; proxmox: number; knownHosts: number }>('vault.summary'),
+  vaultClear: (password: string) => call<unknown>('vault.clear', { password }),
   vaultInfo: () => call<{ path: string; version: string }>('vault.info'),
   vaultReveal: () => call<void>('vault.reveal'),
   syncAdoptPassword: (password: string) => call<void>('sync.adoptPassword', { password }),
   syncForceUpload: () => call<void>('sync.forceUpload'),
-  importSshConfig: (text: string) => call<ImportOutcome>('import.sshconfig', { text }),
-  importPutty: (text?: string) => call<ImportOutcome>('import.putty', { text: text ?? '' }),
-  importCsv: (text: string) => call<ImportOutcome>('import.csv', { text }),
+  importSshConfig: (text: string, workspace?: string) => call<ImportOutcome>('import.sshconfig', { text, workspace }),
+  importPutty: (text?: string, workspace?: string) => call<ImportOutcome>('import.putty', { text: text ?? '', workspace }),
+  importCsv: (text: string, workspace?: string) => call<ImportOutcome>('import.csv', { text, workspace }),
 
+  pickFolder: (title: string) => call<{ path: string | null }>('dialog.pickFolder', { title }),
+  vmwareScan: (folder: string) => call<{ vmrun: boolean; vms: VmwareVmInfo[] }>('vmware.scan', { folder }),
+  vmwareImport: (a: { vms: string[]; workspace: string; identityId: string }) => call<{ imported: number; noIp: number; skipped: number }>('vmware.import', a),
+  vmwareRemoveImported: () => call<{ removed: number }>('vmware.removeImported'),
+  proxmoxList: () => call<ProxmoxInfo[]>('proxmox.list'),
+  proxmoxProbe: (url: string) => call<ProxmoxCert>('proxmox.probe', { url }),
+  proxmoxTest: (c: ProxmoxInput) => call<{ version: string; vms: number }>('proxmox.test', c),
+  proxmoxSave: (c: ProxmoxInput) => call<ProxmoxInfo>('proxmox.save', c),
+  proxmoxDelete: (id: string) => call<void>('proxmox.delete', { id }),
+  proxmoxRemoveImported: (id: string) => call<{ removed: number }>('proxmox.removeImported', { id }),
+  proxmoxVms: (id: string) => call<ProxmoxVmInfo[]>('proxmox.vms', { id }),
+  proxmoxImport: (a: { id: string; vms: { node: string; vmid: number }[]; workspace: string; workspaceFromPool: boolean; identityId: string; groupBy: 'none' | 'pool' | 'node' }) =>
+    call<{ imported: number; noIp: number; skipped: number }>('proxmox.import', a),
   syncGet: () => call<SyncInfo>('sync.get'),
   syncSave: (c: SyncConfigInput) => call<SyncInfo>('sync.save', c),
   syncTest: (c: SyncConfigInput) => call<void>('sync.test', c),
   syncSignUp: (c: SyncConfigInput) => call<{ signedIn: boolean }>('sync.signUp', c),
   syncNow: () => call<{ outcome: string; at: string }>('sync.now'),
   syncDisconnect: () => call<void>('sync.disconnect'),
+  windowCommand: (command: 'state' | 'minimize' | 'maximize' | 'close') => call<{ maximized: boolean }>('window.command', { command }),
+  syncPickFolder: () => call<{ path: string | null }>('sync.pickFolder'),
   syncDownloadInitial: (c: SyncConfigInput) => call<void>('sync.downloadInitial', c),
 };

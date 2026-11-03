@@ -4,9 +4,9 @@ import { SessionFrame } from './SessionFrame';
 import type { Server, SessionStatus } from './types';
 
 /**
- * RDP-Session. Der Remote-Desktop wird vom nativen Windows-RDP-Control gezeichnet, das der Host genau
- * über den Platzhalter-Bereich (.rdp-box) legt. Dieses Element meldet dem Host deshalb seine Position und
- * Grösse (in echten Pixeln) und ob es gerade sichtbar sein soll.
+ * RDP session. The remote desktop is drawn by the native Windows RDP control, which the host places exactly
+ * over the placeholder area (.rdp-box). That is why this element reports its position and
+ * size (in real pixels) to the host, and whether it should be visible right now.
  */
 export function RdpView({
   tabId,
@@ -59,17 +59,17 @@ export function RdpView({
     else if (!visible) void api.rdpLayout(tabId, { x: 0, y: 0, w: 1, h: 1 }, false).catch(() => undefined);
   }, [rect, tabId]);
 
-  // Session öffnen / neu öffnen
+  // Open / reopen the session
   useEffect(() => {
     if (!isNative) {
-      setStatus('error', 'RDP läuft nur in der Windows-App.');
+      setStatus('error', 'RDP only works in the Windows app.');
       return;
     }
     let cancelled = false;
     setStatus('connecting');
     showNative.current = true;
 
-    // Erst nach dem Layout öffnen, damit das Control gleich in der richtigen Grösse entsteht.
+    // Open only after the layout, so the control is created in the right size right away.
     const raf = requestAnimationFrame(() => {
       const r = rect() ?? { x: 0, y: 0, w: 1024, h: 768 };
       api.rdpOpen(tabId, server.id, r).catch((err: Error) => {
@@ -84,7 +84,7 @@ export function RdpView({
       if (e.state === 'connected') setStatus('connected');
       else if (e.state === 'connecting') setStatus('connecting');
       else {
-        // Control ausblenden, damit die Meldung darunter sichtbar wird.
+        // Hide the control so the message underneath becomes visible.
         showNative.current = false;
         setStatus('closed', e.message);
         pushLayout();
@@ -100,7 +100,7 @@ export function RdpView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, reconnectKey]);
 
-  // Position/Grösse/Sichtbarkeit laufend nachziehen
+  // Keep position/size/visibility up to date
   useEffect(() => {
     if (!isNative) return;
     pushLayout();
@@ -123,8 +123,8 @@ export function RdpView({
       onEdit={onEdit}
       extraActions={
         isNative && (
-          <button className="ghost" title="Öffnet das normale Windows-RDP-Fenster (mstsc)" onClick={() => void api.rdpExternal(server.id)}>
-            In Windows-RDP öffnen
+          <button className="ghost" title="Opens the normal Windows RDP window (mstsc)" onClick={() => void api.rdpExternal(server.id)}>
+            Open in Windows RDP
           </button>
         )
       }
@@ -132,13 +132,13 @@ export function RdpView({
       <div className="rdp-box" ref={boxRef}>
         {status !== 'connected' && (
           <div className="overlay-msg">
-            {status === 'connecting' && <div className="muted">Verbinde mit {server.host} …</div>}
+            {status === 'connecting' && <div className="muted">Connecting to {server.host} …</div>}
             {(status === 'error' || status === 'closed') && (
               <>
-                <div className={status === 'error' ? 'error' : 'muted'}>{message || 'Verbindung getrennt.'}</div>
+                <div className={status === 'error' ? 'error' : 'muted'}>{message || 'Disconnected.'}</div>
                 {isNative && (
                   <button className="primary" onClick={onReconnect}>
-                    Neu verbinden
+                    Reconnect
                   </button>
                 )}
               </>

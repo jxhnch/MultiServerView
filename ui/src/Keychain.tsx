@@ -1,8 +1,10 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from './bridge';
-import { IconClose, IconKey, IconLock, IconPlus, IconTrash, IconUpload } from './Icons';
+import { IconClose, IconCopy, IconKey, IconLock, IconPlus, IconTrash, IconUpload } from './Icons';
 import { IdentitiesSection } from './Identities';
+import { GenerateKeyDialog, PublicKeyDialog } from './KeyDialogs';
 import type { Identity, KeyInfo, Server } from './types';
+import { askConfirm } from './Confirm';
 
 export function Keychain({
   keys,
@@ -18,15 +20,17 @@ export function Keychain({
   toast: (msg: string, kind?: 'ok' | 'error') => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [showPublic, setShowPublic] = useState<KeyInfo | null>(null);
 
   async function remove(k: KeyInfo) {
     const used = servers.filter((s) => s.keyId === k.id).length;
-    const warn = used > 0 ? `\n${used} Host(s) benutzen diesen Key und fallen auf Passwort zurück.` : '';
-    if (!confirm(`Key «${k.name}» wirklich löschen?${warn}`)) return;
+    const warn = used > 0 ? `\n${used} host(s) use this key and fall back to a password.` : '';
+    if (!(await askConfirm(`Really delete the key "${k.name}"?${warn}`, { title: 'Delete key', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.keysDelete(k.id);
       await onChanged();
-      toast('Key gelöscht');
+      toast('Key deleted');
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -36,23 +40,30 @@ export function Keychain({
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Schlüssel</h1>
+          <h1>Keys</h1>
           <p className="muted">
-            Private SSH-Keys liegen verschlüsselt im Vault und werden von mehreren Hosts gemeinsam benutzt.
-            Nach dem Import verlässt der private Teil nie mehr den Host-Prozess.
+            Private SSH keys are stored encrypted in the vault and can be shared by several hosts.
+            After import, the private part never leaves the host process.
           </p>
         </div>
-        <button className="primary" onClick={() => setAdding(true)}>
-          <IconPlus size={15} /> Key hinzufügen
-        </button>
+        <div className="row-actions">
+          <button className="primary" onClick={() => setGenerating(true)}>
+            <IconPlus size={15} /> Generate key
+          </button>
+          <button onClick={() => setAdding(true)}>
+            <IconUpload size={15} /> Import key
+          </button>
+        </div>
       </div>
 
       {keys.length === 0 ? (
         <div className="empty-card">
           <IconKey size={28} />
-          <h3>Noch keine Schlüssel</h3>
-          <p className="muted">Füge einen privaten Key im OpenSSH- oder PEM-Format hinzu.</p>
-          <button onClick={() => setAdding(true)}>Key hinzufügen</button>
+          <h3>No keys yet</h3>
+          <p className="muted">Generate a new key pair or import an existing private key (OpenSSH or PEM).</p>
+          <button className="primary" onClick={() => setGenerating(true)}>
+            Generate key
+          </button>
         </div>
       ) : (
         <div className="list">
@@ -66,15 +77,18 @@ export function Keychain({
                 <div className="grow">
                   <div className="list-title">{k.name}</div>
                   <div className="muted small">
-                    {k.kind || 'Key'} · {k.hasPassphrase ? 'mit Passphrase' : 'ohne Passphrase'} · {used} Host{used === 1 ? '' : 's'}
+                    {k.kind || 'Key'} · {k.hasPassphrase ? 'with passphrase' : 'no passphrase'} · {used} Host{used === 1 ? '' : 's'}
                   </div>
                 </div>
                 {k.hasPassphrase && (
-                  <span className="muted" title="Passphrase gespeichert">
+                  <span className="muted" title="Passphrase saved">
                     <IconLock size={15} />
                   </span>
                 )}
-                <button className="ghost icon-only danger" title="Löschen" onClick={() => remove(k)}>
+                <button className="ghost icon-only" title="Show public key / install on a server" onClick={() => setShowPublic(k)} disabled={!k.publicKey}>
+                  <IconCopy size={16} />
+                </button>
+                <button className="ghost icon-only danger" title="Delete" onClick={() => remove(k)}>
                   <IconTrash size={16} />
                 </button>
               </div>
@@ -85,13 +99,25 @@ export function Keychain({
 
       <IdentitiesSection identities={identities} keys={keys} servers={servers} onChanged={onChanged} toast={toast} />
 
+      {generating && (
+        <GenerateKeyDialog
+          onClose={() => setGenerating(false)}
+          onCreated={async (key) => {
+            setGenerating(false);
+            await onChanged();
+            setShowPublic(key);
+          }}
+        />
+      )}
+      {showPublic && <PublicKeyDialog keyInfo={showPublic} servers={servers} onClose={() => setShowPublic(null)} onChanged={onChanged} toast={toast} />}
+
       {adding && (
         <AddKey
           onClose={() => setAdding(false)}
           onSaved={async () => {
             setAdding(false);
             await onChanged();
-            toast('Key gespeichert');
+            toast('Key saved');
           }}
         />
       )}
@@ -130,7 +156,7 @@ function AddKey({ onClose, onSaved }: { onClose: () => void; onSaved: () => Prom
     <div className="overlay" onMouseDown={onClose}>
       <form className="modal wide" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <div className="modal-head">
-          <h2>Key hinzufügen</h2>
+          <h2>Add key</h2>
           <button type="button" className="ghost icon-only" onClick={onClose}>
             <IconClose size={16} />
           </button>
@@ -138,11 +164,11 @@ function AddKey({ onClose, onSaved }: { onClose: () => void; onSaved: () => Prom
 
         <label>
           Name
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Arbeit-Laptop" />
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. work laptop" />
         </label>
 
         <label>
-          Privater Schlüssel
+          Private key
           <textarea
             rows={7}
             spellCheck={false}
@@ -155,28 +181,28 @@ function AddKey({ onClose, onSaved }: { onClose: () => void; onSaved: () => Prom
         <div>
           <input ref={fileRef} type="file" hidden onChange={(e) => pickFile(e.target.files?.[0])} />
           <button type="button" onClick={() => fileRef.current?.click()}>
-            <IconUpload size={15} /> Datei wählen…
+            <IconUpload size={15} /> Choose file…
           </button>
         </div>
 
         <label>
-          Passphrase (falls der Key eine hat)
+          Passphrase (if the key has one)
           <input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
         </label>
 
         <p className="muted small">
-          Unterstützt: OpenSSH (ed25519, rsa, ecdsa) und PEM. PuTTY-Keys (.ppk) vorher in PuTTYgen über
-          «Conversions → Export OpenSSH key» umwandeln.
+          Supported: OpenSSH (ed25519, rsa, ecdsa) and PEM. Convert PuTTY keys (.ppk) in PuTTYgen first via
+          "Conversions → Export OpenSSH key".
         </p>
 
         {error && <div className="error">{error}</div>}
         <div className="actions">
           <span className="grow" />
           <button type="button" onClick={onClose}>
-            Abbrechen
+            Cancel
           </button>
           <button className="primary" disabled={busy || !name.trim() || !privateKey.trim()}>
-            Speichern
+            Save
           </button>
         </div>
       </form>

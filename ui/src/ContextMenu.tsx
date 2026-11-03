@@ -6,16 +6,16 @@ export interface MenuItem {
   onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
-  /** Trennlinie vor diesem Eintrag. */
+  /** Separator line before this entry. */
   separator?: boolean;
 }
 
-/** Rechtsklick-Menü an der Mausposition. Schliesst bei Klick daneben, Escape, Scrollen oder Fensterwechsel. */
+/** Right-click menu at the mouse position. Closes on a click outside, Escape, scrolling or switching windows. */
 export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
-  // Im sichtbaren Bereich halten
+  // Keep within the visible area
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;

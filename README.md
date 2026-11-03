@@ -1,124 +1,163 @@
 # MultiServerView
 
-Eigene Server-Verwaltung für Windows – ein Fenster für **SSH, RDP und VNC**, schnelles Wechseln per `Ctrl+K`, verschlüsselter Vault und optionaler Cloud-Sync (Supabase).
+**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows, open source.
 
-| | |
+![Hosts](docs/screenshots/hosts.png)
+
+## Features
+
+### Connect
+- **SSH terminal** – real terminal (xterm.js), password or key login, host key verification (trust on first use), 10 color schemes, fonts, a password prompt on failed logins just like PuTTY.
+- **SFTP** – two panes (this PC / server), drag & drop, whole folders with progress and cancel, rename, delete, **edit remote text files** in place (with a "changed on the server" safety check).
+- **RDP** – the native Windows RDP control (the same as mstsc / mRemoteNG) right inside a tab.
+- **VNC** – noVNC in a tab, including Ctrl+Alt+Del and clipboard.
+- **Jump hosts** – chain one or more SSH hosts for SSH, SFTP, tunnels, VNC and RDP.
+- **Port forwarding** – local (-L), remote (-R) and SOCKS5 (-D), start/stop with one click.
+- **Split view** – several terminals side by side in one tab, with broadcast (type once, send to all).
+
+![Terminal](docs/screenshots/terminal.png)
+
+![SFTP](docs/screenshots/sftp.png)
+
+### Organize
+- **Workspaces** – one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
+- **Quick switcher** – `Ctrl+K`, a search bar that also understands `ssh user@host`, tabs, favorites, groups, OS logos, light and dark theme.
+- **Identities, keys and snippets** – reuse credentials across hosts, generate SSH keys and install the public key on a server with one click, snippets with `{{variables}}` that ask for values when you run them.
+- **Known hosts and history** – review and reset stored host keys, see your connection history (local only, no passwords).
+
+### Import
+Bring your servers with you. Duplicates are skipped, existing hosts stay untouched.
+- **Proxmox VE** – connect with a read-only API token (certificate pinning included) and add VMs and containers as hosts, with their IPs and operating systems. Choose whether Proxmox pools become workspaces or groups. Delete everything an import added again with one click.
+- **VMware Workstation** – reads your VM library, including addresses from running VMs and the VMware DHCP leases.
+- **mRemoteNG**, **OpenSSH config** (`~/.ssh/config`), **PuTTY** (directly from Windows or a `.reg` file) and **CSV**.
+
+![Import](docs/screenshots/import.png)
+
+### Protect and sync
+- **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
+- **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
+- **Clear vault** – wipe everything with three confirmation steps. Change the master password, set an auto-lock, back up the vault.
+
+![Settings](docs/screenshots/settings.png)
+
+## Download and install
+
+Get the latest version from the **[Releases page](https://github.com/jxhnch/MultiServerView/releases)**:
+
+| File | For |
 |---|---|
-| **SSH** | Echtes Terminal (xterm.js), Passwort **oder SSH-Key**, Host-Key-Prüfung, 10 Farbschemata, Schriftart und -grösse, Snippets per Klick |
-| **SFTP** | Zwei Fenster (dieser PC / Server), Drag & Drop, Upload/Download von Dateien und ganzen Ordnern mit Fortschritt und Abbrechen, Ordner anlegen, umbenennen, löschen |
-| **RDP** | Natives Windows-RDP-Control (wie mstsc / mRemoteNG) direkt im Tab |
-| **VNC** | noVNC im Tab, inkl. Strg+Alt+Entf und Zwischenablage |
-| **Port Forwarding** | Lokal (-L), Remote (-R) und SOCKS5 (-D) über SSH-Hosts, Start/Stopp per Klick |
-| **Schnell wechseln** | Suchzeile oben (auch `ssh user@host` für neue Hosts), `Ctrl+K`, Tabs, Favoriten, Gruppen, Betriebssystem-Logos. Hell/Dunkel umschaltbar |
-| **Zugangsdaten** | Keychain für SSH-Keys, Identities (Benutzer + Passwort/Key für mehrere Hosts) |
-| **Snippets** | Häufige Befehle speichern, im Terminal mit einem Klick ausführen |
-| **Known Hosts / Logs** | Gespeicherte Host-Keys ansehen und zurücksetzen; Verbindungsverlauf (nur lokal, ohne Passwörter) |
-| **Cloud** | Ende-zu-Ende verschlüsselter Sync zwischen PCs (Supabase), Merge bei Änderungen auf beiden Seiten |
-| **Jump Hosts** | Verbindung über einen oder mehrere SSH-Hosts hintereinander (SSH, SFTP, Tunnel, VNC, RDP) |
-| **Geteilte Ansicht** | Mehrere SSH-Terminals nebeneinander in einem Tab, mit Broadcast (Eingabe an alle gleichzeitig) |
-| **Einstellungen** | Design, Terminal (Themes, Schrift, Cursor, Scrollback), SSH, RDP, VNC, Auto-Sperre, Master-Passwort ändern, Backup |
-| **Import** | mRemoteNG, OpenSSH-Config (`~/.ssh/config`), PuTTY (direkt aus Windows oder .reg), CSV |
+| `MultiServerView-Setup-x.y.z.exe` | Installer wizard (no admin rights needed, Start menu entry, uninstaller) |
+| `MultiServerView-x.y.z-portable-win-x64.zip` | Portable: unpack anywhere and run `MultiServerView.exe` |
 
-## Starten (Windows)
+Nothing else has to be installed: .NET is bundled and the WebView2 runtime is part of Windows 10/11. The builds are **not code-signed yet**, so Windows SmartScreen may show a warning on first start ("More info" → "Run anyway").
 
-**Variante A – fertig gebaut über GitHub:** Im Repo unter *Actions → Build (Windows) → Artifacts* die Datei `MultiServerView-win-x64` herunterladen, entpacken, `MultiServerView.exe` starten. Es muss nichts installiert werden (.NET ist enthalten).
+On first start you create a **master password** (at least 8 characters). There is no recovery: if you forget it, nobody can open your vault.
 
-**Variante B – selber bauen:** Voraussetzungen: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) und [Node.js 20+](https://nodejs.org).
+## Keyboard shortcuts
+
+In a terminal, plain Ctrl combinations belong to the shell, so app commands use `Ctrl+Shift`:
+
+| Key | Action |
+|---|---|
+| `Ctrl+K` | Quick connect (outside the terminal) |
+| `Ctrl+Shift+K` | Quick connect (**everywhere**, also inside a terminal) |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+1 … 9` | Jump to a tab (1 = Hosts) |
+| `Ctrl+Shift+W` | Close tab (middle click works too) |
+| `Ctrl+Shift+N` | New host |
+| `Ctrl+Shift+D` | Second session to the same host |
+| `Shift+Enter` / `Shift+click` | Always open a new session when connecting |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Terminal: copy / paste (right click works too) |
+
+When the focus is inside an **RDP session**, all keys go to the remote PC (as in every RDP client). Click another tab with the mouse to leave it.
+
+## Set up sync
+
+**Shared folder (easiest):** open **Sync**, choose a folder that your folder service already syncs (for example in OneDrive) and connect. On the second PC choose *"New device? Load vault from a sync folder or cloud"* on the unlock screen, pick the same folder and unlock with the **same master password**.
+
+**Supabase (about 3 minutes):**
+1. Create a free project on [supabase.com](https://supabase.com).
+2. **SQL Editor** → paste [`docs/supabase.sql`](docs/supabase.sql) → *Run*.
+3. **Project Settings → API**: copy the *Project URL* and the *anon public* key.
+4. In the app open **Sync**, choose Supabase, enter URL, key, e-mail and a cloud password → *Create account* → *Connect*. (If Supabase asks for a confirmation e-mail, confirm it first, or switch off "Confirm email" under *Authentication → Providers → Email*.)
+
+After that, sync runs automatically about 3 seconds after every change and after unlocking. The cloud password is protected locally with Windows DPAPI. The master password never leaves your PC.
+
+## Security in short
+
+- Vault file: `%APPDATA%\MultiServerView\vault.msv`, encrypted with a key derived from your master password.
+- Private SSH keys are never sent back to the UI after import; connections run entirely in the host process.
+- SSH host keys use trust on first use. If the key of a known host changes, the connection is **refused** (you can reset the key in the host dialog).
+- VNC runs through a local bridge that only listens on `127.0.0.1` and protects every connection with a one-time token.
+- The browser development mode (`npm run dev`) stores demo data unencrypted and is only meant for UI development.
+
+## Build from source
+
+Requirements: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and [Node.js 20+](https://nodejs.org).
 
 ```bash
-scripts\publish.cmd
+scripts\publish.cmd          # runs tests, builds the UI, publishes to publish\MultiServerView.exe
 ```
 
-Das führt Tests aus, baut die Oberfläche und legt die App nach `publish\MultiServerView.exe`. Zum schnellen Ausprobieren reicht auch:
+For quick experiments:
 
 ```bash
+cd ui && npm install && npm run build
 dotnet run --project src/MultiServerView.App
 ```
 
-Beim ersten Start legst du ein **Master-Passwort** an. Es gibt keine Wiederherstellung – wer es vergisst, kommt nicht mehr an den Vault. Die WebView2-Runtime ist auf Windows 10/11 normalerweise schon da.
+> `dotnet publish` does not rebuild the UI. Always run `npm run build` in `ui/` first.
 
-## Tastenkürzel
-
-In einem Terminal gehören einfache Strg-Kombinationen der Shell (`Ctrl+K`, `Ctrl+W`, …). Deshalb laufen die App-Befehle mit `Ctrl+Shift`:
-
-| Taste | Aktion |
-|---|---|
-| `Ctrl+K` | Schnell verbinden (ausserhalb des Terminals) |
-| `Ctrl+Shift+K` | Schnell verbinden (**überall**, auch im Terminal) |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Nächster / vorheriger Tab |
-| `Ctrl+1 … 9` | Tab direkt wählen (1 = Start) |
-| `Ctrl+Shift+W` | Tab schliessen (Mittelklick geht auch) |
-| `Ctrl+Shift+N` | Neuer Host |
-| `Ctrl+Shift+D` | Zweite Session zum selben Host |
-| `Shift+Enter` / `Shift+Klick` | Beim Verbinden immer eine neue Session öffnen |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Terminal: kopieren / einfügen (Rechtsklick geht auch) |
-
-Wenn der Fokus in einer **RDP-Session** ist, gehen alle Tasten an den Remote-PC (so ist das bei jedem RDP-Client). Dann mit der Maus auf einen anderen Tab klicken.
-
-## Cloud-Sync einrichten (einmalig, ca. 3 Minuten)
-
-Der Sync braucht ein kostenloses [Supabase](https://supabase.com)-Projekt. In der Cloud liegt **nur der verschlüsselte Vault** – Supabase sieht weder Hosts noch Passwörter noch Keys.
-
-1. Projekt auf supabase.com erstellen.
-2. **SQL Editor** → Inhalt von [`docs/supabase.sql`](docs/supabase.sql) einfügen → *Run*.
-3. **Project Settings → API**: *Project URL* und den *anon public* Key kopieren.
-4. In der App links unten **Cloud** → URL, Key, E-Mail und ein Cloud-Passwort eintragen → *Konto erstellen* → *Verbinden*.
-   (Wenn Supabase eine Bestätigungs-Mail verlangt: bestätigen, dann *Verbinden*. Oder unter *Authentication → Providers → Email* «Confirm email» ausschalten.)
-5. **Zweiter PC:** Beim ersten Start unter dem Master-Passwort-Feld «Neues Gerät? Vault aus der Cloud laden» wählen, Supabase-Zugangsdaten eingeben, danach mit dem **gleichen Master-Passwort** entsperren.
-
-Danach läuft der Sync automatisch ca. 3 Sekunden nach jeder Änderung und nach dem Entsperren. Ändern beide PCs gleichzeitig etwas, wird pro Eintrag der neuere Stand übernommen, Löschungen bleiben gelöscht.
-
-Das Cloud-Passwort wird lokal mit Windows DPAPI geschützt (nur dein Windows-Benutzer kann es lesen). Das Master-Passwort verlässt den PC nie.
-
-## Sicherheit in Kürze
-
-- Vault: PBKDF2-SHA256 (600 000 Iterationen) → AES-256-GCM, Datei `%APPDATA%\MultiServerView\vault.msv`. Passwörter und private Keys stehen nie im Klartext auf der Platte oder in der Cloud.
-- Private SSH-Keys werden nach dem Import nicht mehr ans UI geschickt; die Verbindung läuft komplett im Host-Prozess.
-- SSH-Host-Keys: «Trust on first use». Ändert sich der Key eines bekannten Hosts, wird die Verbindung **abgelehnt** (im Host-Dialog lässt sich der Key zurücksetzen).
-- VNC läuft über eine lokale Brücke, die nur auf `127.0.0.1` lauscht und jede Verbindung mit einem Einmal-Token absichert.
-- Server-Passwörter sind im UI sichtbar, wenn du einen Host bearbeitest (Passwortfeld). Der Browser-Entwicklungsmodus (`npm run dev`) speichert unverschlüsselt und ist nur für die UI-Entwicklung gedacht.
-
-## Aufbau
-
-| Ordner | Inhalt |
-|---|---|
-| `src/MultiServerView.Core` | Vault + Crypto, Merge, Cloud-Sync, SSH-Session (SSH.NET), VNC-WebSocket-Brücke, mRemoteNG-Import (net8.0, plattformunabhängig) |
-| `src/MultiServerView.App` | WinForms-Fenster mit WebView2, Bridge zum UI, RDP-Hosting, DPAPI, Auto-Sync (net8.0-windows) |
-| `ui/` | React + TypeScript (Vite): Oberfläche, xterm.js, noVNC |
-| `tests/` | xUnit-Tests (Crypto, Vault, Merge, Sync gegen simulierte Supabase-API, VNC-Brücke, Import, SSH gegen echten sshd) |
-| `docs/` | `supabase.sql` |
-
-## Entwickeln
+Develop the UI in the browser with demo data and a demo shell:
 
 ```bash
-dotnet test tests/MultiServerView.Core.Tests    # Core-Tests (laufen auch unter Linux/macOS)
-
-cd ui && npm install && npm run dev             # UI im Browser mit Demo-Daten und Demo-Shell
+cd ui && npm install && npm run dev
 ```
 
-Die SSH-Integrationstests laufen nur, wenn `MSV_SSH_TEST_DIR` auf einen Ordner mit Testkeys zeigt und lokal ein sshd auf `127.0.0.1:2222` läuft (Benutzer `msvtest`); sonst tun sie nichts.
-
-UI gegen das echte Fenster mit Hot Reload:
+Or against the real window with hot reload:
 
 ```bash
 set MSV_DEV_URL=http://localhost:5173
 dotnet run --project src/MultiServerView.App
 ```
 
-## Teststatus (ehrlich)
+Run the tests (also works on Linux/macOS):
 
-| Teil | Status |
+```bash
+dotnet test tests/MultiServerView.Core.Tests
+```
+
+SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a folder with test keys and a local sshd listens on `127.0.0.1:2222` (user `msvtest`); otherwise they do nothing.
+
+### Project layout
+
+| Folder | Contents |
 |---|---|
-| Vault, Crypto, Merge, Sync-Logik, SSH, SFTP, Port Forwarding, VNC-Brücke, Import | **Automatisch getestet** (92 Tests; SSH, SFTP und alle drei Weiterleitungs-Arten gegen einen echten sshd, Sync gegen simulierte Supabase-API) |
-| UI (Tabs, Palette, Keychain, SFTP, Snippets, Weiterleitungen, Formulare, Terminal) | Im Browser mit Playwright durchgespielt (Demo-Daten und Demo-Shell) |
-| VNC Ende-zu-Ende | Getestet: noVNC → C#-Brücke → echter VNC-Server |
-| Windows-Fenster (WebView2), **RDP-Control**, DPAPI, SSH/SFTP/Jump/Tunnel auf Windows | **Bei jedem Build auf einem echten Windows-Rechner getestet** (rund 40 Prüfungen: die App startet, wird per Skript bedient, macht Screenshots; gegen einen echten OpenSSH-Server). Noch nicht getestet: deine eigenen Server und ein RDP-Zielrechner mit gespeichertem Passwort. Falls RDP hakt: «In Windows-RDP öffnen» startet mstsc als Ausweg |
-| Echter Supabase-Server | Noch nicht gegen ein echtes Projekt getestet (nur gegen die Simulation) |
+| `src/MultiServerView.Core` | Vault + crypto, merge and sync, SSH/SFTP/tunnels (SSH.NET), VNC bridge, importers (net8.0, platform independent) |
+| `src/MultiServerView.App` | WinForms window with WebView2, bridge to the UI, RDP hosting, DPAPI, auto-sync, self-test |
+| `ui/` | React + TypeScript (Vite): interface, xterm.js, noVNC |
+| `tests/` | xUnit tests (crypto, vault, merge, sync against a simulated Supabase API and folders, VNC bridge, importers, SSH against a real sshd) |
+| `installer/` | Inno Setup script for the installer wizard |
+| `docs/` | Supabase SQL, comparison with Termius, first-run checklist, screenshots |
 
-## Bekannte Einschränkungen
+### Test status
 
-- Solange eine Palette oder ein Dialog offen ist, wird ein laufendes RDP-Fenster kurz ausgeblendet (natives Fenster liegt sonst über dem UI). Die Session läuft weiter.
-- PuTTY-Keys (`.ppk`) vorher in PuTTYgen nach OpenSSH exportieren.
-- mRemoteNG-Import übernimmt keine Passwörter (mRemoteNG verschlüsselt sie selber). Einen Termius-Import gibt es nicht.
-- Kein Telnet/Serial/Mosh, kein KI-Autocomplete, keine Teams (siehe [`docs/termius-vergleich.md`](docs/termius-vergleich.md)).
-- Die Titelleiste ist die normale Windows-Titelleiste (Tabs sitzen darunter).
+| Part | Status |
+|---|---|
+| Vault, crypto, merge, sync logic, SSH, SFTP, forwarding, VNC bridge, importers | Automatically tested (170 unit and integration tests) |
+| Windows window (WebView2), **RDP control**, DPAPI, SSH/SFTP/jump/tunnels on Windows | Every build runs a self-test on a real Windows machine: the app starts, is driven by script, takes screenshots and talks to a real OpenSSH server |
+| Real Supabase project, real Proxmox server, RDP/VNC against real targets | Not tested automatically (only against simulations); reports welcome |
+
+## Known limitations
+
+- While a palette or dialog is open, a running RDP window is hidden briefly (the native window would otherwise cover the UI). The session keeps running.
+- Convert PuTTY keys (`.ppk`) to OpenSSH format in PuTTYgen first.
+- The mRemoteNG import does not take over passwords (mRemoteNG encrypts them itself). There is no Termius import.
+- No Telnet/Serial/Mosh, no AI autocomplete, no teams. See the [comparison with Termius](docs/comparison-with-termius.md).
+- Windows only.
+
+## Inspiration and vibe coding
+
+MultiServerView is inspired by [Termius](https://termius.com), whose workflow (one place for hosts, terminal, SFTP and synced vault) I wanted on Windows with RDP and VNC included and under my own control. It is an independent project and not affiliated with Termius.
+
+This project is **vibe-coded**: it was built together with an AI coding assistant (Claude Code). I steer the design and test the result, the assistant writes most of the code. The code is tested and the self-test runs on every build, but please review it yourself before trusting it with production credentials, and report anything that looks wrong.

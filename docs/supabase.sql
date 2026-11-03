@@ -1,4 +1,4 @@
--- Einmalig im Supabase SQL-Editor ausführen
+-- Run once in the Supabase SQL editor
 create table if not exists public.vaults (
   user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   version    bigint      not null default 1,

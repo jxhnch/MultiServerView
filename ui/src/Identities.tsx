@@ -2,8 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { api } from './bridge';
 import { IconClose, IconEdit, IconPlus, IconTrash, IconUser } from './Icons';
 import type { Identity, KeyInfo, Server } from './types';
+import { askConfirm } from './Confirm';
 
-/** Wiederverwendbare Zugangsdaten (Benutzer + Passwort oder Key) für mehrere Hosts. */
+/** Reusable credentials (username + password or key) for several hosts. */
 export function IdentitiesSection({
   identities,
   keys,
@@ -21,11 +22,11 @@ export function IdentitiesSection({
 
   async function remove(i: Identity) {
     const used = servers.filter((s) => s.identityId === i.id).length;
-    if (!confirm(`Identity «${i.name}» löschen?${used > 0 ? `\n${used} Host(s) benutzen sie und fallen auf ihre eigenen Zugangsdaten zurück.` : ''}`)) return;
+    if (!(await askConfirm(`Delete the identity "${i.name}"?${used > 0 ? `\n${used} host(s) use it and fall back to their own credentials.` : ''}`, { title: 'Delete identity', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.identitiesDelete(i.id);
       await onChanged();
-      toast('Identity gelöscht');
+      toast('Identity deleted');
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -37,7 +38,7 @@ export function IdentitiesSection({
         <div>
           <h1 style={{ fontSize: 18 }}>Identities</h1>
           <p className="muted">
-            Benutzer und Passwort (oder Key) einmal speichern und bei mehreren Hosts auswählen. Ändert sich das Passwort, änderst du es nur hier.
+            Save a username and password (or key) once and pick it for several hosts. When the password changes, you only change it here.
           </p>
         </div>
         <button className="primary" onClick={() => setEditing({ id: '', name: '', username: '', hasPassword: false, auth: 'password', keyId: '' })}>
@@ -46,7 +47,7 @@ export function IdentitiesSection({
       </div>
 
       {identities.length === 0 ? (
-        <p className="muted">Noch keine Identities.</p>
+        <p className="muted">No identities yet.</p>
       ) : (
         <div className="list">
           {identities.map((i) => {
@@ -59,13 +60,13 @@ export function IdentitiesSection({
                 <div className="grow">
                   <div className="list-title">{i.name}</div>
                   <div className="muted small">
-                    {i.username || '(kein Benutzer)'} · {i.auth === 'key' ? 'SSH-Key' : i.hasPassword ? 'Passwort' : 'ohne Passwort'} · {used} Host{used === 1 ? '' : 's'}
+                    {i.username || '(no username)'} · {i.auth === 'key' ? 'SSH key' : i.hasPassword ? 'password' : 'no password'} · {used} Host{used === 1 ? '' : 's'}
                   </div>
                 </div>
-                <button className="ghost icon-only" title="Bearbeiten" onClick={() => setEditing(i)}>
+                <button className="ghost icon-only" title="Edit" onClick={() => setEditing(i)}>
                   <IconEdit size={16} />
                 </button>
-                <button className="ghost icon-only danger" title="Löschen" onClick={() => void remove(i)}>
+                <button className="ghost icon-only danger" title="Delete" onClick={() => void remove(i)}>
                   <IconTrash size={16} />
                 </button>
               </div>
@@ -82,7 +83,7 @@ export function IdentitiesSection({
           onSaved={async () => {
             setEditing(null);
             await onChanged();
-            toast('Identity gespeichert');
+            toast('Identity saved');
           }}
         />
       )}
@@ -102,7 +103,7 @@ function IdentityForm({ initial, keys, onClose, onSaved }: { initial: Identity; 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (auth === 'key' && !keyId) {
-      setError('Bitte einen Key auswählen.');
+      setError('Please choose a key.');
       return;
     }
     setBusy(true);
@@ -120,22 +121,22 @@ function IdentityForm({ initial, keys, onClose, onSaved }: { initial: Identity; 
     <div className="overlay" onMouseDown={onClose}>
       <form className="modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <div className="modal-head">
-          <h2>{initial.id ? 'Identity bearbeiten' : 'Neue Identity'}</h2>
+          <h2>{initial.id ? 'Edit identity' : 'New identity'}</h2>
           <button type="button" className="ghost icon-only" onClick={onClose}>
             <IconClose size={16} />
           </button>
         </div>
         <label>
           Name
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. root auf allen Debian-Servern" />
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. root on all Debian servers" />
         </label>
         <label>
-          Benutzer
+          Username
           <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="root" />
         </label>
         <div className="seg slim">
           <button type="button" className={auth === 'password' ? 'on' : ''} onClick={() => setAuth('password')}>
-            Passwort
+            Password
           </button>
           <button type="button" className={auth === 'key' ? 'on' : ''} onClick={() => setAuth('key')}>
             SSH-Key
@@ -143,14 +144,14 @@ function IdentityForm({ initial, keys, onClose, onSaved }: { initial: Identity; 
         </div>
         {auth === 'password' ? (
           <label>
-            Passwort
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={initial.hasPassword ? '•••••••• (unverändert)' : ''} />
+            Password
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={initial.hasPassword ? '•••••••• (unchanged)' : ''} />
           </label>
         ) : (
           <label>
             Key
             <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
-              <option value="">Key wählen…</option>
+              <option value="">Choose key…</option>
               {keys.map((k) => (
                 <option key={k.id} value={k.id}>
                   {k.name} ({k.kind})
@@ -163,10 +164,10 @@ function IdentityForm({ initial, keys, onClose, onSaved }: { initial: Identity; 
         <div className="actions">
           <span className="grow" />
           <button type="button" onClick={onClose}>
-            Abbrechen
+            Cancel
           </button>
           <button className="primary" disabled={busy || !name.trim()}>
-            Speichern
+            Save
           </button>
         </div>
       </form>

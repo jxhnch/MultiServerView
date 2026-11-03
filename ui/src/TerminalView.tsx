@@ -7,12 +7,13 @@ import { api, binaryToB64, fromB64, onEvent, toB64 } from './bridge';
 import { SessionFrame } from './SessionFrame';
 import { AppearanceMenu, SftpButton, SnippetMenu } from './TerminalTools';
 import { findFont, findTheme, getTermSettings, onTermSettings, toXtermTheme } from './terminalThemes';
+import { PasswordPrompt, isAuthError, type Credentials } from './PasswordPrompt';
 import type { Server, SessionStatus } from './types';
 
 
 /**
- * Ein SSH-Terminal (xterm.js). Bleibt gemountet, solange der Tab offen ist - auch wenn man in einen
- * anderen Tab wechselt (dann nur versteckt). So gehen Scrollback und Verbindung nicht verloren.
+ * An SSH terminal (xterm.js). Stays mounted as long as the tab is open - even when you switch to
+ * another tab (it is only hidden then). That way scrollback and connection are not lost.
  */
 export function TerminalView({
   tabId,
@@ -39,11 +40,11 @@ export function TerminalView({
   onEdit: () => void;
   onOpenSftp: () => void;
   onManageSnippets: () => void;
-  /** Nur das Terminal, ohne Werkzeugleiste (für die geteilte Ansicht). */
+  /** Only the terminal, without toolbar (for the split view). */
   bare?: boolean;
-  /** Meldet eine Funktion an, mit der Text wie getippt in dieses Terminal geschickt werden kann. */
+  /** Registers a function that sends text into this terminal as if typed. */
   registerSender?: (send: ((text: string) => void) | null) => void;
-  /** Wird bei jeder Eingabe des Benutzers aufgerufen (für Broadcast). */
+  /** Called on every user input (for broadcast). */
   onUserInput?: (data: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -51,6 +52,9 @@ export function TerminalView({
   const fitRef = useRef<FitAddon | null>(null);
   const statusRef = useRef<SessionStatus>('connecting');
   const activeRef = useRef(active);
+  const credRef = useRef<Credentials | undefined>(undefined);
+  const [retry, setRetry] = useState(0);
+  const [prompt, setPrompt] = useState<'none' | 'missing' | 'failed'>('none');
   const reconnectRef = useRef(onReconnect);
   const [status, setStatusState] = useState<SessionStatus>('connecting');
   const [bg, setBg] = useState(() => findTheme(getTermSettings().theme).bg);
@@ -65,7 +69,7 @@ export function TerminalView({
     onStatus(tabId, s);
   };
 
-  // ---------------------------------------------------------------- Terminal einmal aufbauen
+  // ---------------------------------------------------------------- Build the terminal once
   useEffect(() => {
     const st = getTermSettings();
     const term = new Terminal({
@@ -92,7 +96,7 @@ export function TerminalView({
     };
     const paste = () => navigator.clipboard?.readText().then((t) => t && term.paste(t)).catch(() => undefined);
 
-    // Kopieren/Einfügen wie in Windows Terminal.
+    // Copy/paste like in Windows Terminal.
     term.attachCustomKeyEventHandler((ev) => {
       if (ev.type !== 'keydown') return true;
       const k = ev.key.toLowerCase();
@@ -134,7 +138,7 @@ export function TerminalView({
       if (statusRef.current === 'connected') void api.sshResize(tabId, cols, rows).catch(() => undefined);
     });
 
-    // Grösse nachziehen, wenn der Container sich ändert (nur wenn sichtbar).
+    // Follow the size when the container changes (only when visible).
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
@@ -144,23 +148,23 @@ export function TerminalView({
     });
     ro.observe(hostRef.current!);
 
-    // Ereignisse vom Host für diese Session
+    // Events from the host for this session
     const off = onEvent((e) => {
       if (!('sessionId' in e) || e.sessionId !== tabId) return;
       if (e.event === 'ssh.data') term.write(fromB64(e.data));
       else if (e.event === 'ssh.info') term.writeln(`\x1b[2m${e.message}\x1b[0m`);
       else if (e.event === 'ssh.closed') {
         setStatus('closed');
-        term.writeln(`\r\n\x1b[33m● Verbindung getrennt${e.reason ? ` (${e.reason})` : ''}. Enter drücken zum erneuten Verbinden.\x1b[0m`);
+        term.writeln(`\r\n\x1b[33m● Disconnected${e.reason ? ` (${e.reason})` : ''}. Press Enter to reconnect.\x1b[0m`);
       }
     });
 
-    // Markierten Text automatisch kopieren (wenn in den Einstellungen aktiv)
+    // Copy selected text automatically (if enabled in the settings)
     term.onSelectionChange(() => {
       if (getTermSettings().copyOnSelect && term.hasSelection()) navigator.clipboard?.writeText(term.getSelection()).catch(() => undefined);
     });
 
-    // Aussehen live ändern (Theme, Schrift, Grösse)
+    // Change appearance live (theme, font, size)
     const offSettings = onTermSettings((n) => {
       term.options.theme = toXtermTheme(findTheme(n.theme));
       term.options.fontFamily = findFont(n.font).css;
@@ -191,37 +195,48 @@ export function TerminalView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
-  // ---------------------------------------------------------------- (Neu) verbinden
+  // ---------------------------------------------------------------- (Re)connect
   useEffect(() => {
     const term = termRef.current;
     const fit = fitRef.current;
     if (!term || !fit) return;
     let cancelled = false;
 
-    if (reconnectKey > 0) term.writeln('\x1b[2m────────── neue Verbindung ──────────\x1b[0m');
-    term.writeln(`\x1b[2mVerbinde mit ${server.username ? server.username + '@' : ''}${server.host}:${server.port} …\x1b[0m`);
+    if (reconnectKey > 0) term.writeln('\x1b[2m────────── new connection ──────────\x1b[0m');
+    term.writeln(`\x1b[2mConnecting to ${server.username ? server.username + '@' : ''}${server.host}:${server.port} …\x1b[0m`);
+    const cred = credRef.current;
+    credRef.current = undefined;
+
+    // Password host without a saved password: ask right away, like PuTTY.
+    if (!cred && server.protocol === 'ssh' && server.auth === 'password' && !server.password && !server.identityId) {
+      term.writeln('\x1b[2mNo password saved – please enter it.\x1b[0m');
+      setStatus('error');
+      setPrompt('missing');
+      return;
+    }
     setStatus('connecting');
 
     try {
       if (hostRef.current && hostRef.current.clientWidth > 0) fit.fit();
     } catch {
-      /* Container noch ohne Grösse */
+      /* container has no size yet */
     }
 
     api
-      .sshOpen(tabId, server.id, term.cols || 120, term.rows || 30)
+      .sshOpen(tabId, server.id, term.cols || 120, term.rows || 30, cred)
       .then(() => {
         if (cancelled) return;
         setStatus('connected');
         if (activeRef.current) term.focus();
-        // Grösse sicherheitshalber nochmal melden (Layout kann sich während des Verbindens geändert haben)
+        // Report the size once more to be safe (the layout may have changed while connecting)
         void api.sshResize(tabId, term.cols, term.rows).catch(() => undefined);
       })
       .catch((err: Error) => {
         if (cancelled) return;
         setStatus('error');
         term.writeln(`\r\n\x1b[31m✖ ${err.message}\x1b[0m`);
-        term.writeln('\x1b[2mEnter drücken zum erneuten Versuch.\x1b[0m');
+        term.writeln('\x1b[2mPress Enter to try again.\x1b[0m');
+        if (isAuthError(err.message)) setPrompt('failed');
       });
 
     return () => {
@@ -229,9 +244,9 @@ export function TerminalView({
       void api.sshClose(tabId).catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, reconnectKey]);
+  }, [tabId, reconnectKey, retry]);
 
-  // ---------------------------------------------------------------- Sender für Broadcast
+  // ---------------------------------------------------------------- Sender for broadcast
   useEffect(() => {
     registerSender?.((text) => {
       if (statusRef.current === 'connected') void api.sshInput(tabId, toB64(text)).catch(() => undefined);
@@ -240,7 +255,7 @@ export function TerminalView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
-  // ---------------------------------------------------------------- Fokus beim Wechseln
+  // ---------------------------------------------------------------- Focus when switching
   useEffect(() => {
     if (!active) return;
     const id = requestAnimationFrame(() => {
@@ -273,6 +288,7 @@ export function TerminalView({
       extraActions={
         <>
           <SnippetMenu
+            server={server}
             onSend={(text) => {
               if (statusRef.current === 'connected') void api.sshInput(tabId, toB64(text)).catch(() => undefined);
               termRef.current?.focus();
@@ -287,6 +303,18 @@ export function TerminalView({
       <div className="term-wrap" style={{ background: bg }}>
         <div className="term-host" ref={hostRef} />
       </div>
+      {prompt !== 'none' && (
+        <PasswordPrompt
+          server={server}
+          failed={prompt === 'failed'}
+          onCancel={() => setPrompt('none')}
+          onSubmit={(cred) => {
+            credRef.current = cred;
+            setPrompt('none');
+            setRetry((n) => n + 1);
+          }}
+        />
+      )}
     </SessionFrame>
   );
 }

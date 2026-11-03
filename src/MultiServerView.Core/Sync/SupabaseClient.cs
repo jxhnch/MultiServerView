@@ -14,9 +14,9 @@ public sealed class SyncException : Exception
 public sealed record RemoteVault(long Version, byte[] Blob);
 
 /// <summary>
-/// Minimaler Supabase-Client (nur REST): Auth (E-Mail/Passwort) + Tabelle "vaults".
-/// In der Cloud liegt ausschliesslich der verschlüsselte Vault-Blob (Base64) - nie Klartext.
-/// Das SQL zum Anlegen der Tabelle steht in docs/supabase.sql.
+/// Minimal Supabase client (REST only): auth (e-mail/password) + table "vaults".
+/// Only the encrypted vault blob (Base64) is stored in the cloud - never plain text.
+/// The SQL to create the table is in docs/supabase.sql.
 /// </summary>
 public sealed class SupabaseClient
 {
@@ -30,22 +30,22 @@ public sealed class SupabaseClient
         _url = url.Trim().TrimEnd('/');
         _anonKey = anonKey.Trim();
         if (!Uri.TryCreate(_url, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && !uri.IsLoopback))
-            throw new SyncException("Die Supabase-URL muss mit https:// beginnen.");
-        if (_anonKey.Length == 0) throw new SyncException("Der Supabase-Anon-Key fehlt.");
+            throw new SyncException("The Supabase URL must start with https://.");
+        if (_anonKey.Length == 0) throw new SyncException("The Supabase anon key is missing.");
     }
 
     // ------------------------------------------------------------------ Auth
 
-    /// <summary>Meldet an und gibt den Access-Token zurück.</summary>
+    /// <summary>Signs in and returns the access token.</summary>
     public async Task<string> SignInAsync(string email, string password, CancellationToken ct = default)
     {
         var json = await SendAsync(HttpMethod.Post, "/auth/v1/token?grant_type=password", null,
             new JsonObject { ["email"] = email, ["password"] = password }, null, ct);
         var token = json?["access_token"]?.GetValue<string>();
-        return string.IsNullOrEmpty(token) ? throw new SyncException("Anmeldung fehlgeschlagen (kein Token erhalten).") : token;
+        return string.IsNullOrEmpty(token) ? throw new SyncException("Authentication failed (no token received).") : token;
     }
 
-    /// <summary>Legt ein Konto an. true = direkt angemeldet, false = E-Mail muss erst bestätigt werden.</summary>
+    /// <summary>Creates an account. true = signed in directly, false = the e-mail must be confirmed first.</summary>
     public async Task<bool> SignUpAsync(string email, string password, CancellationToken ct = default)
     {
         var json = await SendAsync(HttpMethod.Post, "/auth/v1/signup", null,
@@ -53,7 +53,7 @@ public sealed class SupabaseClient
         return !string.IsNullOrEmpty(json?["access_token"]?.GetValue<string>());
     }
 
-    // ------------------------------------------------------------------ Vault-Zeile
+    // ------------------------------------------------------------------ Vault row
 
     public async Task<RemoteVault?> GetVaultAsync(string token, CancellationToken ct = default)
     {
@@ -62,7 +62,7 @@ public sealed class SupabaseClient
         return Parse(arr[0]!);
     }
 
-    /// <summary>Legt die Zeile erstmals an (Version 1).</summary>
+    /// <summary>Creates the row for the first time (version 1).</summary>
     public async Task<long> InsertVaultAsync(string token, byte[] blob, CancellationToken ct = default)
     {
         var json = await SendAsync(HttpMethod.Post, "/rest/v1/vaults", token,
@@ -72,8 +72,8 @@ public sealed class SupabaseClient
     }
 
     /// <summary>
-    /// Optimistisches Update: klappt nur, wenn die Cloud noch auf <paramref name="expectedVersion"/> steht.
-    /// Gibt die neue Version zurück oder null bei Konflikt (jemand anderes war schneller).
+    /// Optimistic update: only works if the remote is still at <paramref name="expectedVersion"/>.
+    /// Returns the new version or null on a conflict (someone else was faster).
     /// </summary>
     public async Task<long?> UpdateVaultAsync(string token, long expectedVersion, byte[] blob, CancellationToken ct = default)
     {
@@ -91,7 +91,7 @@ public sealed class SupabaseClient
     private static RemoteVault Parse(JsonNode row)
     {
         var version = row["version"]?.GetValue<long>() ?? 0;
-        var blob = row["blob"]?.GetValue<string>() ?? throw new SyncException("Antwort ohne Blob.");
+        var blob = row["blob"]?.GetValue<string>() ?? throw new SyncException("Response without a blob.");
         return new RemoteVault(version, Convert.FromBase64String(blob));
     }
 
@@ -112,11 +112,11 @@ public sealed class SupabaseClient
         }
         catch (HttpRequestException ex)
         {
-            throw new SyncException("Cloud nicht erreichbar: " + ex.Message, ex);
+            throw new SyncException("Cloud not reachable: " + ex.Message, ex);
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new SyncException("Cloud antwortet nicht (Zeitüberschreitung).", ex);
+            throw new SyncException("The cloud does not answer (timeout).", ex);
         }
 
         using (res)
@@ -125,7 +125,7 @@ public sealed class SupabaseClient
             if (!res.IsSuccessStatusCode) throw new SyncException(Describe(res.StatusCode, text));
             if (string.IsNullOrWhiteSpace(text)) return null;
             try { return JsonNode.Parse(text); }
-            catch (JsonException ex) { throw new SyncException("Ungültige Antwort der Cloud.", ex); }
+            catch (JsonException ex) { throw new SyncException("Invalid response from the cloud.", ex); }
         }
     }
 
@@ -140,13 +140,13 @@ public sealed class SupabaseClient
                      ?? j?["message"]?.GetValue<string>()
                      ?? j?["error"]?.GetValue<string>();
         }
-        catch { /* kein JSON */ }
+        catch { /* not JSON */ }
 
         if (detail != null && detail.Contains("Invalid login credentials", StringComparison.OrdinalIgnoreCase))
-            return "E-Mail oder Passwort der Cloud stimmt nicht.";
+            return "E-mail or password of the cloud is wrong.";
         if (status == HttpStatusCode.NotFound && (detail?.Contains("vaults") ?? false))
-            return "Die Tabelle «vaults» fehlt in Supabase. Führe docs/supabase.sql aus.";
+            return "The table \"vaults\" is missing in Supabase. Run docs/supabase.sql.";
 
-        return $"Cloud-Fehler {(int)status}" + (detail != null ? ": " + detail : "");
+        return $"Cloud error {(int)status}" + (detail != null ? ": " + detail : "");
     }
 }

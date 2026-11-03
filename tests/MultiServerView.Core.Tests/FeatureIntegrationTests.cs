@@ -8,7 +8,7 @@ using Xunit;
 
 namespace MultiServerView.Core.Tests;
 
-/// <summary>SFTP, Port-Weiterleitungen und OS-Erkennung gegen einen echten lokalen sshd (siehe SshIntegrationTests).</summary>
+/// <summary>SFTP, port forwards and OS detection against a real local sshd (see SshIntegrationTests).</summary>
 public class FeatureIntegrationTests : IDisposable
 {
     private static string? Dir => Environment.GetEnvironmentVariable("MSV_SSH_TEST_DIR");
@@ -37,11 +37,11 @@ public class FeatureIntegrationTests : IDisposable
         var home = await sftp.ConnectAsync();
         Assert.StartsWith("/", home);
 
-        // Ordnerbaum lokal vorbereiten
-        var src = Path.Combine(_tmp, "projekt");
-        Directory.CreateDirectory(Path.Combine(src, "unter"));
-        File.WriteAllText(Path.Combine(src, "a.txt"), "hallo welt");
-        File.WriteAllBytes(Path.Combine(src, "unter", "gross.bin"), new byte[300_000]);
+        // Prepare a folder tree locally
+        var src = Path.Combine(_tmp, "project");
+        Directory.CreateDirectory(Path.Combine(src, "under"));
+        File.WriteAllText(Path.Combine(src, "a.txt"), "hello world");
+        File.WriteAllBytes(Path.Combine(src, "under", "large.bin"), new byte[300_000]);
 
         await sftp.MakeDirAsync(_remoteRoot);
         var last = new TransferProgress("", 0, 0, false);
@@ -49,21 +49,21 @@ public class FeatureIntegrationTests : IDisposable
         Assert.True(last.Finished);
         Assert.Equal(10 + 300_000, last.Total);
 
-        var listing = await sftp.ListAsync(_remoteRoot + "/projekt");
-        Assert.Equal(new[] { "unter", "a.txt" }, listing.Entries.Select(e => e.Name));
+        var listing = await sftp.ListAsync(_remoteRoot + "/project");
+        Assert.Equal(new[] { "under", "a.txt" }, listing.Entries.Select(e => e.Name));
         Assert.StartsWith("d", listing.Entries[0].Mode);
         Assert.Equal(_remoteRoot, listing.Parent);
 
-        // Download und Vergleich
+        // Download and comparison
         var dest = Path.Combine(_tmp, "zurueck");
         Directory.CreateDirectory(dest);
-        await sftp.DownloadAsync(_remoteRoot + "/projekt", dest, _ => { }, CancellationToken.None);
-        Assert.Equal("hallo welt", File.ReadAllText(Path.Combine(dest, "projekt", "a.txt")));
-        Assert.Equal(300_000, new FileInfo(Path.Combine(dest, "projekt", "unter", "gross.bin")).Length);
+        await sftp.DownloadAsync(_remoteRoot + "/project", dest, _ => { }, CancellationToken.None);
+        Assert.Equal("hello world", File.ReadAllText(Path.Combine(dest, "project", "a.txt")));
+        Assert.Equal(300_000, new FileInfo(Path.Combine(dest, "project", "under", "large.bin")).Length);
 
-        // Umbenennen, dann alles rekursiv löschen
-        await sftp.RenameAsync(_remoteRoot + "/projekt/a.txt", _remoteRoot + "/projekt/b.txt");
-        Assert.Contains((await sftp.ListAsync(_remoteRoot + "/projekt")).Entries, e => e.Name == "b.txt");
+        // Rename, then delete everything recursively
+        await sftp.RenameAsync(_remoteRoot + "/project/a.txt", _remoteRoot + "/project/b.txt");
+        Assert.Contains((await sftp.ListAsync(_remoteRoot + "/project")).Entries, e => e.Name == "b.txt");
         await sftp.DeleteAsync(_remoteRoot);
         await Assert.ThrowsAnyAsync<Exception>(() => sftp.ListAsync(_remoteRoot));
     }
@@ -99,7 +99,7 @@ public class FeatureIntegrationTests : IDisposable
         await tcp.ConnectAsync("127.0.0.1", port);
         var buf = new byte[32];
         var n = await tcp.GetStream().ReadAsync(buf).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.StartsWith("SSH-2.0", Encoding.ASCII.GetString(buf, 0, n)); // Banner des sshd, durch den Tunnel
+        Assert.StartsWith("SSH-2.0", Encoding.ASCII.GetString(buf, 0, n)); // banner of the sshd, through the tunnel
 
         mgr.Stop("f1");
         Assert.False(mgr.IsRunning("f1"));
@@ -133,7 +133,7 @@ public class FeatureIntegrationTests : IDisposable
         _ = Task.Run(async () =>
         {
             using var c = await local.AcceptTcpClientAsync();
-            await c.GetStream().WriteAsync("HALLO-VOM-PC"u8.ToArray());
+            await c.GetStream().WriteAsync("HELLO-FROM-PC"u8.ToArray());
             await Task.Delay(500);
         });
 
@@ -143,10 +143,10 @@ public class FeatureIntegrationTests : IDisposable
         await mgr.StartAsync(rule, Server(), null, Accept());
 
         using var tcp = new TcpClient();
-        await tcp.ConnectAsync("127.0.0.1", remotePort); // sshd läuft auf derselben Maschine
+        await tcp.ConnectAsync("127.0.0.1", remotePort); // sshd runs on the same machine
         var buf = new byte[32];
         var n = await tcp.GetStream().ReadAsync(buf).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal("HALLO-VOM-PC", Encoding.ASCII.GetString(buf, 0, n));
+        Assert.Equal("HELLO-FROM-PC", Encoding.ASCII.GetString(buf, 0, n));
         local.Stop();
     }
 
@@ -160,7 +160,7 @@ public class FeatureIntegrationTests : IDisposable
         using var mgr = new PortForwardManager();
 
         var ex = await Assert.ThrowsAsync<SshConnectException>(() => mgr.StartAsync(rule, Server(), null, Accept()));
-        Assert.Contains("konnte nicht geöffnet werden", ex.Message);
+        Assert.Contains("could not be opened", ex.Message);
         busy.Stop();
     }
 
@@ -181,5 +181,68 @@ public class FeatureIntegrationTests : IDisposable
         var p = ((IPEndPoint)l.LocalEndpoint).Port;
         l.Stop();
         return p;
+    }
+
+    [Fact]
+    public async Task Sftp_edit_text_keeps_line_endings_bom_and_detects_foreign_changes()
+    {
+        if (Dir == null) return;
+        using var sftp = new SftpSession(Server(), null, Accept());
+        await sftp.ConnectAsync();
+        await sftp.MakeDirAsync(_remoteRoot);
+
+        // Create a file with Windows line endings, BOM and umlauts.
+        var local = Path.Combine(_tmp, "conf.txt");
+        File.WriteAllBytes(local, new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes("line one\r\nämter\r\n")).ToArray());
+        await sftp.UploadAsync(local, _remoteRoot, _ => { }, CancellationToken.None);
+        var path = _remoteRoot + "/conf.txt";
+
+        var file = await sftp.ReadTextAsync(path);
+        Assert.Equal("line one\nämter\n", file.Content);
+        Assert.Equal("crlf", file.LineEnding);
+        Assert.True(file.Bom);
+
+        // Edit and write back: line endings and BOM stay as in the original.
+        var saved = await sftp.WriteTextAsync(path, "line one\nneu: 日本\n", file.LineEnding, file.Bom, file.Modified, file.Size, force: false);
+        var back = Path.Combine(_tmp, "back");
+        Directory.CreateDirectory(back);
+        await sftp.DownloadAsync(path, back, _ => { }, CancellationToken.None);
+        var bytes = File.ReadAllBytes(Path.Combine(back, "conf.txt"));
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3).ToArray());
+        Assert.Equal("line one\r\nneu: 日本\r\n", Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3));
+        Assert.True(saved.Modified >= file.Modified);
+
+        // Someone else changes the file: a normal save is rejected, with force it works.
+        var other = await sftp.ReadTextAsync(path);
+        await Task.Delay(1100); // SFTP timestamps have a resolution of one second
+        await sftp.WriteTextAsync(path, "from someone else\n", other.LineEnding, other.Bom, other.Modified, other.Size, force: true);
+        await Assert.ThrowsAsync<RemoteChangedException>(() =>
+            sftp.WriteTextAsync(path, "my change\n", other.LineEnding, other.Bom, other.Modified, other.Size, force: false));
+        await sftp.WriteTextAsync(path, "my change\n", other.LineEnding, other.Bom, other.Modified, other.Size, force: true);
+        Assert.Equal("my change\n", (await sftp.ReadTextAsync(path)).Content);
+
+        await sftp.DeleteAsync(_remoteRoot);
+    }
+
+    [Fact]
+    public async Task Sftp_edit_text_rejects_binary_non_utf8_folders_and_huge_files()
+    {
+        if (Dir == null) return;
+        using var sftp = new SftpSession(Server(), null, Accept());
+        await sftp.ConnectAsync();
+        await sftp.MakeDirAsync(_remoteRoot);
+
+        File.WriteAllBytes(Path.Combine(_tmp, "bin.dat"), new byte[] { 1, 2, 0, 3 });
+        File.WriteAllBytes(Path.Combine(_tmp, "latin1.txt"), new byte[] { 0x68, 0xE4, 0x6C, 0x6C, 0x6F }); // "hällo" in Latin-1 = invalid UTF-8
+        File.WriteAllBytes(Path.Combine(_tmp, "gross.txt"), Enumerable.Repeat((byte)'a', (int)SftpSession.MaxEditBytes + 1).ToArray());
+        foreach (var name in new[] { "bin.dat", "latin1.txt", "gross.txt" })
+            await sftp.UploadAsync(Path.Combine(_tmp, name), _remoteRoot, _ => { }, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sftp.ReadTextAsync(_remoteRoot + "/bin.dat"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sftp.ReadTextAsync(_remoteRoot + "/latin1.txt"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sftp.ReadTextAsync(_remoteRoot + "/gross.txt"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sftp.ReadTextAsync(_remoteRoot));
+
+        await sftp.DeleteAsync(_remoteRoot);
     }
 }

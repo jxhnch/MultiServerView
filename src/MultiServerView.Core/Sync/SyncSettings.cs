@@ -2,34 +2,45 @@ using System.Text.Json;
 
 namespace MultiServerView.Core.Sync;
 
-/// <summary>Schützt Geheimnisse auf der Platte (in der App: Windows DPAPI, gebunden an den Windows-Benutzer).</summary>
+/// <summary>Protects secrets on disk (in the app: Windows DPAPI, bound to the Windows user).</summary>
 public interface ISecretProtector
 {
     string Protect(string plain);
     string Unprotect(string protectedText);
 }
 
-/// <summary>Nur für Tests: tut so, als würde es schützen.</summary>
+/// <summary>For tests only: pretends to protect.</summary>
 public sealed class PlainProtector : ISecretProtector
 {
     public string Protect(string plain) => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(plain));
     public string Unprotect(string protectedText) => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(protectedText));
 }
 
-/// <summary>Zugangsdaten zur Cloud (Supabase). Das ist NICHT das Master-Passwort des Vaults.</summary>
+/// <summary>Where to sync to: a Supabase account or a folder. This is NOT the master password of the vault.</summary>
 public sealed class SyncSettings
 {
+    public const string ModeSupabase = "supabase";
+    public const string ModeFolder = "folder";
+
+    /// <summary>"supabase" (default) or "folder".</summary>
+    public string Mode { get; set; } = ModeSupabase;
+
+    /// <summary>Sync folder (only with Mode = folder), e.g. a folder in OneDrive.</summary>
+    public string Folder { get; set; } = "";
+
     public string Url { get; set; } = "";
     public string AnonKey { get; set; } = "";
     public string Email { get; set; } = "";
     public string Password { get; set; } = "";
     public DateTimeOffset? LastSync { get; set; }
 
+    public bool IsFolder => Mode == ModeFolder;
+
     public bool IsConfigured =>
-        Url.Length > 0 && AnonKey.Length > 0 && Email.Length > 0 && Password.Length > 0;
+        IsFolder ? Folder.Length > 0 : Url.Length > 0 && AnonKey.Length > 0 && Email.Length > 0 && Password.Length > 0;
 }
 
-/// <summary>Speichert <see cref="SyncSettings"/> lokal; das Cloud-Passwort wird geschützt abgelegt.</summary>
+/// <summary>Stores <see cref="SyncSettings"/> locally; the cloud password is stored protected.</summary>
 public sealed class SyncSettingsStore
 {
     private readonly string _path;
@@ -43,6 +54,8 @@ public sealed class SyncSettingsStore
 
     private sealed class Disk
     {
+        public string Mode { get; set; } = "";
+        public string Folder { get; set; } = "";
         public string Url { get; set; } = "";
         public string AnonKey { get; set; } = "";
         public string Email { get; set; } = "";
@@ -58,6 +71,8 @@ public sealed class SyncSettingsStore
             var d = JsonSerializer.Deserialize<Disk>(File.ReadAllText(_path), Json.Options) ?? new Disk();
             return new SyncSettings
             {
+                Mode = d.Mode == SyncSettings.ModeFolder ? SyncSettings.ModeFolder : SyncSettings.ModeSupabase,
+                Folder = d.Folder,
                 Url = d.Url,
                 AnonKey = d.AnonKey,
                 Email = d.Email,
@@ -75,6 +90,8 @@ public sealed class SyncSettingsStore
     {
         var d = new Disk
         {
+            Mode = s.Mode,
+            Folder = s.Folder.Trim(),
             Url = s.Url.Trim(),
             AnonKey = s.AnonKey.Trim(),
             Email = s.Email.Trim(),

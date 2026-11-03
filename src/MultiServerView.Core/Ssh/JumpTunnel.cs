@@ -4,12 +4,12 @@ using Renci.SshNet;
 
 namespace MultiServerView.Core.Ssh;
 
-/// <summary>Findet zu einer Server-Id den (aufgelösten) Host samt Key. null = gibt es nicht (mehr).</summary>
+/// <summary>Finds the (resolved) host including its key for a server id. null = does not exist (any more).</summary>
 public delegate (ServerEntry Server, KeyEntry? Key)? JumpResolver(string serverId);
 
 /// <summary>
-/// Verbindet über eine Kette von Jump Hosts (A -> B -> Ziel). Am Ende gibt es einen lokalen Port auf 127.0.0.1,
-/// der durch alle Hops bis zum Ziel führt - SSH, SFTP, VNC und RDP verbinden sich einfach dorthin.
+/// Connects through a chain of jump hosts (A -> B -> target). At the end there is a local port on 127.0.0.1
+/// that leads through all hops to the target - SSH, SFTP, VNC and RDP simply connect there.
 /// </summary>
 public sealed class JumpTunnel : IDisposable
 {
@@ -20,26 +20,26 @@ public sealed class JumpTunnel : IDisposable
     public string Host => "127.0.0.1";
     public int Port { get; private set; }
 
-    /// <summary>Öffnet den Tunnel. Gibt null zurück, wenn der Server gar keinen Jump Host hat.</summary>
+    /// <summary>Opens the tunnel. Returns null if the server has no jump host at all.</summary>
     public static async Task<JumpTunnel?> OpenAsync(ServerEntry target, JumpResolver? resolve,
         Func<string, int, string, HostKeyTrust> check, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(target.JumpHostId)) return null;
-        if (resolve == null) throw new SshConnectException("Jump Hosts sind hier nicht verfügbar.");
+        if (resolve == null) throw new SshConnectException("Jump hosts are not available here.");
 
-        // Kette von innen (direkt vor dem Ziel) nach aussen auflösen.
+        // Resolve the chain from the inside (directly before the target) to the outside.
         var hops = new List<(ServerEntry Server, KeyEntry? Key)>();
         var seen = new HashSet<string> { target.Id };
         var currentId = target.JumpHostId;
         while (!string.IsNullOrEmpty(currentId))
         {
             if (!seen.Add(currentId) || hops.Count >= MaxHops)
-                throw new SshConnectException("Die Jump-Host-Kette ist ungültig (Schleife oder mehr als 5 Stationen).");
-            var hop = resolve(currentId) ?? throw new SshConnectException("Der Jump Host dieses Servers existiert nicht mehr.");
+                throw new SshConnectException("The jump host chain is invalid (loop or more than 5 hops).");
+            var hop = resolve(currentId) ?? throw new SshConnectException("The jump host of this server no longer exists.");
             hops.Add(hop);
             currentId = hop.Server.JumpHostId;
         }
-        hops.Reverse(); // zuerst der äusserste, der direkt erreichbar ist
+        hops.Reverse(); // the outermost one first, which is directly reachable
 
         var tunnel = new JumpTunnel();
         try
@@ -60,7 +60,7 @@ public sealed class JumpTunnel : IDisposable
                 catch (Exception ex)
                 {
                     client.Dispose();
-                    throw new SshConnectException($"Jump Host «{server.Name}»: {hostKeyError() ?? SshConnector.Describe(ex)}", ex);
+                    throw new SshConnectException($"Jump host \"{server.Name}\": {hostKeyError() ?? SshConnector.Describe(ex)}", ex);
                 }
                 tunnel._clients.Add(client);
 
@@ -98,8 +98,8 @@ public sealed class JumpTunnel : IDisposable
 
     public void Dispose()
     {
-        foreach (var p in _ports) try { p.Stop(); } catch { /* egal beim Aufräumen */ }
-        foreach (var c in _clients.AsEnumerable().Reverse()) try { c.Dispose(); } catch { /* egal beim Aufräumen */ }
+        foreach (var p in _ports) try { p.Stop(); } catch { /* does not matter during cleanup */ }
+        foreach (var c in _clients.AsEnumerable().Reverse()) try { c.Dispose(); } catch { /* does not matter during cleanup */ }
         _ports.Clear();
         _clients.Clear();
     }

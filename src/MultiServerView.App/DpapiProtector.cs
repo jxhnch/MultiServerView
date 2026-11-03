@@ -4,7 +4,7 @@ using MultiServerView.Core.Sync;
 
 namespace MultiServerView.App;
 
-/// <summary>Windows DPAPI: Nur dieser Windows-Benutzer auf diesem PC kann das Cloud-Passwort wieder lesen.</summary>
+/// <summary>Windows DPAPI: only this Windows user on this PC can read the cloud password again.</summary>
 internal sealed class DpapiProtector : ISecretProtector
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("MultiServerView.sync.v1");

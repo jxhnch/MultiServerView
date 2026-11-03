@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 namespace MultiServerView.App.Rdp;
 
 /// <summary>
-/// WinForms-Hülle um das RDP-ActiveX (MsRdpClient9NotSafeForScripting, ab Windows 8.1 / Server 2012 R2).
-/// Die CLSID kommt aus mstscax.dll; das Control wird danach per dynamic angesprochen.
+/// WinForms wrapper around the RDP ActiveX (MsRdpClient9NotSafeForScripting, from Windows 8.1 / Server 2012 R2).
+/// The CLSID comes from mstscax.dll; the control is then addressed via dynamic.
 /// </summary>
 internal sealed class RdpAxHost : AxHost
 {
@@ -14,8 +14,8 @@ internal sealed class RdpAxHost : AxHost
 }
 
 /// <summary>
-/// Das Passwort lässt sich beim RDP-Control nur über dieses (nicht-skriptbare) Interface setzen.
-/// Wichtig: Es sind nur die ersten Einträge der vtable deklariert; <c>ClearTextPassword</c> ist der erste.
+/// The password can only be set on the RDP control through this (non-scriptable) interface.
+/// Important: only the first entries of the vtable are declared; <c>ClearTextPassword</c> is the first.
 /// </summary>
 [ComImport]
 [Guid("c1e6743a-41c1-4a74-832a-0dd06c1c7a0e")]

@@ -12,7 +12,7 @@ namespace MultiServerView.Core.Tests;
 
 public class ProxyTests
 {
-    /// <summary>Kleiner TCP-Server, der alles zurückschickt (Echo) - Ersatz für einen VNC-Server.</summary>
+    /// <summary>Small TCP server that sends everything back (echo) - a stand-in for a VNC server.</summary>
     private static (TcpListener listener, int port) StartEcho()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -73,7 +73,7 @@ public class ProxyTests
 
         using (var first = new ClientWebSocket())
         {
-            await first.ConnectAsync(new Uri(url), CancellationToken.None); // einmal geht
+            await first.ConnectAsync(new Uri(url), CancellationToken.None); // once works
         }
 
         using var second = new ClientWebSocket();
@@ -106,15 +106,15 @@ public class ImporterTests
     private const string Sample = """
         <?xml version="1.0" encoding="utf-8"?>
         <Connections Name="Connections" Export="false" EncryptionEngine="AES" BlockCipherMode="GCM" KdfIterations="1000" FullFileEncryption="false" Protected="x" ConfVersion="2.6">
-          <Node Name="Produktion" Type="Container" Expanded="true">
+          <Node Name="Production" Type="Container" Expanded="true">
             <Node Name="web-01" Type="Connection" Descr="Frontend" Hostname="10.0.0.5" Protocol="SSH2" Port="2222" Username="deploy" Password="encrypted" />
             <Node Name="ad-01" Type="Connection" Hostname="ad.corp.local" Protocol="RDP" Port="3389" Username="admin" Domain="CORP" />
-            <Node Name="Unterordner" Type="Container">
+            <Node Name="Subfolder" Type="Container">
               <Node Name="vnc-box" Type="Connection" Hostname="10.0.0.9" Protocol="VNC" Port="5900" />
             </Node>
           </Node>
-          <Node Name="Webinterface" Type="Connection" Hostname="router.local" Protocol="HTTP" Port="80" />
-          <Node Name="ohne-port" Type="Connection" Hostname="h.local" Protocol="RDP" />
+          <Node Name="Web interface" Type="Connection" Hostname="router.local" Protocol="HTTP" Port="80" />
+          <Node Name="no-port" Type="Connection" Hostname="h.local" Protocol="RDP" />
         </Connections>
         """;
 
@@ -129,22 +129,22 @@ public class ImporterTests
         var web = result.Servers.Single(s => s.Name == "web-01");
         Assert.Equal(Protocol.Ssh, web.Protocol);
         Assert.Equal(2222, web.Port);
-        Assert.Equal("Produktion", web.Group);
+        Assert.Equal("Production", web.Group);
         Assert.Equal("Frontend", web.Notes);
-        Assert.Equal("", web.Password); // Passwörter werden nicht importiert
+        Assert.Equal("", web.Password); // passwords are not imported
 
         var ad = result.Servers.Single(s => s.Name == "ad-01");
         Assert.Equal("CORP\\admin", ad.Username);
 
-        Assert.Equal("Produktion / Unterordner", result.Servers.Single(s => s.Name == "vnc-box").Group);
-        Assert.Equal(3389, result.Servers.Single(s => s.Name == "ohne-port").Port);
+        Assert.Equal("Production / Subfolder", result.Servers.Single(s => s.Name == "vnc-box").Group);
+        Assert.Equal(3389, result.Servers.Single(s => s.Name == "no-port").Port);
     }
 
     [Fact]
     public void Rejects_other_files()
     {
         Assert.Throws<ArgumentException>(() => MRemoteNgImporter.Parse("<html/>"));
-        Assert.Throws<ArgumentException>(() => MRemoteNgImporter.Parse("kein xml"));
+        Assert.Throws<ArgumentException>(() => MRemoteNgImporter.Parse("not xml"));
     }
 }
 

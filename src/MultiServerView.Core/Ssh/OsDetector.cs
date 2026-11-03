@@ -1,6 +1,6 @@
 namespace MultiServerView.Core.Ssh;
 
-/// <summary>Erkennt das Betriebssystem aus /etc/os-release (+ "---" + uname -s).</summary>
+/// <summary>Detects the operating system from /etc/os-release (+ "---" + uname -s).</summary>
 public static class OsDetector
 {
     private static readonly Dictionary<string, string> Known = new(StringComparer.OrdinalIgnoreCase)
@@ -15,14 +15,14 @@ public static class OsDetector
     };
 
     /// <summary>
-    /// Befehl, der auf Linux/BSD/macOS die Kennung liefert und auf Windows (cmd.exe) mit "ver" antwortet.
-    /// Ohne Umleitungen (2>/dev/null) - die versteht cmd.exe nicht und meldet nur einen Pfadfehler.
+    /// Command that returns the id on Linux/BSD/macOS and answers with "ver" on Windows (cmd.exe).
+    /// Without redirections (2>/dev/null) - cmd.exe does not understand them and only reports a path error.
     /// </summary>
     public const string ProbeCommand = "cat /etc/os-release; echo '---'; uname -s || ver";
 
     public static string Parse(string output)
     {
-        // Windows-Server mit OpenSSH: cmd.exe versteht "cat" und "uname" nicht.
+        // Windows server with OpenSSH: cmd.exe does not understand "cat" and "uname". The German phrase below is the message of a German-language Windows.
         if (output.Contains("Microsoft Windows [", StringComparison.OrdinalIgnoreCase)
             || output.Contains("not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
             || output.Contains("nicht als interner oder externer Befehl", StringComparison.OrdinalIgnoreCase)

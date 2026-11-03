@@ -375,22 +375,80 @@ label {
   background: var(--bg);
   color: var(--text);
 }
+/* Die Tab-Leiste ist die Titelleiste des Fensters: leere Flächen ziehen das Fenster, alles Klickbare nicht. */
 .tabbar {
   flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
+  /* oben 4 px weniger: Windows lässt dort einen schmalen Streifen in der gleichen Farbe (zum Grössenändern) */
+  padding: 3px 0 7px 10px;
   background: var(--bar);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+.win-max .tabbar {
+  padding-top: 7px;
+}
+.tabbar button,
+.tabbar .x {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Fensterknöpfe (Minimieren / Maximieren / Schliessen) rechts in der Titelleiste */
+.win-ctl {
+  display: flex;
+  align-self: stretch;
+  margin: -3px 0 -7px 8px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.win-max .win-ctl {
+  margin-top: -7px;
+}
+.win-btn {
+  width: 46px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--chrome-muted);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.win-btn:hover:not(:disabled) {
+  background: var(--tab-hover);
+  color: var(--chrome-text);
+}
+.win-btn.close:hover:not(:disabled) {
+  background: #c42b1c;
+  color: #fff;
+}
+.title-strip {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 40px;
+  display: flex;
+  align-items: stretch;
+  background: transparent;
+  -webkit-app-region: drag;
+  app-region: drag;
+  z-index: 5;
+}
+.title-strip .win-ctl {
+  margin: 0;
 }
 .tab {
   display: flex;
   align-items: center;
   gap: 9px;
   height: 34px;
-  min-width: 150px;
+  min-width: 52px;
   max-width: 250px;
   padding: 0 12px;
   border: none;
@@ -1190,6 +1248,7 @@ label {
 
 /* ---------- Entsperren */
 .unlock {
+  position: relative;
   height: 100%;
   display: grid;
   place-items: center;
@@ -2125,4 +2184,146 @@ label {
 }
 .bare-body .term-wrap {
   padding: 6px 4px 4px 8px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-switch {
+  display: flex;
+  gap: 6px;
+}
+.mode-switch button {
+  flex: 1;
+  justify-content: center;
+}
+.mode-switch button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.mode-switch button.on .muted {
+  color: inherit;
+  opacity: 0.8;
+}
+.title-strip .win-btn {
+  color: var(--muted);
+}
+.title-strip .win-btn:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.2);
+  color: var(--text);
+}
+.title-strip .win-btn.close:hover:not(:disabled) {
+  background: #c42b1c;
+  color: #fff;
+}
+.win-btn:focus {
+  outline: none;
+}
+
+/* Texteditor für Remote-Dateien (SFTP) */
+.modal.editor {
+  width: min(980px, 94vw);
+}
+.editor-text {
+  height: min(62vh, 640px);
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+}
+
+/* Workspace-Leiste über der Host-Liste */
+.ws-bar {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.toolbar.ws-bar .tool.on {
+  background: var(--hover);
+  border-color: var(--line);
+  font-weight: 700;
+}
+.toolbar.ws-bar .tool.drop {
+  border-color: var(--accent);
+}
+.ws-count {
+  margin-left: 4px;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* Bestätigungsdialog (ersetzt das graue Browser-confirm) */
+.confirm-text {
+  margin: 0;
+  white-space: pre-line;
+  line-height: 1.5;
+}
+.modal button.primary.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.overlay.confirm-overlay {
+  z-index: 70; /* über allen anderen Dialogen, auch über dem Texteditor */
+}
+
+/* Proxmox-Import: Liste mit Häkchen */
+.pve-list {
+  max-height: 40vh;
+  overflow: auto;
+}
+.list-row.dim {
+  opacity: 0.55;
+}
+.notice.ok {
+  background: rgba(15, 157, 107, 0.12);
+  color: var(--ok);
+}
+
+.pve-list .list-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.pve-list .list-row input[type='checkbox'] {
+  width: auto;
+  flex: none;
+}
+.pve-list .list-row.dim {
+  cursor: default;
+}
+
+/* Vault leeren: Liste dessen, was gelöscht wird */
+.clear-list {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.modal button.danger:not(.primary):not(.ghost) {
+  border-color: var(--danger);
+}
+
+/* Seite «Import»: Abschnitte untereinander */
+.import-section {
+  margin-top: 24px;
+}
+.import-section .list {
+  margin-top: 10px;
+}
+.import-section .sec-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.import-section .sec-head p {
+  margin: 4px 0 0;
+  max-width: 640px;
 }

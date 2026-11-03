@@ -4,8 +4,8 @@ using MultiServerView.Core.Sync;
 namespace MultiServerView.App;
 
 /// <summary>
-/// Synchronisiert automatisch: 3 Sekunden nach der letzten Änderung und einmal nach dem Entsperren.
-/// Meldet den Zustand ans UI (Event "sync.status"); bei Änderungen aus der Cloud zusätzlich "vault.changed".
+/// Synchronizes automatically: 3 seconds after the last change and once after unlocking.
+/// Reports the state to the UI (event "sync.status"); for changes from the remote additionally "vault.changed".
 /// </summary>
 internal sealed class AutoSync : IDisposable
 {
@@ -23,7 +23,7 @@ internal sealed class AutoSync : IDisposable
         _store.Changed += Schedule;
     }
 
-    /// <summary>Plant einen Sync in 3 Sekunden (mehrere Änderungen werden gebündelt).</summary>
+    /// <summary>Schedules a sync in 3 seconds (several changes are bundled).</summary>
     public void Schedule()
     {
         if (!_store.IsUnlocked || !_sync.Settings.IsConfigured) return;
@@ -39,13 +39,13 @@ internal sealed class AutoSync : IDisposable
     private async Task RunQuietlyAsync()
     {
         try { await RunAsync(); }
-        catch { /* Status wurde bereits ans UI gemeldet */ }
+        catch { /* the status was already reported to the UI */ }
     }
 
-    /// <summary>Führt den Sync aus und meldet das Ergebnis. Wirft bei Fehlern (nach dem Melden).</summary>
+    /// <summary>Runs the sync and reports the result. Throws on errors (after reporting).</summary>
     public async Task<SyncResult> RunAsync()
     {
-        _emit(new { @event = "sync.status", state = "syncing", message = "Synchronisiere…" });
+        _emit(new { @event = "sync.status", state = "syncing", message = "Syncing…" });
         try
         {
             var result = await _sync.SyncAsync();
@@ -58,9 +58,9 @@ internal sealed class AutoSync : IDisposable
                 state = "ok",
                 message = result.Outcome switch
                 {
-                    SyncOutcome.UpToDate => "Alles aktuell",
-                    SyncOutcome.Pulled => "Änderungen aus der Cloud übernommen",
-                    SyncOutcome.Merged => "Zusammengeführt",
+                    SyncOutcome.UpToDate => "Up to date",
+                    SyncOutcome.Pulled => "Changes taken over from the remote",
+                    SyncOutcome.Merged => "Merged",
                     _ => "Hochgeladen"
                 },
                 at = result.At

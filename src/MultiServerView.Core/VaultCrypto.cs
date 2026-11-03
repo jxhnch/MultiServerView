@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace MultiServerView.Core;
 
-/// <summary>Abgeleiteter Schlüssel. Wird im Speicher gehalten solange der Vault offen ist.</summary>
+/// <summary>Derived key. Kept in memory as long as the vault is open.</summary>
 public sealed class VaultKey
 {
     public VaultKey(byte[] key, byte[] salt, int iterations)
@@ -17,16 +17,16 @@ public sealed class VaultKey
     public int Iterations { get; }
 }
 
-/// <summary>Der Blob wurde mit einem anderen Salt verschlüsselt (anderer Vault).</summary>
+/// <summary>The blob was encrypted with a different salt (a different vault).</summary>
 public sealed class VaultMismatchException : CryptographicException
 {
-    public VaultMismatchException() : base("Dieser Vault gehört zu einer anderen Installation (anderer Salt).") { }
+    public VaultMismatchException() : base("This vault belongs to another installation (different salt).") { }
 }
 
 /// <summary>
-/// Verschlüsselung des Vaults: PBKDF2-SHA256 (Passwort -> Key) + AES-256-GCM.
-/// Dateiformat: "MSV1" | iterations(int32 LE) | salt(16) | nonce(12) | tag(16) | ciphertext.
-/// Header (magic + iterations + salt) wird als Associated Data mit authentifiziert.
+/// Encryption of the vault: PBKDF2-SHA256 (password -> key) + AES-256-GCM.
+/// File format: "MSV1" | iterations(int32 LE) | salt(16) | nonce(12) | tag(16) | ciphertext.
+/// The header (magic + iterations + salt) is authenticated as associated data.
 /// </summary>
 public static class VaultCrypto
 {
@@ -46,7 +46,7 @@ public static class VaultCrypto
         return new VaultKey(key, salt, iterations);
     }
 
-    /// <summary>Verschlüsselt mit bereits abgeleitetem Key. Pro Aufruf neue Nonce.</summary>
+    /// <summary>Encrypts with an already derived key. New nonce on every call.</summary>
     public static byte[] Seal(byte[] plaintext, VaultKey key)
     {
         var header = BuildHeader(key);
@@ -65,7 +65,7 @@ public static class VaultCrypto
         return blob;
     }
 
-    /// <summary>Entschlüsselt. Wirft <see cref="CryptographicException"/> bei falschem Passwort oder manipulierter Datei.</summary>
+    /// <summary>Decrypts. Throws <see cref="CryptographicException"/> on a wrong password or a tampered file.</summary>
     public static byte[] Open(byte[] blob, string password, out VaultKey key)
     {
         var (iterations, salt) = ReadHeader(blob);
@@ -74,8 +74,8 @@ public static class VaultCrypto
     }
 
     /// <summary>
-    /// Entschlüsselt mit einem schon abgeleiteten Key (z. B. für Cloud-Blobs).
-    /// Wirft <see cref="VaultMismatchException"/>, wenn Salt/Iterationen nicht zum Key passen.
+    /// Decrypts with an already derived key (e.g. for synced blobs).
+    /// Throws <see cref="VaultMismatchException"/> if salt/iterations do not match the key.
     /// </summary>
     public static byte[] OpenWithKey(byte[] blob, VaultKey key)
     {
@@ -88,11 +88,11 @@ public static class VaultCrypto
     private static (int iterations, byte[] salt) ReadHeader(byte[] blob)
     {
         if (blob.Length < HeaderSize + NonceSize + TagSize || !blob.AsSpan(0, 4).SequenceEqual(Magic))
-            throw new CryptographicException("Keine gültige Vault-Datei.");
+            throw new CryptographicException("Not a valid vault file.");
 
         var iterations = BitConverter.ToInt32(blob, 4);
         if (iterations < 100_000 || iterations > 10_000_000)
-            throw new CryptographicException("Ungültige Vault-Datei (Iterationen).");
+            throw new CryptographicException("Invalid vault file (iterations).");
 
         return (iterations, blob.AsSpan(8, SaltSize).ToArray());
     }

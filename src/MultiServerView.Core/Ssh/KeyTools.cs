@@ -1,18 +1,18 @@
 namespace MultiServerView.Core.Ssh;
 
-public static class KeyTools
+public static partial class KeyTools
 {
     /// <summary>
-    /// Prüft einen privaten Key (und die Passphrase) und gibt den Typ zurück ("ED25519", "RSA", "ECDSA").
-    /// Wirft <see cref="SshConnectException"/>, wenn der Key nicht lesbar ist.
+    /// Checks a private key (and the passphrase) and returns the type ("ED25519", "RSA", "ECDSA").
+    /// Throws <see cref="SshConnectException"/> if the key cannot be read.
     /// </summary>
     public static string Inspect(string privateKey, string passphrase)
     {
         var text = privateKey.Trim();
         if (!text.Contains("PRIVATE KEY", StringComparison.Ordinal))
-            throw new SshConnectException("Das sieht nicht nach einem privaten SSH-Key aus (Zeile «BEGIN … PRIVATE KEY» fehlt).");
+            throw new SshConnectException("This does not look like a private SSH key (the line \"BEGIN … PRIVATE KEY\" is missing).");
         if (text.Contains("PuTTY-User-Key-File", StringComparison.Ordinal))
-            throw new SshConnectException("PuTTY-Keys (.ppk) werden nicht unterstützt. In PuTTYgen: Conversions → Export OpenSSH key.");
+            throw new SshConnectException("PuTTY keys (.ppk) are not supported. In PuTTYgen: Conversions → Export OpenSSH key.");
 
         var file = SshConnector.LoadKey(new KeyEntry { PrivateKey = text, Passphrase = passphrase });
         var algorithm = file.HostKeyAlgorithms.FirstOrDefault()?.Name ?? "";

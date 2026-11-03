@@ -1,9 +1,9 @@
 namespace MultiServerView.Core.Import;
 
 /// <summary>
-/// Liest eine OpenSSH-Konfiguration (~/.ssh/config). Pro konkretem "Host"-Eintrag entsteht ein SSH-Host.
-/// Übernommen: HostName, User, Port, ProxyJump (als Jump Host, wenn der Jump-Host ebenfalls importiert wird).
-/// Nicht übernommen: Platzhalter-Einträge (Host *), Match-Blöcke, IdentityFile (Keys bitte einzeln importieren), ProxyCommand.
+/// Reads an OpenSSH configuration (~/.ssh/config). Every concrete "Host" entry becomes an SSH host.
+/// Taken over: HostName, User, Port, ProxyJump (as a jump host if the jump host is imported as well).
+/// Not taken over: wildcard entries (Host *), Match blocks, IdentityFile (import keys individually), ProxyCommand.
 /// </summary>
 public static class SshConfigImporter
 {
@@ -73,7 +73,7 @@ public static class SshConfigImporter
             Username = b.User ?? defaults.User ?? ""
         }).ToList();
 
-        // ProxyJump: auf einen anderen importierten Host zeigen (per Alias oder HostName)
+        // ProxyJump: point to another imported host (by alias or HostName)
         for (var i = 0; i < blocks.Count; i++)
         {
             var jump = blocks[i].ProxyJump ?? defaults.ProxyJump;

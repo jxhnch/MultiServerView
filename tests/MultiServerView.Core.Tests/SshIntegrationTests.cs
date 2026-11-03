@@ -6,9 +6,9 @@ using Xunit;
 namespace MultiServerView.Core.Tests;
 
 /// <summary>
-/// Echte SSH-Verbindungen gegen einen lokalen sshd. Laufen nur, wenn MSV_SSH_TEST_DIR gesetzt ist
-/// (Ordner mit userkey, userkey_pp = Passphrase "pp-secret"; Server 127.0.0.1:2222, Benutzer msvtest / testpw-123).
-/// Ohne die Variable tun diese Tests nichts - so bleibt `dotnet test` überall grün.
+/// Real SSH connections against a local sshd. They only run if MSV_SSH_TEST_DIR is set
+/// (folder with userkey, userkey_pp = passphrase "pp-secret"; server 127.0.0.1:2222, user msvtest / testpw-123).
+/// Without the variable these tests do nothing - so `dotnet test` stays green everywhere.
 /// </summary>
 public class SshIntegrationTests
 {
@@ -54,9 +54,9 @@ public class SshIntegrationTests
     public async Task Wrong_password_gives_friendly_error()
     {
         if (Dir == null) return;
-        using var s = new SshTerminalSession(Server("falsch"), null, Accept());
+        using var s = new SshTerminalSession(Server("wrong"), null, Accept());
         var ex = await Assert.ThrowsAsync<SshConnectException>(() => s.ConnectAsync(80, 24));
-        Assert.Contains("Anmeldung fehlgeschlagen", ex.Message);
+        Assert.Contains("Authentication failed", ex.Message);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class SshIntegrationTests
         server.Port = 1;
         using var s = new SshTerminalSession(server, null, Accept());
         var ex = await Assert.ThrowsAsync<SshConnectException>(() => s.ConnectAsync(80, 24));
-        Assert.Contains("abgelehnt", ex.Message);
+        Assert.Contains("refused", ex.Message);
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class SshIntegrationTests
         var pem = File.ReadAllText(Path.Combine(Dir, "userkey_pp"));
 
         Assert.Equal("RSA", KeyTools.Inspect(pem, "pp-secret"));
-        Assert.Throws<SshConnectException>(() => KeyTools.Inspect(pem, "falsch"));
+        Assert.Throws<SshConnectException>(() => KeyTools.Inspect(pem, "wrong"));
 
         var server = Server("");
         server.Auth = AuthMethod.Key;
@@ -114,13 +114,13 @@ public class SshIntegrationTests
     {
         if (Dir == null) return;
         using var s = new SshTerminalSession(Server(), null, Accept());
-        string? closedReason = "nicht-geschlossen";
+        string? closedReason = "not-closed";
         var closed = new TaskCompletionSource();
         s.Closed += r => { closedReason = r; closed.TrySetResult(); };
         await s.ConnectAsync(80, 24);
         s.Resize(200, 50);
         s.Write(Encoding.UTF8.GetBytes("exit\n"));
         await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.NotEqual("nicht-geschlossen", closedReason);
+        Assert.NotEqual("not-closed", closedReason);
     }
 }

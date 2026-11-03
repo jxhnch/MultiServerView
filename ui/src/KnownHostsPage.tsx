@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './bridge';
 import { IconShield, IconTrash } from './Icons';
 import type { KnownHost } from './types';
+import { askConfirm } from './Confirm';
 
 export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error') => void }) {
   const [items, setItems] = useState<KnownHost[]>([]);
@@ -9,7 +10,7 @@ export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | '
   useEffect(() => void load(), [load]);
 
   async function remove(k: KnownHost) {
-    if (!confirm(`Host-Key von ${k.id} vergessen? Beim nächsten Verbinden wird er neu gespeichert.`)) return;
+    if (!(await askConfirm(`Forget the host key of ${k.id}? It will be stored again the next time you connect.`, { title: 'Forget host key', confirmLabel: 'Forget' }))) return;
     try {
       await api.knownHostsRemove(k.id);
       await load();
@@ -24,16 +25,16 @@ export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | '
         <div>
           <h1>Known Hosts</h1>
           <p className="muted">
-            Beim ersten Verbinden merkt sich die App den Fingerabdruck jedes SSH-Servers. Ändert er sich später, wird die Verbindung
-            abgelehnt – das schützt vor Man-in-the-Middle-Angriffen. Die Liste wird mit der Cloud synchronisiert.
+            On the first connection the app remembers the fingerprint of every SSH server. If it changes later, the connection is
+            refused – this protects against man-in-the-middle attacks. The list is synced together with the rest of the vault.
           </p>
         </div>
       </div>
       {items.length === 0 ? (
         <div className="empty-card">
           <IconShield size={28} />
-          <h3>Noch keine bekannten Hosts</h3>
-          <p>Sie erscheinen hier nach der ersten SSH- oder SFTP-Verbindung.</p>
+          <h3>No known hosts yet</h3>
+          <p>They appear here after the first SSH or SFTP connection.</p>
         </div>
       ) : (
         <div className="list">
@@ -46,7 +47,7 @@ export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | '
                 <div className="list-title">{k.id}</div>
                 <div className="muted small mono ellipsis selectable">{k.fingerprint}</div>
               </div>
-              <button className="ghost icon-only danger" title="Vergessen" onClick={() => void remove(k)}>
+              <button className="ghost icon-only danger" title="Forget" onClick={() => void remove(k)}>
                 <IconTrash size={16} />
               </button>
             </div>

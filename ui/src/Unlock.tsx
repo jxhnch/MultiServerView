@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from './bridge';
 import { IconCloud, IconServer } from './Icons';
+import { TitleStrip } from './WindowControls';
 
 export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; onDone: () => void; onVaultInstalled: () => void }) {
   const [pw, setPw] = useState('');
@@ -13,7 +14,7 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
     e.preventDefault();
     setError('');
     if (!exists && pw !== pw2) {
-      setError('Die Passwörter sind nicht gleich.');
+      setError('The passwords do not match.');
       return;
     }
     setBusy(true);
@@ -30,6 +31,7 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
 
   return (
     <div className="unlock">
+      <TitleStrip />
       <div className="unlock-stack">
         <form className="unlock-card" onSubmit={submit}>
           <div className="logo">
@@ -38,16 +40,16 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
           <h1>MultiServerView</h1>
           <p className="muted">
             {exists
-              ? 'Gib dein Master-Passwort ein, um den Vault zu entsperren.'
-              : 'Neuer Vault. Das Master-Passwort verschlüsselt alle Server, Keys und Passwörter. Es gibt keine Wiederherstellung, wenn du es vergisst.'}
+              ? 'Enter your master password to unlock the vault.'
+              : 'New vault. The master password encrypts all servers, keys and passwords. There is no recovery if you forget it.'}
           </p>
-          <input type="password" autoFocus placeholder="Master-Passwort" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <input type="password" autoFocus placeholder="Master password" value={pw} onChange={(e) => setPw(e.target.value)} />
           {!exists && (
-            <input type="password" placeholder="Passwort wiederholen" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+            <input type="password" placeholder="Repeat password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
           )}
           {error && <div className="error">{error}</div>}
           <button className="primary big" disabled={busy || pw.length === 0}>
-            {busy ? 'Moment…' : exists ? 'Entsperren' : 'Vault erstellen'}
+            {busy ? 'One moment…' : exists ? 'Unlock' : 'Create vault'}
           </button>
         </form>
 
@@ -55,7 +57,7 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
           <div className="unlock-alt">
             {!cloud ? (
               <button className="link" onClick={() => setCloud(true)}>
-                <IconCloud size={15} /> Neues Gerät? Vault aus der Cloud laden
+                <IconCloud size={15} /> New device? Load vault from a sync folder or cloud
               </button>
             ) : (
               <CloudDownload onInstalled={onVaultInstalled} onCancel={() => setCloud(false)} />
@@ -68,6 +70,8 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
 }
 
 function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onCancel: () => void }) {
+  const [mode, setMode] = useState<'folder' | 'supabase'>('folder');
+  const [folder, setFolder] = useState('');
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
   const [email, setEmail] = useState('');
@@ -80,8 +84,8 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
     setBusy(true);
     setError('');
     try {
-      await api.syncDownloadInitial({ url, anonKey, email, password });
-      onInstalled(); // Vault liegt jetzt lokal -> normaler Entsperren-Dialog
+      await api.syncDownloadInitial({ mode, folder: folder.trim(), url, anonKey, email, password });
+      onInstalled(); // the vault is now local -> normal unlock dialog
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
@@ -90,22 +94,52 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
 
   return (
     <form className="unlock-card small" onSubmit={submit}>
-      <h3>Aus Cloud laden</h3>
+      <h3>Load vault</h3>
+      <div className="mode-switch">
+        <button type="button" className={mode === 'folder' ? 'on' : ''} onClick={() => setMode('folder')}>
+          Folder
+        </button>
+        <button type="button" className={mode === 'supabase' ? 'on' : ''} onClick={() => setMode('supabase')}>
+          Supabase
+        </button>
+      </div>
       <p className="muted small">
-        Zugangsdaten deines Supabase-Kontos. Danach entsperrst du mit dem <b>gleichen Master-Passwort</b> wie auf dem anderen Gerät.
+        {mode === 'folder'
+          ? 'The sync folder that contains the file MultiServerView-Vault.msv (e.g. in OneDrive). '
+          : 'Credentials of your Supabase account. '}
+        Then you unlock with the <b>same master password</b> as on the other device.
       </p>
-      <input placeholder="Supabase-URL (https://…supabase.co)" value={url} onChange={(e) => setUrl(e.target.value)} />
-      <input placeholder="Anon (public) Key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} />
-      <input type="email" placeholder="E-Mail" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <input type="password" placeholder="Cloud-Passwort" value={password} onChange={(e) => setPassword(e.target.value)} />
+      {mode === 'folder' ? (
+        <div className="row">
+          <input className="grow" placeholder="Sync folder" value={folder} onChange={(e) => setFolder(e.target.value)} />
+          <button
+            type="button"
+            onClick={() =>
+              api
+                .syncPickFolder()
+                .then((r) => r.path && setFolder(r.path))
+                .catch((err: Error) => setError(err.message))
+            }
+          >
+            Choose…
+          </button>
+        </div>
+      ) : (
+        <>
+          <input placeholder="Supabase-URL (https://…supabase.co)" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input placeholder="Anon (public) Key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} />
+          <input type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" placeholder="Cloud password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </>
+      )}
       {error && <div className="error">{error}</div>}
       <div className="actions">
         <button type="button" onClick={onCancel}>
-          Abbrechen
+          Cancel
         </button>
         <span className="grow" />
-        <button className="primary" disabled={busy || !url || !anonKey || !email || !password}>
-          {busy ? 'Lade…' : 'Laden'}
+        <button className="primary" disabled={busy || (mode === 'folder' ? !folder.trim() : !url || !anonKey || !email || !password)}>
+          {busy ? 'Loading…' : 'Load'}
         </button>
       </div>
     </form>

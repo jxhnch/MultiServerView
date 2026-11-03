@@ -5,9 +5,9 @@ namespace MultiServerView.Core.Import;
 public sealed record PuttySession(string Name, string HostName, int Port, string Protocol, string User);
 
 /// <summary>
-/// Importiert gespeicherte PuTTY-Sitzungen - entweder aus einer exportierten .reg-Datei oder direkt aus
-/// der Windows-Registry (die App liest sie und übergibt die Sitzungen an <see cref="FromSessions"/>).
-/// Nur SSH-Sitzungen werden übernommen (Telnet, Serial, rlogin, raw werden übersprungen).
+/// Imports saved PuTTY sessions - either from an exported .reg file or directly from
+/// the Windows registry (the app reads it and hands the sessions to <see cref="FromSessions"/>).
+/// Only SSH sessions are taken over (Telnet, Serial, rlogin, raw are skipped).
 /// </summary>
 public static partial class PuttyImporter
 {
@@ -23,7 +23,7 @@ public static partial class PuttyImporter
                 continue;
             }
 
-            // PuTTY erlaubt "user@host" im Host-Feld.
+            // PuTTY allows "user@host" in the host field.
             var host = s.HostName.Trim();
             var user = s.User;
             var at = host.IndexOf('@');
@@ -46,11 +46,11 @@ public static partial class PuttyImporter
         return new ImportResult(servers, skipped);
     }
 
-    /// <summary>Liest den Text einer exportierten .reg-Datei (HKCU\Software\SimonTatham\PuTTY\Sessions).</summary>
+    /// <summary>Reads the text of an exported .reg file (HKCU\Software\SimonTatham\PuTTY\Sessions).</summary>
     public static ImportResult ParseReg(string reg)
     {
         if (!reg.Contains("SimonTatham\\PuTTY\\Sessions", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Das ist keine PuTTY-Exportdatei (Schlüssel «SimonTatham\\PuTTY\\Sessions» fehlt). Export: regedit → HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions → Datei → Exportieren.");
+            throw new ArgumentException("This is not a PuTTY export file (the key \"SimonTatham\\PuTTY\\Sessions\" is missing). Export: regedit → HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions → File → Export.");
 
         var sessions = new List<PuttySession>();
         string? name = null;

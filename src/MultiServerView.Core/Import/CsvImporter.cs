@@ -3,8 +3,8 @@ using System.Text;
 namespace MultiServerView.Core.Import;
 
 /// <summary>
-/// Importiert Hosts aus einer CSV-Datei (Trennzeichen , ; oder Tab - wird erkannt). Erste Zeile = Spaltennamen.
-/// Erkannte Spalten (Gross-/Kleinschreibung egal): name/label, host/hostname/address/ip, port, protocol/type,
+/// Imports hosts from a CSV file (separator , ; or tab - detected automatically). First line = column names.
+/// Recognized columns (case-insensitive; German headers work too): name/label, host/hostname/address/ip, port, protocol/type,
 /// user/username, password, group/groups/folder, tags, notes/description.
 /// </summary>
 public static class CsvImporter
@@ -12,7 +12,7 @@ public static class CsvImporter
     public static ImportResult Parse(string csv)
     {
         var rows = ReadRows(csv.TrimStart('﻿'));
-        if (rows.Count < 2) throw new ArgumentException("Die CSV-Datei braucht eine Kopfzeile und mindestens eine Datenzeile.");
+        if (rows.Count < 2) throw new ArgumentException("The CSV file needs a header row and at least one data row.");
 
         var header = rows[0].Select(h => h.Trim().ToLowerInvariant()).ToList();
         int Col(params string[] names) => header.FindIndex(h => names.Contains(h));
@@ -23,11 +23,12 @@ public static class CsvImporter
         var iProto = Col("protocol", "type", "protokoll");
         var iUser = Col("user", "username", "login", "benutzer");
         var iPass = Col("password", "passwort");
+        var iWorkspace = Col("workspace", "arbeitsbereich", "bereich");
         var iGroup = Col("group", "groups", "folder", "gruppe", "ordner");
         var iTags = Col("tags", "tag");
         var iNotes = Col("notes", "note", "description", "notizen", "comment");
 
-        if (iHost < 0) throw new ArgumentException("In der CSV fehlt eine Spalte «host» (oder hostname / address / ip).");
+        if (iHost < 0) throw new ArgumentException("The CSV is missing a column \"host\" (or hostname / address / ip).");
 
         string Get(List<string> r, int i) => i >= 0 && i < r.Count ? r[i].Trim() : "";
 
@@ -57,6 +58,7 @@ public static class CsvImporter
                 Protocol = protocol.Value,
                 Username = Get(r, iUser),
                 Password = Get(r, iPass),
+                Workspace = Get(r, iWorkspace),
                 Group = Get(r, iGroup),
                 Tags = Get(r, iTags).Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
                 Notes = Get(r, iNotes)

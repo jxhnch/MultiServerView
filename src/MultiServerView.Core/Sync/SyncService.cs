@@ -4,27 +4,27 @@ namespace MultiServerView.Core.Sync;
 
 public enum SyncOutcome
 {
-    /// <summary>Cloud war leer, lokaler Stand wurde hochgeladen.</summary>
+    /// <summary>The remote was empty, the local state was uploaded.</summary>
     Created,
 
-    /// <summary>Lokal und Cloud waren schon identisch.</summary>
+    /// <summary>Local and remote were already identical.</summary>
     UpToDate,
 
-    /// <summary>Nur Änderungen aus der Cloud übernommen.</summary>
+    /// <summary>Only changes from the remote were taken over.</summary>
     Pulled,
 
-    /// <summary>Nur lokale Änderungen hochgeladen.</summary>
+    /// <summary>Only local changes were uploaded.</summary>
     Pushed,
 
-    /// <summary>Beide Seiten hatten Änderungen: zusammengeführt und hochgeladen.</summary>
+    /// <summary>Both sides had changes: merged and uploaded.</summary>
     Merged
 }
 
 public sealed record SyncResult(SyncOutcome Outcome, long Version, DateTimeOffset At);
 
 /// <summary>
-/// Gleicht den lokalen Vault mit der Cloud ab: laden -> zusammenführen -> hochladen.
-/// Der Server sieht nur den verschlüsselten Blob; das Zusammenführen passiert lokal.
+/// Reconciles the local vault with the remote: load -> merge -> upload.
+/// The server only sees the encrypted blob; merging happens locally.
 /// </summary>
 public sealed class SyncService
 {
@@ -48,23 +48,22 @@ public sealed class SyncService
         try
         {
             var cfg = _settings.Load();
-            if (!cfg.IsConfigured) throw new SyncException("Die Cloud ist noch nicht eingerichtet.");
+            if (!cfg.IsConfigured) throw new SyncException("Sync is not set up yet.");
 
-            var client = _clientFactory(cfg);
-            var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
+            var remote = CreateRemote(cfg);
 
             for (var attempt = 0; attempt < 4; attempt++)
             {
-                var result = await TryOnceAsync(client, token, ct);
+                var result = await TryOnceAsync(remote, ct);
                 if (result != null)
                 {
                     cfg.LastSync = result.At;
                     _settings.Save(cfg);
                     return result;
                 }
-                // Konflikt: jemand war schneller -> nochmal von vorne (neu laden, mergen).
+                // Conflict: someone was faster -> start over (reload, merge).
             }
-            throw new SyncException("Die Cloud wird gerade von einem anderen Gerät geändert. Bitte gleich nochmal versuchen.");
+            throw new SyncException("The vault is being changed by another device right now. Please try again in a moment.");
         }
         finally
         {
@@ -72,14 +71,18 @@ public sealed class SyncService
         }
     }
 
-    private async Task<SyncResult?> TryOnceAsync(SupabaseClient client, string token, CancellationToken ct)
+    /// <summary>Where the vault lives: in the sync folder or at Supabase.</summary>
+    private ISyncRemote CreateRemote(SyncSettings cfg) =>
+        cfg.IsFolder ? new FolderRemote(cfg.Folder) : new SupabaseRemote(_clientFactory(cfg), cfg.Email, cfg.Password);
+
+    private async Task<SyncResult?> TryOnceAsync(ISyncRemote store, CancellationToken ct)
     {
-        var remote = await client.GetVaultAsync(token, ct);
+        var remote = await store.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
 
         if (remote == null)
         {
-            var v = await client.InsertVaultAsync(token, _store.ExportBlob(), ct);
+            var v = await store.InsertAsync(_store.ExportBlob(), ct);
             return new SyncResult(SyncOutcome.Created, v, now);
         }
 
@@ -91,38 +94,64 @@ public sealed class SyncService
         catch (System.Security.Cryptography.CryptographicException)
         {
             throw new SyncException(
-                "Der Vault in der Cloud passt nicht zu diesem Gerät (anderes Master-Passwort oder getrennt erstellt). " +
-                "Auf einem neuen Gerät: «Aus Cloud laden» statt einen neuen Vault zu erstellen. " +
-                "Falls du das Master-Passwort auf einem anderen Gerät geändert hast: «Neues Master-Passwort übernehmen» (Cloud-Seite).");
+                "The synced vault does not match this device (different master password or created separately). " +
+                "On a new device: use \"Load vault\" instead of creating a new vault. " +
+                "If you changed the master password on another device: use \"Adopt new master password\" (Sync page).");
         }
 
         var local = _store.Snapshot();
         var merged = VaultMerge.Merge(local, remoteData);
+
+        // Also read conflict copies of other devices (folder sync only) so their changes are not lost.
+        var usedCopies = new List<ConflictCopy>();
+        if (store is IConflictAware conflicts)
+        {
+            foreach (var copy in await conflicts.GetConflictCopiesAsync(ct))
+            {
+                try
+                {
+                    merged = VaultMerge.Merge(merged, _store.OpenRemote(copy.Blob));
+                    usedCopies.Add(copy);
+                }
+                catch (Exception)
+                {
+                    // Does not belong to this vault (different master password) or is unreadable: leave it untouched.
+                }
+            }
+        }
+        void ArchiveCopies()
+        {
+            if (store is IConflictAware aware) foreach (var copy in usedCopies) aware.Archive(copy);
+        }
         var mergedFp = VaultMerge.Fingerprint(merged);
-        var localChanged = VaultMerge.Fingerprint(local) != mergedFp;   // Cloud brachte etwas Neues
-        var remoteChanged = VaultMerge.Fingerprint(remoteData) != mergedFp; // Lokal hat etwas Neues
+        var localChanged = VaultMerge.Fingerprint(local) != mergedFp;   // the remote brought something new
+        var remoteChanged = VaultMerge.Fingerprint(remoteData) != mergedFp; // local has something new
 
         if (localChanged) _store.Apply(merged);
 
         if (!remoteChanged)
+        {
+            ArchiveCopies();
             return new SyncResult(localChanged ? SyncOutcome.Pulled : SyncOutcome.UpToDate, remote.Version, now);
+        }
 
-        var newVersion = await client.UpdateVaultAsync(token, remote.Version, _store.ExportBlob(), ct);
-        if (newVersion == null) return null; // Konflikt
+        var newVersion = await store.UpdateAsync(remote.Version, _store.ExportBlob(), ct);
+        if (newVersion == null) return null; // conflict
 
+        ArchiveCopies();
         return new SyncResult(localChanged ? SyncOutcome.Merged : SyncOutcome.Pushed, newVersion.Value, now);
     }
 
-    /// <summary>Neues Gerät: Cloud-Blob als lokalen Vault installieren (danach mit dem Master-Passwort entsperren).</summary>
+    /// <summary>New device: install the synced blob as the local vault (then unlock with the master password).</summary>
     public async Task DownloadInitialAsync(SyncSettings cfg, CancellationToken ct = default)
     {
-        if (_store.Exists) throw new SyncException("Auf diesem Gerät gibt es schon einen Vault.");
-        if (!cfg.IsConfigured) throw new SyncException("Bitte alle Cloud-Felder ausfüllen.");
+        if (_store.Exists) throw new SyncException("There is already a vault on this device.");
+        if (!cfg.IsConfigured) throw new SyncException(cfg.IsFolder ? "Please choose a sync folder." : "Please fill in all cloud fields.");
 
-        var client = _clientFactory(cfg);
-        var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
-        var remote = await client.GetVaultAsync(token, ct)
-                     ?? throw new SyncException("In der Cloud liegt noch kein Vault für dieses Konto.");
+        var remote = await CreateRemote(cfg).GetAsync(ct)
+                     ?? throw new SyncException(cfg.IsFolder
+                         ? $"There is no vault in this folder yet ({FolderRemote.FileName}). Wait until the folder service has downloaded the file from the other device."
+                         : "There is no vault in the cloud for this account yet.");
 
         _store.InstallBlob(remote.Blob);
         cfg.LastSync = DateTimeOffset.UtcNow;
@@ -130,8 +159,8 @@ public sealed class SyncService
     }
 
     /// <summary>
-    /// Überschreibt den Cloud-Vault mit dem lokalen Stand (nötig nach einem Wechsel des Master-Passworts, weil der
-    /// Cloud-Blob dann mit dem alten Schlüssel verschlüsselt ist). Andere Geräte müssen das neue Passwort übernehmen.
+    /// Overwrites the synced vault with the local state (needed after a change of the master password because the
+    /// synced blob is then encrypted with the old key). Other devices have to adopt the new password.
     /// </summary>
     public async Task ForceUploadAsync(CancellationToken ct = default)
     {
@@ -139,13 +168,12 @@ public sealed class SyncService
         try
         {
             var cfg = _settings.Load();
-            if (!cfg.IsConfigured) throw new SyncException("Die Cloud ist noch nicht eingerichtet.");
-            var client = _clientFactory(cfg);
-            var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
-            var remote = await client.GetVaultAsync(token, ct);
-            if (remote == null) await client.InsertVaultAsync(token, _store.ExportBlob(), ct);
-            else if (await client.UpdateVaultAsync(token, remote.Version, _store.ExportBlob(), ct) == null)
-                throw new SyncException("Die Cloud wurde gerade von einem anderen Gerät geändert. Bitte nochmal versuchen.");
+            if (!cfg.IsConfigured) throw new SyncException("Sync is not set up yet.");
+            var store = CreateRemote(cfg);
+            var remote = await store.GetAsync(ct);
+            if (remote == null) await store.InsertAsync(_store.ExportBlob(), ct);
+            else if (await store.UpdateAsync(remote.Version, _store.ExportBlob(), ct) == null)
+                throw new SyncException("The vault was just changed by another device. Please try again.");
             cfg.LastSync = DateTimeOffset.UtcNow;
             _settings.Save(cfg);
         }
@@ -156,8 +184,8 @@ public sealed class SyncService
     }
 
     /// <summary>
-    /// Für Geräte, die noch das alte Master-Passwort haben: lädt den Cloud-Vault, öffnet ihn mit dem NEUEN Passwort,
-    /// führt ihn mit dem lokalen Stand zusammen und übernimmt den neuen Schlüssel.
+    /// For devices that still have the old master password: loads the synced vault, opens it with the NEW password,
+    /// merges it with the local state and takes over the new key.
     /// </summary>
     public async Task AdoptCloudPasswordAsync(string newPassword, CancellationToken ct = default)
     {
@@ -165,10 +193,8 @@ public sealed class SyncService
         try
         {
             var cfg = _settings.Load();
-            if (!cfg.IsConfigured) throw new SyncException("Die Cloud ist noch nicht eingerichtet.");
-            var client = _clientFactory(cfg);
-            var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
-            var remote = await client.GetVaultAsync(token, ct) ?? throw new SyncException("In der Cloud liegt noch kein Vault.");
+            if (!cfg.IsConfigured) throw new SyncException("Sync is not set up yet.");
+            var remote = await CreateRemote(cfg).GetAsync(ct) ?? throw new SyncException("There is no vault there yet.");
 
             VaultData remoteData;
             VaultKey key;
@@ -188,18 +214,17 @@ public sealed class SyncService
         }
     }
 
-    /// <summary>Prüft nur, ob die Zugangsdaten stimmen und die Tabelle existiert.</summary>
+    /// <summary>Only checks whether the credentials are correct and the table exists (folder: whether it is writable).</summary>
     public async Task TestConnectionAsync(SyncSettings cfg, CancellationToken ct = default)
     {
-        var client = _clientFactory(cfg);
-        var token = await client.SignInAsync(cfg.Email, cfg.Password, ct);
-        await client.GetVaultAsync(token, ct);
+        if (cfg.IsFolder) new FolderRemote(cfg.Folder).CheckWritable();
+        else await CreateRemote(cfg).GetAsync(ct);
     }
 
     public async Task<bool> SignUpAsync(SyncSettings cfg, CancellationToken ct = default)
     {
-        var client = _clientFactory(cfg);
-        return await client.SignUpAsync(cfg.Email, cfg.Password, ct);
+        if (cfg.IsFolder) throw new SyncException("A sync folder needs no account.");
+        return await _clientFactory(cfg).SignUpAsync(cfg.Email, cfg.Password, ct);
     }
 
     public void Save(SyncSettings cfg) => _settings.Save(cfg);

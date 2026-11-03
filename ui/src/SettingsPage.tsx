@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, isNative } from './bridge';
+import { ClearVaultDialog } from './ClearVault';
 import { IconClose, IconLock } from './Icons';
 import { FONTS, THEMES, findFont, findTheme, getTermSettings, onTermSettings, setTermSettings, type TermSettings } from './terminalThemes';
 import { getUiSettings, onUiSettings, setUiSettings, type UiSettings } from './uiSettings';
@@ -61,25 +62,26 @@ function Seg<T extends string | number>({ value, options, onChange }: { value: T
 }
 
 const SHORTCUTS: [string, string][] = [
-  ['Ctrl + K', 'Schnell verbinden (nicht im Terminal)'],
-  ['Ctrl + Umschalt + K', 'Schnell verbinden (überall, auch im Terminal)'],
-  ['Ctrl + Tab / Ctrl + Umschalt + Tab', 'Nächster / vorheriger Tab'],
-  ['Ctrl + 1 … 9', 'Tab direkt wählen (1 = Hosts)'],
-  ['Ctrl + Umschalt + W', 'Tab schliessen (Mittelklick geht auch)'],
-  ['Ctrl + Umschalt + N', 'Neuer Host'],
-  ['Ctrl + Umschalt + D', 'Zweite Session zum selben Host'],
-  ['Ctrl + Umschalt + C / V', 'Terminal: kopieren / einfügen (Rechtsklick geht auch)'],
-  ['Umschalt + Enter / Umschalt + Klick', 'Beim Verbinden eine neue Session öffnen'],
-  ['Entf / F2', 'SFTP: Auswahl löschen / umbenennen'],
+  ['Ctrl + K', 'Quick connect (not inside a terminal)'],
+  ['Ctrl + Shift + K', 'Quick connect (everywhere, also inside a terminal)'],
+  ['Ctrl + Tab / Ctrl + Shift + Tab', 'Next / previous tab'],
+  ['Ctrl + 1 … 9', 'Jump to a tab (1 = Hosts)'],
+  ['Ctrl + Shift + W', 'Close tab (middle-click works too)'],
+  ['Ctrl + Shift + N', 'New host'],
+  ['Ctrl + Shift + D', 'Second session to the same host'],
+  ['Ctrl + Shift + C / V', 'Terminal: copy / paste (right-click works too)'],
+  ['Shift + Enter / Shift + Click', 'Open a new session when connecting'],
+  ['Del / F2', 'SFTP: delete / rename selection'],
 ];
 
-export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (msg: string, kind?: 'ok' | 'error') => void }) {
+export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void; onCleared: () => Promise<void>; toast: (msg: string, kind?: 'ok' | 'error') => void }) {
   const ui = useUi();
   const term = useTerm();
   const [host, setHost] = useState<HostSettings | null>(null);
   const [saved, setSaved] = useState(false);
   const [info, setInfo] = useState<{ path: string; version: string } | null>(null);
   const [pwModal, setPwModal] = useState(false);
+  const [clearModal, setClearModal] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -115,7 +117,7 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
   async function exportBackup() {
     try {
       const r = await api.vaultExport();
-      if (r.saved) toast('Backup gespeichert: ' + r.path);
+      if (r.saved) toast('Backup saved: ' + r.path);
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -125,19 +127,19 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
     <div className="page settings">
       <div className="page-head">
         <div>
-          <h1>Einstellungen</h1>
-          <p className="muted">Änderungen gelten sofort. Neue Verbindungs-Einstellungen wirken beim nächsten Verbinden.</p>
+          <h1>Settings</h1>
+          <p className="muted">Changes apply immediately. New connection settings take effect the next time you connect.</p>
         </div>
-        <span className={'saved-note' + (saved ? ' on' : '')}>✓ Gespeichert</span>
+        <span className={'saved-note' + (saved ? ' on' : '')}>✓ Saved</span>
       </div>
 
-      <Card title="Darstellung">
-        <Row title="Design" hint="Gilt für die ganze App ausser dem Terminal (hat sein eigenes Farbschema).">
-          <Seg value={ui.theme} onChange={(v) => setUiSettings({ theme: v })} options={[{ value: 'light', label: 'Hell' }, { value: 'dark', label: 'Dunkel' }]} />
+      <Card title="Appearance">
+        <Row title="Design" hint="Applies to the whole app except the terminal (it has its own color scheme).">
+          <Seg value={ui.theme} onChange={(v) => setUiSettings({ theme: v })} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
         </Row>
       </Card>
 
-      <Card title="Terminal" subtitle="Gilt für alle SSH-Terminals, auch in der geteilten Ansicht.">
+      <Card title="Terminal" subtitle="Applies to all SSH terminals, including the split view.">
         <div className="term-preview" style={{ background: theme.bg, color: theme.fg, fontFamily: font.css, fontSize: term.fontSize }}>
           <div>
             <span style={{ color: theme.ansi[2] }}>demo@server</span>
@@ -145,7 +147,7 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
             <span style={{ color: theme.ansi[4] }}>~</span>$ ls -la
           </div>
           <div>
-            <span style={{ color: theme.ansi[4] }}>drwxr-xr-x</span> projekte&nbsp; <span style={{ color: theme.ansi[3] }}>backups</span>&nbsp; <span style={{ color: theme.ansi[1] }}>fehler.log</span>
+            <span style={{ color: theme.ansi[4] }}>drwxr-xr-x</span> projects&nbsp; <span style={{ color: theme.ansi[3] }}>backups</span>&nbsp; <span style={{ color: theme.ansi[1] }}>error.log</span>
           </div>
           <div>
             <span style={{ color: theme.ansi[2] }}>demo@server</span>:<span style={{ color: theme.ansi[4] }}>~</span>$ <span className={'cursor ' + term.cursorStyle} style={{ background: theme.cursor }} />
@@ -164,7 +166,7 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
             </button>
           ))}
         </div>
-        <Row title="Schriftart">
+        <Row title="Font">
           <select value={term.font} onChange={(e) => setTermSettings({ font: e.target.value })}>
             {FONTS.map((f) => (
               <option key={f.id} value={f.id}>
@@ -173,13 +175,13 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
             ))}
           </select>
         </Row>
-        <Row title="Schriftgrösse">
+        <Row title="Font size">
           <div className="stepper light">
-            <button onClick={() => setTermSettings({ fontSize: term.fontSize - 1 })} aria-label="Kleiner">
+            <button onClick={() => setTermSettings({ fontSize: term.fontSize - 1 })} aria-label="Smaller">
               −
             </button>
             <span>{term.fontSize}</span>
-            <button onClick={() => setTermSettings({ fontSize: term.fontSize + 1 })} aria-label="Grösser">
+            <button onClick={() => setTermSettings({ fontSize: term.fontSize + 1 })} aria-label="Larger">
               +
             </button>
           </div>
@@ -188,76 +190,76 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
           <Seg
             value={term.cursorStyle}
             onChange={(v) => setTermSettings({ cursorStyle: v })}
-            options={[{ value: 'bar', label: 'Balken' }, { value: 'block', label: 'Block' }, { value: 'underline', label: 'Unterstrich' }]}
+            options={[{ value: 'bar', label: 'Bar' }, { value: 'block', label: 'Block' }, { value: 'underline', label: 'Underline' }]}
           />
         </Row>
-        <Row title="Cursor blinkt">
-          <Switch checked={term.cursorBlink} onChange={(v) => setTermSettings({ cursorBlink: v })} label="Cursor blinkt" />
+        <Row title="Cursor blinks">
+          <Switch checked={term.cursorBlink} onChange={(v) => setTermSettings({ cursorBlink: v })} label="Cursor blinks" />
         </Row>
-        <Row title="Verlauf (Scrollback)" hint="Wie viele Zeilen du zurückscrollen kannst. Mehr braucht mehr Speicher.">
+        <Row title="History (scrollback)" hint="How many lines you can scroll back. More lines need more memory.">
           <select value={term.scrollback} onChange={(e) => setTermSettings({ scrollback: Number(e.target.value) })}>
             {[1000, 5000, 10000, 50000].map((n) => (
               <option key={n} value={n}>
-                {n.toLocaleString('de-CH')} Zeilen
+                {n.toLocaleString('en-US')} lines
               </option>
             ))}
           </select>
         </Row>
-        <Row title="Beim Markieren kopieren" hint="Markierter Text landet sofort in der Zwischenablage (wie bei PuTTY).">
-          <Switch checked={term.copyOnSelect} onChange={(v) => setTermSettings({ copyOnSelect: v })} label="Beim Markieren kopieren" />
+        <Row title="Copy on select" hint="Selected text goes straight to the clipboard (like PuTTY).">
+          <Switch checked={term.copyOnSelect} onChange={(v) => setTermSettings({ copyOnSelect: v })} label="Copy on select" />
         </Row>
       </Card>
 
-      <Card title="SSH und SFTP">
+      <Card title="SSH and SFTP">
         {!host ? (
-          <div className="muted pad-sm">Lade…</div>
+          <div className="muted pad-sm">Loading…</div>
         ) : (
           <>
-            <Row title="Keep-Alive" hint="Alle x Sekunden ein Lebenszeichen senden, damit Firewalls die Verbindung nicht kappen. 0 = aus.">
+            <Row title="Keep-Alive" hint="Send a signal every x seconds so firewalls do not drop the connection. 0 = off.">
               <div className="num-field">
                 <input type="number" min={0} max={600} value={host.sshKeepAliveSeconds} onChange={(e) => updateHost({ sshKeepAliveSeconds: Number(e.target.value) })} />
-                <span className="muted small">Sekunden</span>
+                <span className="muted small">seconds</span>
               </div>
             </Row>
-            <Row title="Zeitlimit beim Verbinden" hint="Wie lange auf den Server gewartet wird, bevor abgebrochen wird.">
+            <Row title="Connection timeout" hint="How long to wait for the server before giving up.">
               <div className="num-field">
                 <input type="number" min={3} max={120} value={host.sshConnectTimeoutSeconds} onChange={(e) => updateHost({ sshConnectTimeoutSeconds: Number(e.target.value) })} />
-                <span className="muted small">Sekunden</span>
+                <span className="muted small">seconds</span>
               </div>
             </Row>
           </>
         )}
       </Card>
 
-      <Card title="Remote Desktop (RDP)" subtitle={isNative ? undefined : 'Nur in der Windows-App wirksam.'}>
+      <Card title="Remote Desktop (RDP)" subtitle={isNative ? undefined : 'Only effective in the Windows app.'}>
         {!host ? (
-          <div className="muted pad-sm">Lade…</div>
+          <div className="muted pad-sm">Loading…</div>
         ) : (
           <>
-            <Row title="Farbtiefe" hint="Niedriger spart Bandbreite bei langsamen Verbindungen.">
+            <Row title="Color depth" hint="Lower saves bandwidth on slow connections.">
               <Seg value={host.rdpColorDepth} onChange={(v) => updateHost({ rdpColorDepth: v })} options={[{ value: 16, label: '16 Bit' }, { value: 24, label: '24 Bit' }, { value: 32, label: '32 Bit' }]} />
             </Row>
-            <Row title="Zwischenablage teilen" hint="Kopieren und Einfügen zwischen diesem PC und dem Remote-PC.">
-              <Switch checked={host.rdpClipboard} onChange={(v) => updateHost({ rdpClipboard: v })} label="Zwischenablage teilen" />
+            <Row title="Share clipboard" hint="Copy and paste between this PC and the remote PC.">
+              <Switch checked={host.rdpClipboard} onChange={(v) => updateHost({ rdpClipboard: v })} label="Share clipboard" />
             </Row>
-            <Row title="Lokale Laufwerke einbinden" hint="Deine Laufwerke erscheinen im Remote-PC (Dateien per Explorer kopieren). Nur bei vertrauenswürdigen Servern einschalten.">
-              <Switch checked={host.rdpDrives} onChange={(v) => updateHost({ rdpDrives: v })} label="Lokale Laufwerke einbinden" />
+            <Row title="Redirect local drives" hint="Your drives appear on the remote PC (copy files with Explorer). Only enable for trusted servers.">
+              <Switch checked={host.rdpDrives} onChange={(v) => updateHost({ rdpDrives: v })} label="Redirect local drives" />
             </Row>
-            <Row title="Auflösung automatisch anpassen" hint="Der Remote-Desktop passt sich der Fenstergrösse an (statt nur zu skalieren).">
-              <Switch checked={host.rdpDynamicResize} onChange={(v) => updateHost({ rdpDynamicResize: v })} label="Auflösung automatisch anpassen" />
+            <Row title="Adjust resolution automatically" hint="The remote desktop follows the window size (instead of just scaling).">
+              <Switch checked={host.rdpDynamicResize} onChange={(v) => updateHost({ rdpDynamicResize: v })} label="Adjust resolution automatically" />
             </Row>
-            <Row title="Bei Zertifikatsproblemen warnen" hint="Sicherer, aber bei selbstsignierten Zertifikaten (üblich in Firmennetzen) lästig.">
-              <Switch checked={host.rdpWarnOnCertificate} onChange={(v) => updateHost({ rdpWarnOnCertificate: v })} label="Bei Zertifikatsproblemen warnen" />
+            <Row title="Warn on certificate problems" hint="Safer, but annoying with self-signed certificates (common in company networks).">
+              <Switch checked={host.rdpWarnOnCertificate} onChange={(v) => updateHost({ rdpWarnOnCertificate: v })} label="Warn on certificate problems" />
             </Row>
           </>
         )}
       </Card>
 
       <Card title="VNC">
-        <Row title="An Fenster anpassen" hint="Skaliert den Bildschirm des Servers auf die Fenstergrösse.">
-          <Switch checked={ui.vncScale} onChange={(v) => setUiSettings({ vncScale: v })} label="An Fenster anpassen" />
+        <Row title="Fit to window" hint="Scales the server screen to the window size.">
+          <Switch checked={ui.vncScale} onChange={(v) => setUiSettings({ vncScale: v })} label="Fit to window" />
         </Row>
-        <Row title="Bildqualität" hint="0 = wenig Daten, 9 = beste Qualität.">
+        <Row title="Image quality" hint="0 = little data, 9 = best quality.">
           <div className="range-field">
             <input type="range" min={0} max={9} value={ui.vncQuality} onChange={(e) => setUiSettings({ vncQuality: Number(e.target.value) })} />
             <span className="small">{ui.vncQuality}</span>
@@ -265,46 +267,51 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
         </Row>
       </Card>
 
-      <Card title="Sicherheit">
-        <Row title="Automatisch sperren" hint="Sperrt den Vault nach dieser Zeit ohne Mausbewegung oder Tastatur. Offene Sessions werden dabei getrennt.">
+      <Card title="Security">
+        <Row title="Auto-lock" hint="Locks the vault after this time without mouse or keyboard activity. Open sessions are disconnected.">
           <select value={ui.autoLockMinutes} onChange={(e) => setUiSettings({ autoLockMinutes: Number(e.target.value) })}>
-            <option value={0}>Nie</option>
+            <option value={0}>Never</option>
             {[5, 10, 15, 30, 60].map((m) => (
               <option key={m} value={m}>
-                nach {m} Minuten
+                after {m} minutes
               </option>
             ))}
           </select>
         </Row>
-        <Row title="Master-Passwort" hint="Ändert den Schlüssel des Vaults. Bei aktiver Cloud wird auch der Cloud-Vault aktualisiert.">
+        <Row title="Master password" hint="Changes the key of the vault. With sync enabled, the synced vault is updated as well.">
           <button onClick={() => setPwModal(true)}>
-            <IconLock size={15} /> Ändern…
+            <IconLock size={15} /> Change…
           </button>
         </Row>
-        <Row title="Jetzt sperren">
-          <button onClick={onLock}>Vault sperren</button>
+        <Row title="Lock now">
+          <button onClick={onLock}>Lock vault</button>
         </Row>
       </Card>
 
-      <Card title="Daten und Backup">
-        <Row title="Vault-Datei" hint="Verschlüsselt (AES-256). Ohne dein Master-Passwort nicht lesbar.">
+      <Card title="Data and backup">
+        <Row title="Vault file" hint="Encrypted (AES-256). Unreadable without your master password.">
           <div className="path-field">
             <code className="selectable ellipsis" title={info?.path}>
               {info?.path ?? '…'}
             </code>
             {isNative && (
               <button className="ghost" onClick={() => void api.vaultReveal()}>
-                Im Explorer zeigen
+                Show in Explorer
               </button>
             )}
           </div>
         </Row>
-        <Row title="Backup exportieren" hint="Speichert eine Kopie der verschlüsselten Vault-Datei, z. B. auf einen USB-Stick.">
-          <button onClick={() => void exportBackup()}>Backup speichern…</button>
+        <Row title="Export backup" hint="Saves a copy of the encrypted vault file, e.g. to a USB stick.">
+          <button onClick={() => void exportBackup()}>Save backup…</button>
+        </Row>
+        <Row title="Clear vault" hint="Deletes all hosts, keys, identities, snippets and connections. The master password stays. Requires several confirmations.">
+          <button className="danger" onClick={() => setClearModal(true)}>
+            Clear vault…
+          </button>
         </Row>
       </Card>
 
-      <Card title="Tastenkürzel" subtitle="Im Terminal gehören einfache Strg-Kombinationen der Shell, darum laufen App-Befehle mit Umschalt.">
+      <Card title="Keyboard shortcuts" subtitle="Inside a terminal, plain Ctrl combinations belong to the shell, so app commands use Shift.">
         <div className="kbd-table">
           {SHORTCUTS.map(([k, d]) => (
             <div className="kbd-row" key={k}>
@@ -321,24 +328,35 @@ export function SettingsPage({ onLock, toast }: { onLock: () => void; toast: (ms
           ))}
         </div>
         <p className="muted small" style={{ marginTop: 8 }}>
-          In einer RDP-Session gehen alle Tasten an den Remote-PC. Dann mit der Maus auf einen anderen Tab klicken.
+          In an RDP session, all keys go to the remote PC. Click another tab with the mouse instead.
         </p>
       </Card>
 
-      <Card title="Über MultiServerView">
+      <Card title="About MultiServerView">
         <Row title="Version">
           <span>{info?.version || '–'}</span>
         </Row>
       </Card>
 
+      {clearModal && (
+        <ClearVaultDialog
+          onClose={() => setClearModal(false)}
+          toast={toast}
+          onCleared={async () => {
+            setClearModal(false);
+            await onCleared();
+            toast('Vault cleared');
+          }}
+        />
+      )}
       {pwModal && (
         <ChangePassword
           onClose={() => setPwModal(false)}
           onDone={(cloud, message) => {
             setPwModal(false);
-            if (cloud === 'updated') toast('Passwort geändert und Cloud aktualisiert. Auf anderen Geräten: Cloud → «Neues Master-Passwort übernehmen».');
-            else if (cloud === 'failed') toast('Passwort geändert, aber die Cloud konnte nicht aktualisiert werden: ' + message, 'error');
-            else toast('Master-Passwort geändert');
+            if (cloud === 'updated') toast('Password changed and synced vault updated. On your other devices: Sync → "Adopt new master password".');
+            else if (cloud === 'failed') toast('Password changed, but the synced vault could not be updated: ' + message, 'error');
+            else toast('Master password changed');
           }}
         />
       )}
@@ -356,7 +374,7 @@ function ChangePassword({ onClose, onDone }: { onClose: () => void; onDone: (clo
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (newPw !== newPw2) {
-      setError('Die neuen Passwörter sind nicht gleich.');
+      setError('The new passwords do not match.');
       return;
     }
     setBusy(true);
@@ -374,32 +392,32 @@ function ChangePassword({ onClose, onDone }: { onClose: () => void; onDone: (clo
     <div className="overlay" onMouseDown={onClose}>
       <form className="modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <div className="modal-head">
-          <h2>Master-Passwort ändern</h2>
+          <h2>Change master password</h2>
           <button type="button" className="ghost icon-only" onClick={onClose}>
             <IconClose size={16} />
           </button>
         </div>
         <label>
-          Aktuelles Passwort
+          Current password
           <input type="password" autoFocus value={oldPw} onChange={(e) => setOldPw(e.target.value)} />
         </label>
         <label>
-          Neues Passwort (mindestens 8 Zeichen)
+          New password (at least 8 characters)
           <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
         </label>
         <label>
-          Neues Passwort wiederholen
+          Repeat new password
           <input type="password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} />
         </label>
-        <p className="hint">Es gibt keine Wiederherstellung. Wer das Passwort vergisst, kommt nicht mehr an den Vault.</p>
+        <p className="hint">There is no recovery. If you forget the password, the vault can no longer be opened.</p>
         {error && <div className="error">{error}</div>}
         <div className="actions">
           <span className="grow" />
           <button type="button" onClick={onClose}>
-            Abbrechen
+            Cancel
           </button>
           <button className="primary" disabled={busy || !oldPw || newPw.length < 8}>
-            Ändern
+            Change
           </button>
         </div>
       </form>

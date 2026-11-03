@@ -15,12 +15,12 @@ interface Item {
 }
 
 const ACTIONS: Item[] = [
-  { key: 'a-new', action: 'new', label: 'Neuen Host anlegen', hint: 'Ctrl+Shift+N' },
-  { key: 'a-split', action: 'split', label: 'Geteilte Ansicht öffnen' },
-  { key: 'a-settings', action: 'settings', label: 'Einstellungen' },
-  { key: 'a-keys', action: 'keys', label: 'Schlüssel verwalten' },
-  { key: 'a-cloud', action: 'cloud', label: 'Cloud & Sync' },
-  { key: 'a-lock', action: 'lock', label: 'Vault sperren' },
+  { key: 'a-new', action: 'new', label: 'Add new host', hint: 'Ctrl+Shift+N' },
+  { key: 'a-split', action: 'split', label: 'Open split view' },
+  { key: 'a-settings', action: 'settings', label: 'Settings' },
+  { key: 'a-keys', action: 'keys', label: 'Manage keys' },
+  { key: 'a-cloud', action: 'cloud', label: 'Sync' },
+  { key: 'a-lock', action: 'lock', label: 'Lock vault' },
 ];
 
 export function CommandPalette({
@@ -44,7 +44,7 @@ export function CommandPalette({
     const hosts = filterServers(servers, query).slice(0, 40).map((s) => ({ key: s.id, server: s, label: s.name }));
     const q = query.trim().toLowerCase();
     const actions = ACTIONS.filter((a) => q.length > 0 && a.label.toLowerCase().includes(q));
-    // Ohne Eingabe: zuerst Hosts (zuletzt benutzt oben), Aktionen am Ende.
+    // Without input: hosts first (last used on top), actions at the end.
     return q.length === 0 ? [...hosts, ...ACTIONS] : [...hosts, ...actions];
   }, [servers, query]);
 
@@ -82,7 +82,7 @@ export function CommandPalette({
       <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
         <input
           autoFocus
-          placeholder="Host suchen und verbinden…"
+          placeholder="Search and connect to a host…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKey}
@@ -107,25 +107,25 @@ export function CommandPalette({
                   {it.server.host}
                 </span>
               )}
-              {it.server && openServerIds.has(it.server.id) && <span className="chip live">offen</span>}
+              {it.server && openServerIds.has(it.server.id) && <span className="chip live">open</span>}
               {it.server?.group && <span className="chip">{it.server.group}</span>}
               {it.hint && <kbd>{it.hint}</kbd>}
             </div>
           ))}
-          {items.length === 0 && <div className="palette-empty">Kein Treffer.</div>}
+          {items.length === 0 && <div className="palette-empty">No match.</div>}
         </div>
         <div className="palette-foot muted">
           <span>
-            <kbd>↑</kbd> <kbd>↓</kbd> wählen
+            <kbd>↑</kbd> <kbd>↓</kbd> select
           </span>
           <span>
-            <kbd>↵</kbd> verbinden
+            <kbd>↵</kbd> connect
           </span>
           <span>
-            <kbd>⇧ ↵</kbd> zusätzliche Session
+            <kbd>⇧ ↵</kbd> additional session
           </span>
           <span>
-            <kbd>Esc</kbd> schliessen
+            <kbd>Esc</kbd> close
           </span>
         </div>
       </div>

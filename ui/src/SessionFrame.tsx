@@ -3,16 +3,16 @@ import { IconDuplicate, IconEdit, IconRefresh } from './Icons';
 import type { Server, SessionStatus } from './types';
 
 const STATUS_TEXT: Record<SessionStatus, string> = {
-  connecting: 'Verbinde…',
-  connected: 'Verbunden',
-  closed: 'Getrennt',
-  error: 'Fehler',
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  closed: 'Disconnected',
+  error: 'Error',
 };
 
 /**
- * Rahmen um jede Session. Termius-Stil: möglichst nur der Inhalt.
- * - "float": kleine, dezente Werkzeugleiste oben rechts (SSH, VNC)
- * - "bar":   schmale Leiste oberhalb (RDP, weil das native Fenster über HTML liegen würde)
+ * Frame around every session. Termius style: preferably only the content.
+ * - "float": small, unobtrusive toolbar at the top right (SSH, VNC)
+ * - "bar":   slim bar above (RDP, because the native window would sit above HTML)
  */
 export function SessionFrame({
   server,
@@ -36,13 +36,13 @@ export function SessionFrame({
   const buttons = (
     <>
       {extraActions}
-      <button title="Neu verbinden" onClick={onReconnect}>
+      <button title="Reconnect" onClick={onReconnect}>
         <IconRefresh size={15} />
       </button>
-      <button title="Zweite Session zum selben Host (Ctrl+Shift+D)" onClick={onDuplicate}>
+      <button title="Second session to the same host (Ctrl+Shift+D)" onClick={onDuplicate}>
         <IconDuplicate size={15} />
       </button>
-      <button title="Host-Details" onClick={onEdit}>
+      <button title="Host details" onClick={onEdit}>
         <IconEdit size={15} />
       </button>
     </>

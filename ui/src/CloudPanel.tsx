@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, isNative, type SyncConfigInput } from './bridge';
-import { IconCheck, IconCloud, IconCopy, IconRefresh } from './Icons';
+import { IconCheck, IconCloud, IconCopy, IconRefresh, IconFolder } from './Icons';
 import { SUPABASE_SQL } from './supabaseSql';
 import type { SyncInfo, SyncStatus } from './types';
+import { askConfirm } from './Confirm';
 
 export function CloudPanel({
   info,
@@ -15,6 +16,8 @@ export function CloudPanel({
   onChanged: () => Promise<void>;
   toast: (msg: string, kind?: 'ok' | 'error') => void;
 }) {
+  const [mode, setMode] = useState<'folder' | 'supabase'>('folder');
+  const [folder, setFolder] = useState('');
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
   const [email, setEmail] = useState('');
@@ -24,13 +27,24 @@ export function CloudPanel({
 
   useEffect(() => {
     if (!info) return;
+    setMode(info.configured ? info.mode : 'folder');
+    setFolder(info.folder);
     setUrl(info.url);
     setAnonKey(info.anonKey);
     setEmail(info.email);
   }, [info]);
 
-  const cfg = (): SyncConfigInput => ({ url: url.trim(), anonKey: anonKey.trim(), email: email.trim(), password });
-  const ready = url.trim() && anonKey.trim() && email.trim() && (password || info?.hasPassword);
+  const cfg = (): SyncConfigInput => ({ mode, folder: folder.trim(), url: url.trim(), anonKey: anonKey.trim(), email: email.trim(), password });
+  const ready = mode === 'folder' ? !!folder.trim() : url.trim() && anonKey.trim() && email.trim() && (password || info?.hasPassword);
+
+  async function pickFolder() {
+    try {
+      const r = await api.syncPickFolder();
+      if (r.path) setFolder(r.path);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -51,19 +65,19 @@ export function CloudPanel({
       await onChanged();
       await api.syncNow();
       await onChanged();
-      toast('Cloud verbunden und synchronisiert');
+      toast('Sync connected and synchronized');
     });
 
   const test = () =>
     run('test', async () => {
       await api.syncTest({ ...cfg(), password: password || '' });
-      toast('Verbindung funktioniert');
+      toast('Connection works');
     });
 
   const signUp = () =>
     run('signup', async () => {
       const r = await api.syncSignUp(cfg());
-      toast(r.signedIn ? 'Konto erstellt' : 'Konto erstellt – bitte E-Mail bestätigen, dann «Verbinden»', 'ok');
+      toast(r.signedIn ? 'Account created' : 'Account created – please confirm your e-mail, then click "Connect"', 'ok');
     });
 
   const now = () =>
@@ -74,34 +88,59 @@ export function CloudPanel({
 
   const disconnect = () =>
     run('disc', async () => {
-      if (!confirm('Cloud trennen? Dein lokaler Vault bleibt erhalten, die Cloud-Kopie auch.')) return;
+      if (!(await askConfirm('Disconnect sync? Your local vault stays, and so does the copy in the folder or in the cloud.', { title: 'Disconnect sync', confirmLabel: 'Disconnect' }))) return;
       await api.syncDisconnect();
       await onChanged();
-      toast('Cloud getrennt');
+      toast('Sync disconnected');
     });
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Cloud &amp; Sync</h1>
+          <h1>Sync</h1>
           <p className="muted">
-            Dein Vault wird <b>Ende-zu-Ende verschlüsselt</b>: Die Cloud (Supabase) bekommt nur einen unlesbaren Blob.
-            Dein Master-Passwort verlässt dieses Gerät nie. Die Zugangsdaten unten gehören zum Supabase-Konto – das ist
-            nicht das Master-Passwort.
+            Your vault is <b>end-to-end encrypted</b>: only an unreadable blob is stored in the folder or at Supabase.
+            Your master password never leaves this device.
           </p>
         </div>
         {info?.configured && (
           <span className={`pill ${status.state === 'error' ? 'error' : status.state === 'syncing' ? 'connecting' : 'connected'}`}>
             <span className="dot-sm" />
-            {status.state === 'off' ? 'Verbunden' : status.message || 'Verbunden'}
+            {status.state === 'off' ? 'Connected' : status.message || 'Connected'}
           </span>
         )}
       </div>
 
-      {!isNative && <div className="notice">Im Browser-Modus ist die Cloud nicht verfügbar – das geht nur in der Windows-App.</div>}
+      {!isNative && <div className="notice">Sync is not available in browser mode – it only works in the Windows app.</div>}
 
       <div className="card-form">
+        <div className="mode-switch">
+          <button type="button" className={mode === 'folder' ? 'on' : ''} onClick={() => setMode('folder')}>
+            Folder <span className="muted small">(OneDrive, iCloud, Syncthing …)</span>
+          </button>
+          <button type="button" className={mode === 'supabase' ? 'on' : ''} onClick={() => setMode('supabase')}>
+            Supabase <span className="muted small">(own account)</span>
+          </button>
+        </div>
+        {mode === 'folder' ? (
+          <>
+            <div className="row">
+              <label className="grow">
+                Sync folder
+                <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="C:\Users\you\OneDrive\MultiServerView" className="mono" />
+              </label>
+              <button type="button" style={{ alignSelf: 'flex-end' }} onClick={() => void pickFolder()} disabled={!!busy}>
+                <IconFolder size={15} /> Choose…
+              </button>
+            </div>
+            <p className="muted small">
+              The app stores the encrypted file <code>MultiServerView-Vault.msv</code> there. Your folder service brings it to your other PCs,
+              and the app merges the changes. Without the master password the file is unreadable. On the second PC, choose the same folder.
+            </p>
+          </>
+        ) : (
+          <>
         <div className="row">
           <label className="grow">
             Supabase-URL
@@ -115,36 +154,41 @@ export function CloudPanel({
         <div className="row">
           <label className="grow">
             E-Mail
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="du@example.com" />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
           </label>
           <label className="grow">
-            Cloud-Passwort
+            Cloud password
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={info?.hasPassword ? '•••••••• (unverändert)' : 'Passwort für das Supabase-Konto'}
+              placeholder={info?.hasPassword ? '•••••••• (unchanged)' : 'Password for the Supabase account'}
             />
           </label>
         </div>
 
+          </>
+        )}
+
         {error && <div className="error">{error}</div>}
 
         <div className="actions">
-          <button onClick={signUp} disabled={!!busy || !url || !anonKey || !email || !password}>
-            Konto erstellen
-          </button>
+          {mode === 'supabase' && (
+            <button onClick={signUp} disabled={!!busy || !url || !anonKey || !email || !password}>
+              Create account
+            </button>
+          )}
           <button onClick={test} disabled={!!busy || !ready}>
-            Testen
+            Test
           </button>
           <span className="grow" />
           {info?.configured && (
             <button className="ghost danger" onClick={disconnect} disabled={!!busy}>
-              Trennen
+              Disconnect
             </button>
           )}
           <button className="primary" onClick={save} disabled={!!busy || !ready}>
-            <IconCloud size={15} /> {busy === 'save' ? 'Verbinde…' : info?.configured ? 'Speichern & synchronisieren' : 'Verbinden'}
+            <IconCloud size={15} /> {busy === 'save' ? 'Connecting…' : info?.configured ? 'Save & sync' : 'Connect'}
           </button>
         </div>
       </div>
@@ -152,10 +196,10 @@ export function CloudPanel({
       {info?.configured && (
         <div className="card-form row center-v">
           <div className="grow">
-            <div className="list-title">Jetzt synchronisieren</div>
+            <div className="list-title">Sync now</div>
             <div className="muted small">
-              {info.lastSync ? `Zuletzt: ${new Date(info.lastSync).toLocaleString('de-CH')}` : 'Noch nicht synchronisiert'} · läuft
-              automatisch nach jeder Änderung
+              {info.lastSync ? `Last: ${new Date(info.lastSync).toLocaleString('en-GB')}` : 'Not synchronized yet'} · runs
+              automatically after every change
             </div>
           </div>
           <button onClick={now} disabled={!!busy}>
@@ -166,7 +210,7 @@ export function CloudPanel({
 
       {info?.configured && <PasswordTools toast={toast} onChanged={onChanged} />}
 
-      <Setup />
+      {mode === 'supabase' && <Setup />}
     </div>
   );
 }
@@ -179,36 +223,36 @@ function Setup() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      /* Zwischenablage nicht erlaubt */
+      /* clipboard not allowed */
     }
   };
 
   return (
     <details className="card-form setup">
-      <summary>Einrichtung in 3 Minuten (einmalig)</summary>
+      <summary>Setup in 3 minutes (one time)</summary>
       <ol>
         <li>
-          Auf <b>supabase.com</b> ein kostenloses Projekt erstellen.
+          Create a free project on <b>supabase.com</b>.
         </li>
         <li>
-          Im Projekt: <b>SQL Editor</b> → den Code unten einfügen → <b>Run</b>.
+          In the project: <b>SQL Editor</b> → paste the code below → <b>Run</b>.
         </li>
         <li>
-          <b>Project Settings → API</b>: <i>Project URL</i> und den <i>anon public</i> Key oben eintragen.
+          <b>Project Settings → API</b>: enter the <i>Project URL</i> and the <i>anon public</i> key above.
         </li>
         <li>
-          Optional unter <b>Authentication → Providers → Email</b> «Confirm email» ausschalten, dann geht die Anmeldung
-          sofort. Danach hier «Konto erstellen» und «Verbinden».
+          Optionally turn off "Confirm email" under <b>Authentication → Providers → Email</b> so sign-in works
+          immediately. Then click "Create account" and "Connect" here.
         </li>
         <li>
-          Auf dem zweiten PC: beim ersten Start «Neues Gerät? Aus Cloud laden» und danach mit dem gleichen Master-Passwort
-          entsperren.
+          On the second PC: at first start choose "New device? Load from sync folder or cloud" and then unlock with the same master password
+          to open the vault.
         </li>
       </ol>
       <div className="code-head">
         <span className="muted small">SQL</span>
         <button className="ghost" onClick={copy}>
-          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied ? 'Kopiert' : 'Kopieren'}
+          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
       <pre className="code">{SUPABASE_SQL}</pre>
@@ -216,7 +260,7 @@ function Setup() {
   );
 }
 
-/** Für den Fall, dass das Master-Passwort auf einem anderen Gerät geändert wurde (oder dieses Gerät die Cloud ersetzen soll). */
+/** For when the master password was changed on another device (or this device should replace the synced vault). */
 function PasswordTools({ toast, onChanged }: { toast: (msg: string, kind?: 'ok' | 'error') => void; onChanged: () => Promise<void> }) {
   const [adopting, setAdopting] = useState(false);
   const [pw, setPw] = useState('');
@@ -230,7 +274,7 @@ function PasswordTools({ toast, onChanged }: { toast: (msg: string, kind?: 'ok' 
     try {
       await api.syncAdoptPassword(pw);
       await onChanged();
-      toast('Neues Master-Passwort übernommen');
+      toast('New master password adopted');
       setAdopting(false);
       setPw('');
     } catch (err) {
@@ -241,10 +285,10 @@ function PasswordTools({ toast, onChanged }: { toast: (msg: string, kind?: 'ok' 
   }
 
   async function force() {
-    if (!confirm('Den Cloud-Vault mit dem Stand dieses Geräts überschreiben?\nÄnderungen anderer Geräte, die noch nicht hier sind, gehen dabei verloren.')) return;
+    if (!(await askConfirm('Overwrite the synced vault with the state of this device?\nChanges from other devices that are not here yet will be lost.', { title: 'Overwrite vault', confirmLabel: 'Overwrite', danger: true }))) return;
     try {
       await api.syncForceUpload();
-      toast('Cloud mit diesem Vault überschrieben');
+      toast('Synced vault overwritten with this vault');
       await onChanged();
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -253,30 +297,30 @@ function PasswordTools({ toast, onChanged }: { toast: (msg: string, kind?: 'ok' 
 
   return (
     <details className="card-form setup">
-      <summary>Erweitert: Master-Passwort geändert?</summary>
+      <summary>Advanced: master password changed?</summary>
       <p className="muted small">
-        Ändert man das Master-Passwort, ist der Cloud-Vault mit dem neuen Schlüssel verschlüsselt. Andere Geräte, die noch das alte Passwort benutzen,
-        können dann nicht mehr synchronisieren, bis sie das neue Passwort übernehmen.
+        When the master password is changed, the synced vault is encrypted with the new key. Other devices that still use the old password
+        can no longer sync until they adopt the new password.
       </p>
       <div className="actions" style={{ justifyContent: 'flex-start' }}>
-        <button onClick={() => setAdopting(true)}>Neues Master-Passwort übernehmen…</button>
+        <button onClick={() => setAdopting(true)}>Adopt new master password…</button>
         <button className="ghost danger" onClick={() => void force()}>
-          Cloud mit diesem Vault überschreiben
+          Overwrite synced vault with this vault
         </button>
       </div>
       {adopting && (
         <form className="card-form" style={{ background: 'var(--surface-2)' }} onSubmit={adopt}>
           <label>
-            Neues Master-Passwort (das du auf dem anderen Gerät gesetzt hast)
+            New master password (the one you set on the other device)
             <input type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
           </label>
           {error && <div className="error">{error}</div>}
           <div className="actions">
             <button type="button" onClick={() => setAdopting(false)}>
-              Abbrechen
+              Cancel
             </button>
             <button className="primary" disabled={busy || pw.length < 8}>
-              Übernehmen
+              Adopt
             </button>
           </div>
         </form>

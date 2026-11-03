@@ -7,7 +7,7 @@ import {
 import { IconMonitor, ProtocolIcon } from './Icons';
 import type { Server } from './types';
 
-/** Betriebssystem-Kennung (vom Host erkannt) -> Logo. */
+/** Operating system id (detected from the host) -> logo. */
 const OS_ICONS: Record<string, SimpleIcon> = {
   debian: siDebian, ubuntu: siUbuntu, centos: siCentos, fedora: siFedora, redhat: siRedhat, rocky: siRockylinux,
   almalinux: siAlmalinux, arch: siArchlinux, manjaro: siManjaro, alpine: siAlpinelinux, opensuse: siOpensuse,
@@ -24,7 +24,7 @@ const OS_LABEL: Record<string, string> = {
 
 export const osLabel = (os: string) => OS_LABEL[os] ?? '';
 
-/** Farbkachel eines Hosts: Distro-Logo (SSH, sobald erkannt) oder Protokoll-Icon. */
+/** Color tile of a host: distro logo (SSH, once detected) or protocol icon. */
 export function HostTile({ server, size = 'md' }: { server: Pick<Server, 'protocol' | 'os'>; size?: 'sm' | 'md' | 'lg' }) {
   const px = size === 'sm' ? 13 : size === 'lg' ? 24 : 20;
   if (server.protocol === 'ssh' && server.os === 'windows')

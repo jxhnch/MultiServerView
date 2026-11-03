@@ -24,11 +24,11 @@ public class MergeTests
     [Fact]
     public void Newer_update_wins_in_both_directions()
     {
-        var older = new VaultData { Servers = { S("1", "alt", 1) } };
-        var newer = new VaultData { Servers = { S("1", "neu", 5) } };
+        var older = new VaultData { Servers = { S("1", "old", 1) } };
+        var newer = new VaultData { Servers = { S("1", "new", 5) } };
 
-        Assert.Equal("neu", VaultMerge.Merge(older, newer).Servers.Single().Name);
-        Assert.Equal("neu", VaultMerge.Merge(newer, older).Servers.Single().Name);
+        Assert.Equal("new", VaultMerge.Merge(older, newer).Servers.Single().Name);
+        Assert.Equal("new", VaultMerge.Merge(newer, older).Servers.Single().Name);
     }
 
     [Fact]
@@ -53,12 +53,12 @@ public class MergeTests
     [Fact]
     public void LastUsed_takes_the_latest_value_regardless_of_winner()
     {
-        var a = new VaultData { Servers = { S("1", "neu", 10, T0.AddMinutes(1)) } };
-        var b = new VaultData { Servers = { S("1", "alt", 1, T0.AddMinutes(99)) } };
+        var a = new VaultData { Servers = { S("1", "new", 10, T0.AddMinutes(1)) } };
+        var b = new VaultData { Servers = { S("1", "old", 1, T0.AddMinutes(99)) } };
 
         var merged = VaultMerge.Merge(a, b).Servers.Single();
 
-        Assert.Equal("neu", merged.Name);
+        Assert.Equal("new", merged.Name);
         Assert.Equal(T0.AddMinutes(99), merged.LastUsed);
     }
 

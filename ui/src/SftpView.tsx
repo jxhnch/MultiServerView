@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, onEvent } from './bridge';
 import {
-  IconArrowLeft, IconArrowRight, IconArrowUp, IconClose, IconEdit, IconFile, IconFolder, IconPlus, IconRefresh, IconTrash,
+  IconArrowLeft, IconArrowRight, IconArrowUp, IconClose, IconEdit, IconFile, IconFolder, IconPlus, IconRefresh, IconText, IconTrash,
 } from './Icons';
+import { PasswordPrompt, isAuthError, type Credentials } from './PasswordPrompt';
 import { PromptDialog } from './Prompt';
+import { RemoteEditor } from './RemoteEditor';
 import type { BrowseResult, FileEntry, Server, SessionStatus } from './types';
+import { askConfirm } from './Confirm';
 
 type Side = 'local' | 'remote';
 interface Transfer {
@@ -35,7 +38,7 @@ const fmtDate = (iso: string) => {
     : d.toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' });
 };
 
-/** Pfad in anklickbare Teile zerlegen (Windows "C:\\a\\b" oder Unix "/a/b"). */
+/** Split a path into clickable parts (Windows "C:\\a\\b" or Unix "/a/b"). */
 function crumbs(path: string, side: Side): { label: string; path: string }[] {
   if (side === 'remote') {
     const parts = path.split('/').filter(Boolean);
@@ -44,7 +47,7 @@ function crumbs(path: string, side: Side): { label: string; path: string }[] {
   const win = path.includes('\\') || /^[A-Za-z]:/.test(path);
   const sep = win ? '\\' : '/';
   const parts = path.split(/[\\/]/).filter(Boolean);
-  const out: { label: string; path: string }[] = [{ label: 'Dieser PC', path: '' }];
+  const out: { label: string; path: string }[] = [{ label: 'This PC', path: '' }];
   parts.forEach((p, i) => {
     const joined = parts.slice(0, i + 1).join(sep);
     out.push({ label: p, path: win ? (i === 0 ? joined + '\\' : joined) : '/' + joined });
@@ -76,6 +79,10 @@ export function SftpView({
 }) {
   const [status, setStatusState] = useState<SessionStatus>('connecting');
   const [error, setError] = useState('');
+  const credRef = useRef<Credentials | undefined>(undefined);
+  const [retry, setRetry] = useState(0);
+  const [authPrompt, setAuthPrompt] = useState(false);
+  const [editing, setEditing] = useState<FileEntry | null>(null);
   const [local, setLocal] = useState<BrowseResult | null>(null);
   const [remote, setRemote] = useState<BrowseResult | null>(null);
   const [sel, setSel] = useState<Record<Side, Set<string>>>({ local: new Set(), remote: new Set() });
@@ -122,13 +129,15 @@ export function SftpView({
     [tabId],
   );
 
-  // Verbinden
+  // Connect
   useEffect(() => {
     let cancelled = false;
     setStatus('connecting');
     setError('');
+    const cred = credRef.current;
+    credRef.current = undefined;
     api
-      .sftpOpen(tabId, server.id)
+      .sftpOpen(tabId, server.id, cred)
       .then(async ({ home }) => {
         if (cancelled) return;
         setStatus('connected');
@@ -138,21 +147,22 @@ export function SftpView({
         if (cancelled) return;
         setStatus('error');
         setError(e.message);
+        if (isAuthError(e.message)) setAuthPrompt(true);
       });
     return () => {
       cancelled = true;
       void api.sftpClose(tabId).catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, reconnectKey]);
+  }, [tabId, reconnectKey, retry]);
 
-  // Lokale Ansicht: Startordner (Home) beim ersten Mal
+  // Local view: start folder (home) the first time
   useEffect(() => {
     if (!local) void api.localBrowse('').then((r) => { localPath.current = r.path; setLocal(r); }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fortschritt
+  // Progress
   useEffect(
     () =>
       onEvent((e) => {
@@ -164,7 +174,7 @@ export function SftpView({
     [tabId],
   );
 
-  // ------------------------------------------------------------------ Aktionen
+  // ------------------------------------------------------------------ Actions
   const entriesOf = (side: Side) => (side === 'local' ? local?.entries : remote?.entries) ?? [];
   const selected = (side: Side) => entriesOf(side).filter((e) => sel[side].has(e.path));
 
@@ -187,10 +197,10 @@ export function SftpView({
     if (entries.length === 0) return;
     const destList = direction === 'up' ? remote?.entries : local?.entries;
     const clash = entries.filter((en) => destList?.some((d) => d.name === en.name));
-    if (clash.length > 0 && !confirm(`${clash.map((c) => c.name).join(', ')} existiert am Ziel bereits und wird überschrieben. Fortfahren?`)) return;
+    if (clash.length > 0 && !(await askConfirm(`${clash.map((c) => c.name).join(', ')} already exists at the destination and will be overwritten. Continue?`, { title: 'Overwrite file', confirmLabel: 'Overwrite', danger: true }))) return;
 
     const id = crypto.randomUUID();
-    const label = entries.length === 1 ? entries[0].name : `${entries.length} Elemente`;
+    const label = entries.length === 1 ? entries[0].name : `${entries.length} items`;
     setTransfers((prev) => [{ id, name: label, direction, done: 0, total: 0, state: 'running' as const }, ...prev].slice(0, 8));
     try {
       if (direction === 'up') await api.sftpUpload(tabId, id, entries.map((x) => x.path), remotePath.current);
@@ -200,14 +210,14 @@ export function SftpView({
       else await loadLocal(localPath.current);
     } catch (e) {
       const msg = (e as Error).message;
-      setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, state: msg === 'Abgebrochen.' ? 'cancelled' : 'error', message: msg } : t)));
+      setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, state: msg === 'Cancelled.' ? 'cancelled' : 'error', message: msg } : t)));
     }
   }
 
   async function removeSelected() {
     const items = selected('remote');
     if (items.length === 0) return;
-    if (!confirm(`${items.length === 1 ? `«${items[0].name}»` : `${items.length} Elemente`} auf dem Server endgültig löschen?${items.some((i) => i.isDir) ? '\nOrdner werden mit Inhalt gelöscht.' : ''}`)) return;
+    if (!(await askConfirm(`Permanently delete ${items.length === 1 ? `"${items[0].name}"` : `${items.length} items`} from the server?${items.some((i) => i.isDir) ? '\nFolders are deleted with their contents.' : ''}`, { title: 'Delete from server', confirmLabel: 'Delete', danger: true }))) return;
     try {
       for (const it of items) await api.sftpDelete(tabId, it.path);
     } catch (e) {
@@ -239,7 +249,7 @@ export function SftpView({
     }
   }
 
-  // Drag & Drop zwischen den Seiten
+  // Drag & drop between the panes
   const onDragStart = (side: Side, entry: FileEntry, e: React.DragEvent) => {
     if (!sel[side].has(entry.path)) setSel((s) => ({ ...s, [side]: new Set([entry.path]) }));
     e.dataTransfer.setData('application/x-msv-side', side);
@@ -254,20 +264,24 @@ export function SftpView({
     void transfer(from === 'local' ? 'up' : 'down', items);
   };
 
-  // Tastatur: Entf löscht, F2 benennt um (nur Server-Seite)
+  // Keyboard: Del deletes, F2 renames (server side only)
   const onKey = (side: Side, e: React.KeyboardEvent) => {
     if (side !== 'remote') return;
     if (e.key === 'Delete') void removeSelected();
+    if (e.key === 'F4') {
+      const one = selected('remote');
+      if (one.length === 1 && !one[0].isDir) setEditing(one[0]);
+    }
     if (e.key === 'F2') {
       const one = selected('remote');
       if (one.length === 1) setPrompt({ kind: 'rename', side, entry: one[0] });
     }
   };
 
-  // ------------------------------------------------------------------ Darstellung
+  // ------------------------------------------------------------------ Layout
   const pane = (side: Side) => {
     const data = side === 'local' ? local : remote;
-    const title = side === 'local' ? 'Dieser PC' : server.name;
+    const title = side === 'local' ? 'This PC' : server.name;
     const navigate = (p: string) => (side === 'local' ? loadLocal(p) : loadRemote(p));
     const count = sel[side].size;
     return (
@@ -285,21 +299,24 @@ export function SftpView({
         <header>
           <span className="sftp-title">{title}</span>
           <span className="grow" />
-          <button className="ghost icon-only" title="Ordner nach oben" disabled={!data || (data.parent === '' && data.path === '')} onClick={() => data && navigate(data.parent)}>
+          <button className="ghost icon-only" title="Up one folder" disabled={!data || (data.parent === '' && data.path === '')} onClick={() => data && navigate(data.parent)}>
             <IconArrowUp size={15} />
           </button>
-          <button className="ghost icon-only" title="Neu laden" onClick={() => navigate(data?.path ?? '')}>
+          <button className="ghost icon-only" title="Reload" onClick={() => navigate(data?.path ?? '')}>
             <IconRefresh size={15} />
           </button>
-          <button className="ghost icon-only" title="Neuer Ordner" disabled={!data || (side === 'local' && data.path === '')} onClick={() => setPrompt({ kind: 'mkdir', side })}>
+          <button className="ghost icon-only" title="New folder" disabled={!data || (side === 'local' && data.path === '')} onClick={() => setPrompt({ kind: 'mkdir', side })}>
             <IconPlus size={15} />
           </button>
           {side === 'remote' && (
             <>
-              <button className="ghost icon-only" title="Umbenennen (F2)" disabled={count !== 1} onClick={() => setPrompt({ kind: 'rename', side, entry: selected('remote')[0] })}>
+              <button className="ghost icon-only" title="Edit as text (F4)" disabled={count !== 1 || selected('remote')[0]?.isDir} onClick={() => setEditing(selected('remote')[0])}>
+                <IconText size={15} />
+              </button>
+              <button className="ghost icon-only" title="Rename (F2)" disabled={count !== 1} onClick={() => setPrompt({ kind: 'rename', side, entry: selected('remote')[0] })}>
                 <IconEdit size={15} />
               </button>
-              <button className="ghost icon-only danger" title="Löschen (Entf)" disabled={count === 0} onClick={() => void removeSelected()}>
+              <button className="ghost icon-only danger" title="Delete (Del)" disabled={count === 0} onClick={() => void removeSelected()}>
                 <IconTrash size={15} />
               </button>
             </>
@@ -318,12 +335,12 @@ export function SftpView({
         </nav>
         <div className="file-head">
           <span className="c-name">Name</span>
-          <span className="c-size">Grösse</span>
-          <span className="c-date">Geändert</span>
-          {side === 'remote' && <span className="c-mode">Rechte</span>}
+          <span className="c-size">Size</span>
+          <span className="c-date">Modified</span>
+          {side === 'remote' && <span className="c-mode">Permissions</span>}
         </div>
         <div className="file-list">
-          {data?.entries.length === 0 && <div className="muted pad-sm">Dieser Ordner ist leer.</div>}
+          {data?.entries.length === 0 && <div className="muted pad-sm">This folder is empty.</div>}
           {data?.entries.map((en) => (
             <div
               key={en.path}
@@ -344,8 +361,8 @@ export function SftpView({
           ))}
         </div>
         <footer className="muted small">
-          {data ? `${data.entries.length} Einträge` : ''}
-          {count > 0 ? ` · ${count} ausgewählt` : ''}
+          {data ? `${data.entries.length} entries` : ''}
+          {count > 0 ? ` · ${count} selected` : ''}
         </footer>
       </section>
     );
@@ -358,11 +375,11 @@ export function SftpView({
         <span className="muted">SFTP · {server.username ? `${server.username}@` : ''}{server.host}:{server.port}</span>
         <span className={`pill ${status}`}>
           <span className="dot-sm" />
-          {status === 'connected' ? 'Verbunden' : status === 'connecting' ? 'Verbinde…' : 'Fehler'}
+          {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting…' : 'Error'}
         </span>
         <span className="grow" />
         <button className="ghost" onClick={onReconnect}>
-          <IconRefresh size={15} /> Neu verbinden
+          <IconRefresh size={15} /> Reconnect
         </button>
         <button className="ghost" onClick={onEdit}>
           <IconEdit size={15} /> Host
@@ -371,19 +388,19 @@ export function SftpView({
 
       {status === 'error' && !remote ? (
         <div className="sftp-fail">
-          <div className="error">{error || 'Verbindung fehlgeschlagen.'}</div>
+          <div className="error">{error || 'Connection failed.'}</div>
           <button className="primary" onClick={onReconnect}>
-            Neu verbinden
+            Reconnect
           </button>
         </div>
       ) : (
         <div className="sftp-main">
           {pane('local')}
           <div className="sftp-mid">
-            <button className="primary icon-only" title="Auswahl hochladen" disabled={sel.local.size === 0 || status !== 'connected'} onClick={() => void transfer('up', selected('local'))}>
+            <button className="primary icon-only" title="Upload selection" disabled={sel.local.size === 0 || status !== 'connected'} onClick={() => void transfer('up', selected('local'))}>
               <IconArrowRight size={17} />
             </button>
-            <button className="primary icon-only" title="Auswahl herunterladen" disabled={sel.remote.size === 0 || status !== 'connected'} onClick={() => void transfer('down', selected('remote'))}>
+            <button className="primary icon-only" title="Download selection" disabled={sel.remote.size === 0 || status !== 'connected'} onClick={() => void transfer('down', selected('remote'))}>
               <IconArrowLeft size={17} />
             </button>
           </div>
@@ -410,17 +427,17 @@ export function SftpView({
                 <i style={{ width: `${t.total > 0 ? Math.min(100, (t.done / t.total) * 100) : t.state === 'done' ? 100 : 4}%` }} />
               </div>
               <span className="t-info muted small">
-                {t.state === 'running' && (t.total > 0 ? `${fmtSize(t.done)} / ${fmtSize(t.total)}` : 'Starte…')}
-                {t.state === 'done' && 'Fertig'}
-                {t.state === 'cancelled' && 'Abgebrochen'}
+                {t.state === 'running' && (t.total > 0 ? `${fmtSize(t.done)} / ${fmtSize(t.total)}` : 'Starting…')}
+                {t.state === 'done' && 'Done'}
+                {t.state === 'cancelled' && 'Cancelled'}
                 {t.state === 'error' && <span className="error">{t.message}</span>}
               </span>
               {t.state === 'running' ? (
-                <button className="ghost icon-only" title="Abbrechen" onClick={() => void api.sftpCancel(t.id)}>
+                <button className="ghost icon-only" title="Cancel" onClick={() => void api.sftpCancel(t.id)}>
                   <IconClose size={14} />
                 </button>
               ) : (
-                <button className="ghost icon-only" title="Entfernen" onClick={() => setTransfers((p) => p.filter((x) => x.id !== t.id))}>
+                <button className="ghost icon-only" title="Remove" onClick={() => setTransfers((p) => p.filter((x) => x.id !== t.id))}>
                   <IconClose size={14} />
                 </button>
               )}
@@ -431,12 +448,25 @@ export function SftpView({
 
       {prompt && (
         <PromptDialog
-          title={prompt.kind === 'mkdir' ? 'Neuer Ordner' : 'Umbenennen'}
-          label={prompt.kind === 'mkdir' ? 'Name des Ordners' : 'Neuer Name'}
+          title={prompt.kind === 'mkdir' ? 'New folder' : 'Rename'}
+          label={prompt.kind === 'mkdir' ? 'Folder name' : 'New name'}
           initial={prompt.kind === 'rename' ? prompt.entry?.name : ''}
-          confirmLabel={prompt.kind === 'mkdir' ? 'Anlegen' : 'Umbenennen'}
+          confirmLabel={prompt.kind === 'mkdir' ? 'Create' : 'Rename'}
           onSubmit={(v) => void submitPrompt(v)}
           onClose={() => setPrompt(null)}
+        />
+      )}
+      {editing && <RemoteEditor sessionId={tabId} file={editing} onClose={() => setEditing(null)} />}
+      {authPrompt && (
+        <PasswordPrompt
+          server={server}
+          failed
+          onCancel={() => setAuthPrompt(false)}
+          onSubmit={(cred) => {
+            credRef.current = cred;
+            setAuthPrompt(false);
+            setRetry((n) => n + 1);
+          }}
         />
       )}
     </div>

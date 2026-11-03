@@ -1,10 +1,10 @@
-/** Einstellungen, die nur die Oberfläche betreffen (liegen im Browser-Speicher von WebView2). */
+/** Settings that only affect the interface (stored in the WebView2 browser storage). */
 export interface UiSettings {
   theme: 'light' | 'dark';
-  /** Minuten Untätigkeit bis der Vault automatisch gesperrt wird (0 = nie). */
+  /** Minutes of inactivity until the vault is locked automatically (0 = never). */
   autoLockMinutes: number;
   vncScale: boolean;
-  /** 0 (kleinste Datenmenge) bis 9 (beste Qualität). */
+  /** 0 (least data) to 9 (best quality). */
   vncQuality: number;
 }
 
@@ -17,10 +17,10 @@ function load(): UiSettings {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<UiSettings>) };
-    // Übernahme des alten Theme-Schlüssels
+    // Take over the old theme key
     if (localStorage.getItem('msv-theme') === 'dark') return { ...DEFAULTS, theme: 'dark' };
   } catch {
-    /* nicht schlimm */
+    /* not a problem */
   }
   return { ...DEFAULTS };
 }
@@ -32,7 +32,7 @@ export function setUiSettings(patch: Partial<UiSettings>) {
   try {
     localStorage.setItem(KEY, JSON.stringify(current));
   } catch {
-    /* nicht schlimm */
+    /* not a problem */
   }
   listeners.forEach((l) => l(current));
 }

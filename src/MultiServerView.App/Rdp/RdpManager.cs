@@ -5,13 +5,13 @@ using MultiServerView.Core;
 namespace MultiServerView.App.Rdp;
 
 /// <summary>
-/// Hostet das native Microsoft-RDP-Control (mstscax, derselbe ActiveX wie bei mstsc und mRemoteNG)
-/// als Kind-Control im Hauptfenster - genau über dem Bereich, den das UI für die Session reserviert.
-/// Alles hier läuft auf dem UI-Thread; die Bridge ruft von Hintergrund-Threads auf, deshalb Invoke.
+/// Hosts the native Microsoft RDP control (mstscax, the same ActiveX as in mstsc and mRemoteNG)
+/// as a child control in the main window - exactly above the area the UI reserves for the session.
+/// Everything here runs on the UI thread; the bridge calls from background threads, hence Invoke.
 ///
-/// Das Control wird per Late-Binding (dynamic) angesprochen. So braucht das Projekt keine
-/// generierten Interop-Assemblies (aximp), und ein fehlendes Feature (z. B. ältere Windows-Version)
-/// führt nicht zum Absturz, sondern wird übersprungen.
+/// The control is addressed via late binding (dynamic). This way the project needs no
+/// generated interop assemblies (aximp), and a missing feature (e.g. an older Windows version)
+/// does not crash but is skipped.
 /// </summary>
 internal sealed class RdpManager : IRdpController, IDisposable
 {
@@ -22,7 +22,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
     private readonly System.Windows.Forms.Timer _poll = new() { Interval = 500 };
     private bool _suspended;
 
-    /// <summary>Messwerte des letzten Schliessens (für den Selbsttest).</summary>
+    /// <summary>Measurements of the last close (for the self-test).</summary>
     public string LastCloseTimings { get; private set; } = "";
 
     public RdpManager(Control owner, Action<object> emit, Func<AppSettings> settings)
@@ -47,7 +47,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         public System.Windows.Forms.Timer? ResizeTimer { get; set; }
     }
 
-    // ------------------------------------------------------------------ IRdpController (Thread-sicher)
+    // ------------------------------------------------------------------ IRdpController (thread-safe)
 
     public void Open(string sessionId, ServerEntry server, Rectangle bounds) =>
         _owner.Invoke(new Action(() => OpenCore(sessionId, server, bounds)));
@@ -69,7 +69,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
 
     private void OpenCore(string id, ServerEntry server, Rectangle bounds)
     {
-        CloseCore(id); // Reconnect mit gleicher Id
+        CloseCore(id); // reconnect with the same id
 
         RdpAxHost host;
         dynamic ocx;
@@ -81,15 +81,15 @@ internal sealed class RdpManager : IRdpController, IDisposable
             _owner.Controls.Add(host);
             ((ISupportInitialize)host).EndInit();
             host.CreateControl();
-            ocx = host.GetOcx() ?? throw new InvalidOperationException("RDP-Control konnte nicht erzeugt werden.");
+            ocx = host.GetOcx() ?? throw new InvalidOperationException("The RDP control could not be created.");
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException
                                        or System.ComponentModel.InvalidAsynchronousStateException
                                        or System.Windows.Forms.AxHost.InvalidActiveXStateException)
         {
             throw new InvalidOperationException(
-                "Das Windows-RDP-Control (mstscax) ist nicht verfügbar. " +
-                "Du kannst stattdessen «In Windows-RDP öffnen» (mstsc) benutzen.", ex);
+                "The Windows RDP control (mstscax) is not available. " +
+                "You can use \"Open in Windows RDP\" (mstsc) instead.", ex);
         }
 
         var session = new RdpSession { Id = id, Host = host, Ocx = ocx, WantVisible = true };
@@ -107,7 +107,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         catch (Exception ex)
         {
             CloseCore(id);
-            throw new InvalidOperationException("RDP-Verbindung konnte nicht gestartet werden: " + ex.Message, ex);
+            throw new InvalidOperationException("The RDP connection could not be started: " + ex.Message, ex);
         }
         host.Focus();
     }
@@ -116,7 +116,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
     {
         Try(() => ocx.Server = server.Host);
 
-        // "DOMAIN\user" oder "user@domain" -> Domain getrennt setzen
+        // "DOMAIN\user" or "user@domain" -> set the domain separately
         var user = server.Username ?? "";
         var domain = "";
         var slash = user.IndexOf('\\');
@@ -137,10 +137,10 @@ internal sealed class RdpManager : IRdpController, IDisposable
         Try(() => ocx.AdvancedSettings9.RedirectClipboard = settings.RdpClipboard);
         Try(() => ocx.AdvancedSettings9.RedirectDrives = settings.RdpDrives);
         Try(() => ocx.AdvancedSettings9.AuthenticationLevel = settings.RdpWarnOnCertificate ? 2u : 0u);
-        Try(() => ocx.AdvancedSettings9.PerformanceFlags = 0x0); // volle Qualität (Hintergrund, Animationen, ...)
+        Try(() => ocx.AdvancedSettings9.PerformanceFlags = 0x0); // full quality (background, animations, ...)
         Try(() => ocx.AdvancedSettings9.BitmapPeristence = 1);
 
-        // Passwort: nur über das Non-Scriptable-Interface setzbar (nie als Klartext-Property).
+        // Password: can only be set via the non-scriptable interface (never as a plain-text property).
         if (!string.IsNullOrEmpty(server.Password))
         {
             Try(() =>
@@ -169,7 +169,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         }
     }
 
-    /// <summary>Passt die Auflösung der Remote-Sitzung an die Fenstergrösse an (erst wenn das Ziehen aufgehört hat).</summary>
+    /// <summary>Adjusts the resolution of the remote session to the window size (only once dragging has stopped).</summary>
     private void QueueResolutionUpdate(RdpSession s, Size size)
     {
         if (size == s.LastRequestedSize || size.Width < 200 || size.Height < 150) return;
@@ -184,7 +184,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
             timer.Stop();
             timer.Dispose();
             if (!_sessions.ContainsKey(s.Id)) return;
-            // Klappt nur bei verbundener Session und Servern ab Windows 8.1; sonst bleibt es bei SmartSizing (skaliert).
+            // Only works with a connected session and servers from Windows 8.1; otherwise it stays with SmartSizing (scaled).
             Try(() =>
             {
                 if (Convert.ToInt32(s.Ocx.Connected) == 1)
@@ -205,7 +205,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         s.Host.Visible = false;
         _owner.Controls.Remove(s.Host);
         s.Host.Dispose();
-        LastCloseTimings = $"Abmelden {tDisconnect} ms, Freigeben {sw.ElapsedMilliseconds - tDisconnect} ms";
+        LastCloseTimings = $"Disconnect {tDisconnect} ms, release {sw.ElapsedMilliseconds - tDisconnect} ms";
     }
 
     private void Poll()
@@ -219,7 +219,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
             if (state == s.LastState) continue;
             if (state != 0) s.SawActive = true;
 
-            // Vor dem ersten Verbindungsaufbau steht Connected kurz auf 0 - das ist noch kein Trennen.
+            // Before the first connection attempt Connected is briefly 0 - that is not a disconnect yet.
             if (state == 0 && !s.SawActive && (DateTime.UtcNow - s.Started).TotalSeconds < 4) continue;
 
             s.LastState = state;
@@ -228,7 +228,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
                 @event = "rdp.status",
                 sessionId = s.Id,
                 state = state switch { 1 => "connected", 2 => "connecting", _ => "disconnected" },
-                message = state == 0 ? "Verbindung getrennt oder fehlgeschlagen." : ""
+                message = state == 0 ? "Connection closed or failed." : ""
             });
         }
     }
@@ -239,7 +239,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException
                                        or InvalidCastException or NotSupportedException or ArgumentException)
         {
-            Debug.WriteLine("RDP: Einstellung übersprungen: " + ex.Message);
+            Debug.WriteLine("RDP: setting skipped: " + ex.Message);
         }
     }
 
@@ -247,7 +247,7 @@ internal sealed class RdpManager : IRdpController, IDisposable
     {
         _poll.Stop();
         _poll.Dispose();
-        // Beim Beenden nicht sauber abmelden: Disconnect() kann bei einer gerade verbindenden Sitzung blockieren.
+        // Do not disconnect cleanly on exit: Disconnect() can block on a session that is still connecting.
         foreach (var id in _sessions.Keys.ToList()) CloseCore(id, disconnect: false);
     }
 }

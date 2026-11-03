@@ -1,10 +1,21 @@
+using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Sftp;
 using MultiServerView.Core.Ssh;
 
 namespace MultiServerView.Core.Sftp;
 
-/// <summary>Eine SFTP-Verbindung zu einem Host: Dateien auflisten, hoch-/herunterladen, anlegen, umbenennen, löschen.</summary>
+/// <summary>A text file from the server for editing. <see cref="Content"/> always uses "\n" as line ending; the original is in <see cref="LineEnding"/>.</summary>
+public sealed record RemoteText(string Content, string LineEnding, bool Bom, long Size, long Modified);
+
+/// <summary>The file was changed on the server since it was opened.</summary>
+public sealed class RemoteChangedException : InvalidOperationException
+{
+    public const string Text = "The file was changed on the server since you opened it.";
+    public RemoteChangedException() : base(Text) { }
+}
+
+/// <summary>An SFTP connection to a host: list, upload/download, create, rename and delete files.</summary>
 public sealed class SftpSession : IDisposable
 {
     private readonly ServerEntry _server;
@@ -22,7 +33,7 @@ public sealed class SftpSession : IDisposable
         _check = check;
     }
 
-    private SftpClient Client => _client ?? throw new InvalidOperationException("Die SFTP-Verbindung ist nicht offen.");
+    private SftpClient Client => _client ?? throw new InvalidOperationException("The SFTP connection is not open.");
 
     public async Task<string> ConnectAsync()
     {
@@ -63,7 +74,7 @@ public sealed class SftpSession : IDisposable
 
     public Task DeleteAsync(string path) => Task.Run(() => DeleteRecursive(Client, path));
 
-    /// <summary>Lädt eine Datei oder einen ganzen Ordner (rekursiv) in <paramref name="remoteDir"/> hoch.</summary>
+    /// <summary>Uploads a file or a whole folder (recursively) into <paramref name="remoteDir"/>.</summary>
     public async Task UploadAsync(string localPath, string remoteDir, Action<TransferProgress> progress, CancellationToken ct)
     {
         var client = Client;
@@ -83,7 +94,7 @@ public sealed class SftpSession : IDisposable
                     f.Add((file, Combine(rootRemote, Relative(localPath, file)), new FileInfo(file).Length));
             }
             else if (File.Exists(localPath)) f.Add((localPath, Combine(remoteDir, name), new FileInfo(localPath).Length));
-            else throw new FileNotFoundException("Datei nicht gefunden: " + localPath);
+            else throw new FileNotFoundException("File not found: " + localPath);
 
             foreach (var dir in d.OrderBy(x => x.Length))
                 if (!client.Exists(dir)) client.CreateDirectory(dir);
@@ -98,7 +109,7 @@ public sealed class SftpSession : IDisposable
             ct.ThrowIfCancellationRequested();
             var baseDone = done;
             await using var stream = File.OpenRead(local);
-            // Async-API: Abbruch über das Token. In Fortschritts-Callbacks nie werfen - die laufen auf dem Threadpool.
+            // Async API: cancel via the token. Never throw in progress callbacks - they run on the thread pool.
             await client.UploadFileAsync(stream, remote, true,
                 new Progress<UploadFileProgressReport>(r => progress(new TransferProgress(name, baseDone + (long)r.TotalBytesUploaded, total, false))), ct);
             done += size;
@@ -106,7 +117,7 @@ public sealed class SftpSession : IDisposable
         progress(new TransferProgress(name, total, total, true));
     }
 
-    /// <summary>Lädt eine Datei oder einen ganzen Ordner (rekursiv) in den lokalen Ordner <paramref name="localDir"/> herunter.</summary>
+    /// <summary>Downloads a file or a whole folder (recursively) into the local folder <paramref name="localDir"/>.</summary>
     public async Task DownloadAsync(string remotePath, string localDir, Action<TransferProgress> progress, CancellationToken ct)
     {
         var client = Client;
@@ -176,7 +187,61 @@ public sealed class SftpSession : IDisposable
         client.DeleteDirectory(path);
     }
 
-    /// <summary>Macht aus relativen Pfaden absolute und löst "." und ".." auf.</summary>
+    /// <summary>Largest file the built-in editor opens.</summary>
+    public const long MaxEditBytes = 2 * 1024 * 1024;
+
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    /// <summary>Reads a UTF-8 text file for editing. Binary files and very large files are rejected.</summary>
+    public Task<RemoteText> ReadTextAsync(string path) => Task.Run(() =>
+    {
+        var client = Client;
+        var attrs = client.GetAttributes(path);
+        if (attrs.IsDirectory) throw new InvalidOperationException("A folder cannot be edited.");
+        if (attrs.Size > MaxEditBytes) throw new InvalidOperationException($"The file is larger than {MaxEditBytes / (1024 * 1024)} MB - please download it instead.");
+
+        var bytes = client.ReadAllBytes(path);
+        if (Array.IndexOf(bytes, (byte)0) >= 0) throw new InvalidOperationException("This is not a text file (it contains binary data).");
+
+        var hasBom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+        string text;
+        try
+        {
+            text = StrictUtf8.GetString(bytes, hasBom ? 3 : 0, bytes.Length - (hasBom ? 3 : 0));
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new InvalidOperationException("The file is not UTF-8 encoded and cannot be edited safely here.");
+        }
+
+        var crlf = text.Contains("\r\n", StringComparison.Ordinal);
+        return new RemoteText(crlf ? text.Replace("\r\n", "\n") : text, crlf ? "crlf" : "lf", hasBom, bytes.Length, UnixSeconds(attrs.LastWriteTimeUtc));
+    });
+
+    /// <summary>
+    /// Writes the edited text back (line ending and BOM as in the original; permissions and owner stay because the same file
+    /// is overwritten). Without <paramref name="force"/> it aborts if the file was changed since it was read.
+    /// </summary>
+    public Task<(long Modified, long Size)> WriteTextAsync(string path, string content, string lineEnding, bool bom, long expectedModified, long expectedSize, bool force) => Task.Run(() =>
+    {
+        var client = Client;
+        if (!force)
+        {
+            var now = client.GetAttributes(path);
+            if (UnixSeconds(now.LastWriteTimeUtc) != expectedModified || now.Size != expectedSize) throw new RemoteChangedException();
+        }
+
+        var text = lineEnding == "crlf" ? content.Replace("\r\n", "\n").Replace("\n", "\r\n") : content;
+        var body = StrictUtf8.GetBytes(text);
+        var bytes = bom ? new byte[] { 0xEF, 0xBB, 0xBF }.Concat(body).ToArray() : body;
+        using (var ms = new MemoryStream(bytes)) client.UploadFile(ms, path, true);
+        var written = client.GetAttributes(path);
+        return (UnixSeconds(written.LastWriteTimeUtc), written.Size);
+    });
+
+    private static long UnixSeconds(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
+
+    /// <summary>Turns relative paths into absolute ones and resolves "." and "..".</summary>
     public static string Normalize(string workingDirectory, string path)
     {
         var raw = string.IsNullOrWhiteSpace(path) || path == "." ? workingDirectory : path.StartsWith('/') ? path : Combine(workingDirectory, path);
@@ -213,8 +278,8 @@ public sealed class SftpSession : IDisposable
 
     public void Dispose()
     {
-        try { _client?.Dispose(); } catch { /* egal beim Aufräumen */ }
-        try { _tunnel?.Dispose(); } catch { /* egal beim Aufräumen */ }
+        try { _client?.Dispose(); } catch { /* does not matter during cleanup */ }
+        try { _tunnel?.Dispose(); } catch { /* does not matter during cleanup */ }
         _client = null;
         _tunnel = null;
     }

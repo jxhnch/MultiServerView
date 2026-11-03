@@ -1,18 +1,18 @@
 namespace MultiServerView.Core.Sftp;
 
-/// <summary>Ein Eintrag in einer Dateiliste (lokal oder auf dem Server).</summary>
+/// <summary>An entry in a file list (local or on the server).</summary>
 public sealed record FileEntry(string Name, string Path, bool IsDir, long Size, DateTimeOffset Modified, string Mode);
 
 public sealed record BrowseResult(string Path, string Parent, List<FileEntry> Entries);
 
 public sealed record TransferProgress(string Name, long Done, long Total, bool Finished);
 
-/// <summary>Lokales Dateisystem für das linke SFTP-Fenster.</summary>
+/// <summary>Local file system for the left SFTP pane.</summary>
 public static class LocalFs
 {
     public static string Home() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    /// <summary>Listet einen Ordner (Ordner zuerst). Leerer Pfad = Laufwerke (Windows) bzw. "/".</summary>
+    /// <summary>Lists a folder (folders first). Empty path = drives (Windows) or "/".</summary>
     public static BrowseResult Browse(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -30,7 +30,7 @@ public static class LocalFs
 
         var full = Path.GetFullPath(path!);
         var dir = new DirectoryInfo(full);
-        if (!dir.Exists) throw new DirectoryNotFoundException("Ordner nicht gefunden: " + full);
+        if (!dir.Exists) throw new DirectoryNotFoundException("Folder not found: " + full);
 
         var entries = new List<FileEntry>();
         try
@@ -43,12 +43,12 @@ public static class LocalFs
                     entries.Add(new FileEntry(info.Name, info.FullName, isDir, isDir ? 0 : ((FileInfo)info).Length,
                         new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero), ""));
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Eintrag überspringen */ }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* skip the entry */ }
             }
         }
         catch (UnauthorizedAccessException)
         {
-            throw new UnauthorizedAccessException("Kein Zugriff auf diesen Ordner.");
+            throw new UnauthorizedAccessException("No access to this folder.");
         }
 
         entries = entries.OrderByDescending(e => e.IsDir).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();

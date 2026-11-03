@@ -1,5 +1,5 @@
-/** Gleicher Inhalt wie docs/supabase.sql - im UI, damit man es direkt kopieren kann. */
-export const SUPABASE_SQL = `-- Einmalig im Supabase SQL-Editor ausführen
+/** Same content as docs/supabase.sql - in the UI so it can be copied directly. */
+export const SUPABASE_SQL = `-- Run once in the Supabase SQL editor
 create table if not exists public.vaults (
   user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   version    bigint      not null default 1,

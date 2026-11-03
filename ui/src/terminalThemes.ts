@@ -7,7 +7,7 @@ export interface TermTheme {
   fg: string;
   cursor: string;
   selection: string;
-  /** 16 ANSI-Farben: schwarz, rot, grün, gelb, blau, magenta, cyan, weiss, dann dieselben hell. */
+  /** 16 ANSI colors: black, red, green, yellow, blue, magenta, cyan, white, then the same bright. */
   ansi: string[];
 }
 
@@ -48,7 +48,7 @@ export interface TermSettings {
   cursorStyle: 'bar' | 'block' | 'underline';
   cursorBlink: boolean;
   scrollback: number;
-  /** Markierten Text sofort in die Zwischenablage kopieren. */
+  /** Copy selected text to the clipboard immediately. */
   copyOnSelect: boolean;
 }
 
@@ -62,7 +62,7 @@ function load(): TermSettings {
     const raw = localStorage.getItem(KEY);
     if (raw) return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<TermSettings>) };
   } catch {
-    /* nicht schlimm */
+    /* not a problem */
   }
   return { ...DEFAULTS };
 }
@@ -74,7 +74,7 @@ export function setTermSettings(patch: Partial<TermSettings>) {
   try {
     localStorage.setItem(KEY, JSON.stringify(current));
   } catch {
-    /* nicht schlimm */
+    /* not a problem */
   }
   listeners.forEach((l) => l(current));
 }

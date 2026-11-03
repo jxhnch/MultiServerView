@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './bridge';
 import { IconClock } from './Icons';
 import type { HistoryEntry } from './types';
+import { askConfirm } from './Confirm';
 
 const KIND: Record<HistoryEntry['kind'], string> = { ssh: 'SSH', sftp: 'SFTP', rdp: 'RDP', vnc: 'VNC', forward: 'Tunnel' };
 
@@ -19,7 +20,7 @@ export function LogsPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error'
   useEffect(() => void load(), [load]);
 
   async function clear() {
-    if (!confirm('Den ganzen Verlauf löschen?')) return;
+    if (!(await askConfirm('Delete the whole history?', { title: 'Delete history', confirmLabel: 'Delete', danger: true }))) return;
     await api.historyClear();
     await load();
   }
@@ -29,33 +30,33 @@ export function LogsPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error'
       <div className="page-head">
         <div>
           <h1>Logs</h1>
-          <p className="muted">Wann welcher Host verbunden war und ob es geklappt hat. Bleibt nur auf diesem PC – ohne Passwörter und ohne Terminal-Inhalte.</p>
+          <p className="muted">When which host was connected and whether it worked. Stays on this PC only – without passwords and without terminal content.</p>
         </div>
         <div className="head-actions">
-          <button onClick={() => void load()}>Aktualisieren</button>
+          <button onClick={() => void load()}>Refresh</button>
           <button className="danger" disabled={items.length === 0} onClick={() => void clear()}>
-            Verlauf löschen
+            Delete history
           </button>
         </div>
       </div>
       {items.length === 0 ? (
         <div className="empty-card">
           <IconClock size={28} />
-          <h3>Noch kein Verlauf</h3>
+          <h3>No history yet</h3>
         </div>
       ) : (
         <div className="log-table">
           <div className="log-head">
-            <span>Zeit</span>
+            <span>Time</span>
             <span>Host</span>
-            <span>Art</span>
-            <span>Ergebnis</span>
-            <span>Dauer</span>
-            <span>Hinweis</span>
+            <span>Type</span>
+            <span>Result</span>
+            <span>Duration</span>
+            <span>Note</span>
           </div>
           {items.map((e) => (
             <div className="log-row" key={e.id}>
-              <span className="muted">{new Date(e.startedAt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'medium' })}</span>
+              <span className="muted">{new Date(e.startedAt).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'medium' })}</span>
               <span className="ellipsis" title={e.host}>
                 {e.serverName} <span className="muted small">{e.host}</span>
               </span>
@@ -65,7 +66,7 @@ export function LogsPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error'
               <span>
                 <span className={'pill ' + (e.result === 'ok' ? 'connected' : e.result === 'error' ? 'error' : 'connecting')}>
                   <span className="dot-sm" />
-                  {e.result === 'ok' ? 'OK' : e.result === 'error' ? 'Fehler' : 'Läuft'}
+                  {e.result === 'ok' ? 'OK' : e.result === 'error' ? 'Error' : 'Running'}
                 </span>
               </span>
               <span className="muted">{duration(e)}</span>

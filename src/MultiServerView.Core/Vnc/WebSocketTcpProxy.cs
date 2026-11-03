@@ -8,10 +8,10 @@ using System.Text;
 namespace MultiServerView.Core.Vnc;
 
 /// <summary>
-/// Lokale Brücke für noVNC: nimmt eine WebSocket-Verbindung von der Oberfläche an
-/// und reicht die Bytes 1:1 an einen TCP-Server (VNC) weiter und zurück.
-/// Lauscht nur auf 127.0.0.1; jeder Eintrag ist per Einmal-Token geschützt, damit keine
-/// fremde Webseite oder anderer Prozess die Brücke missbrauchen kann.
+/// Local bridge for noVNC: accepts a WebSocket connection from the interface
+/// and passes the bytes 1:1 to a TCP server (VNC) and back.
+/// Listens on 127.0.0.1 only; every entry is protected by a one-time token so that no
+/// foreign web page or other process can abuse the bridge.
 /// </summary>
 public sealed class WebSocketTcpProxy : IDisposable
 {
@@ -37,7 +37,7 @@ public sealed class WebSocketTcpProxy : IDisposable
         _acceptLoop = Task.Run(AcceptLoop);
     }
 
-    /// <summary>Meldet ein Ziel an und gibt die WebSocket-URL zurück (einmal benutzbar, 30 s gültig).</summary>
+    /// <summary>Registers a target and returns the WebSocket URL (usable once, valid for 30 s).</summary>
     public string Register(string host, int port)
     {
         Start();
@@ -110,7 +110,7 @@ public sealed class WebSocketTcpProxy : IDisposable
         }
         catch (Exception ex) when (ex is IOException or SocketException or WebSocketException or OperationCanceledException or ObjectDisposedException)
         {
-            // Verbindung weg - nichts zu tun
+            // connection gone - nothing to do
         }
     }
 
@@ -147,17 +147,17 @@ public sealed class WebSocketTcpProxy : IDisposable
         finally
         {
             linked.Cancel();
-            try { await Task.WhenAll(wsToTcp, tcpToWs); } catch { /* beide Seiten sind eh am Ende */ }
+            try { await Task.WhenAll(wsToTcp, tcpToWs); } catch { /* both sides are at their end anyway */ }
             try
             {
                 if (ws.State == WebSocketState.Open)
                     await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
             }
-            catch { /* egal */ }
+            catch { /* does not matter */ }
         }
     }
 
-    /// <summary>Liest den HTTP-Upgrade-Request. Rückgabe: Token (aus dem Pfad), Sec-WebSocket-Key, Subprotokoll "binary" gewünscht.</summary>
+    /// <summary>Reads the HTTP upgrade request. Returns: token (from the path), Sec-WebSocket-Key, whether the subprotocol "binary" is wanted.</summary>
     private static async Task<(string token, string key, bool binary)?> ReadHandshakeAsync(NetworkStream stream, CancellationToken ct)
     {
         var sb = new StringBuilder();
@@ -206,7 +206,7 @@ public sealed class WebSocketTcpProxy : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
-        try { _listener.Stop(); } catch { /* egal */ }
+        try { _listener.Stop(); } catch { /* does not matter */ }
         _cts.Dispose();
     }
 }

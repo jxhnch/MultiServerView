@@ -10,10 +10,10 @@ public sealed class SshConnectException : Exception
     public SshConnectException(string message, Exception? inner = null) : base(message, inner) { }
 }
 
-/// <summary>Gemeinsame Bausteine für alles, was eine SSH-Verbindung aufbaut (Terminal, SFTP, Port-Weiterleitung).</summary>
+/// <summary>Shared building blocks for everything that sets up an SSH connection (terminal, SFTP, port forwarding).</summary>
 public static class SshConnector
 {
-    /// <summary>Globale Verbindungs-Einstellungen (aus den App-Einstellungen).</summary>
+    /// <summary>Global connection settings (from the app settings).</summary>
     public static TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(15);
     public static TimeSpan KeepAlive { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -25,14 +25,14 @@ public static class SshConnector
         if (server.Auth == AuthMethod.Key)
         {
             if (key == null || string.IsNullOrWhiteSpace(key.PrivateKey))
-                throw new SshConnectException("Für diesen Host ist kein SSH-Key ausgewählt oder der Key fehlt.");
+                throw new SshConnectException("No SSH key is selected for this host, or the key is missing.");
             methods.Add(new PrivateKeyAuthenticationMethod(user, LoadKey(key)));
         }
         else
         {
             methods.Add(new PasswordAuthenticationMethod(user, server.Password));
 
-            // Viele Server nehmen das Passwort nur über "keyboard-interactive" an.
+            // Many servers only accept the password via "keyboard-interactive".
             var kbd = new KeyboardInteractiveAuthenticationMethod(user);
             kbd.AuthenticationPrompt += (_, e) =>
             {
@@ -48,8 +48,8 @@ public static class SshConnector
     }
 
     /// <summary>
-    /// Hängt die Host-Key-Prüfung (Trust on first use) an einen Client.
-    /// Der zurückgegebene Delegate liefert nach einem Fehlschlag die verständliche Warnung (oder null).
+    /// Attaches the host key check (trust on first use) to a client.
+    /// After a failure, the returned delegate provides the understandable warning (or null).
     /// </summary>
     public static Func<string?> HookHostKey(BaseClient client, ServerEntry server,
         Func<string, int, string, HostKeyTrust> check, Action<string>? info)
@@ -65,21 +65,21 @@ public static class SshConnector
                     break;
                 case HostKeyTrust.NewlyTrusted:
                     e.CanTrust = true;
-                    info?.Invoke($"Neuer Host-Key gespeichert ({e.HostKeyName}) {fp}");
+                    info?.Invoke($"New host key stored ({e.HostKeyName}) {fp}");
                     break;
                 default:
                     e.CanTrust = false;
                     error =
-                        $"WARNUNG: Der Host-Key von {server.Host} hat sich geändert ({fp}). " +
-                        "Das kann ein Angriff sein oder der Server wurde neu aufgesetzt. " +
-                        "Wenn du das erwartest: im Host-Panel «Host-Key zurücksetzen».";
+                        $"WARNING: The host key of {server.Host} has changed ({fp}). " +
+                        "This can be an attack, or the server was set up again. " +
+                        "If you expect this: use \"Reset host key\" in the host panel.";
                     break;
             }
         };
         return () => error;
     }
 
-    /// <summary>Liest einen privaten Key (OpenSSH / PEM). Wirft <see cref="SshConnectException"/> bei Fehlern.</summary>
+    /// <summary>Reads a private key (OpenSSH / PEM). Throws <see cref="SshConnectException"/> on errors.</summary>
     public static PrivateKeyFile LoadKey(KeyEntry key)
     {
         try
@@ -90,22 +90,22 @@ public static class SshConnector
         catch (Exception ex) when (ex is SshException or InvalidOperationException or ArgumentException or FormatException
                                        or System.Security.Cryptography.CryptographicException)
         {
-            throw new SshConnectException("Der SSH-Key konnte nicht gelesen werden (falsche Passphrase oder nicht unterstütztes Format).", ex);
+            throw new SshConnectException("The SSH key could not be read (wrong passphrase or unsupported format).", ex);
         }
     }
 
     public static string Describe(Exception ex) => ex switch
     {
-        SshAuthenticationException => "Anmeldung fehlgeschlagen (Benutzer, Passwort oder Key stimmen nicht).",
-        SshOperationTimeoutException => "Zeitüberschreitung beim Verbinden.",
+        SshAuthenticationException => "Authentication failed (wrong username, password or key).",
+        SshOperationTimeoutException => "Connection timed out.",
         SocketException se => se.SocketErrorCode switch
         {
-            SocketError.ConnectionRefused => "Verbindung abgelehnt (läuft SSH auf diesem Port?).",
-            SocketError.HostNotFound or SocketError.NoData => "Host nicht gefunden.",
-            SocketError.TimedOut => "Zeitüberschreitung beim Verbinden.",
-            _ => "Netzwerkfehler: " + se.Message
+            SocketError.ConnectionRefused => "Connection refused (is SSH running on this port?).",
+            SocketError.HostNotFound or SocketError.NoData => "Host not found.",
+            SocketError.TimedOut => "Connection timed out.",
+            _ => "Network error: " + se.Message
         },
-        SshConnectionException => "Verbindung fehlgeschlagen: " + ex.Message,
+        SshConnectionException => "Connection failed: " + ex.Message,
         _ => ex.Message
     };
 }

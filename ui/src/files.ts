@@ -1,4 +1,4 @@
-/** Liest eine Textdatei; erkennt UTF-16 (z. B. .reg-Exporte von Windows) anhand der Markierung am Dateianfang. */
+/** Reads a text file; detects UTF-16 (e.g. .reg exports from Windows) by the marker at the start of the file. */
 export async function readTextAuto(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
   const b = new Uint8Array(buf);

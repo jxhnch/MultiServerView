@@ -1,44 +1,47 @@
-# MultiServerView – Hinweise für Claude Code
+# MultiServerView – Notes for Claude Code
 
-Eigene Server-Verwaltung für Windows (SSH, SFTP, RDP, VNC, Port Forwarding, Cloud-Sync), Vorbild ist Termius. Besitzer: jxhnch.
+Own server manager for Windows (SSH, SFTP, RDP, VNC, port forwarding, encrypted sync), inspired by Termius. Owner: jxhnch.
 
-## Aufbau
-| Ordner | Inhalt |
+## Layout
+| Folder | Contents |
 |---|---|
-| `src/MultiServerView.Core` | Vault + Crypto (PBKDF2 → AES-GCM), Merge/Cloud-Sync (Supabase), SSH/SFTP/Tunnel (SSH.NET), VNC-Proxy, Importer. net8.0, plattformunabhängig, gut testbar |
-| `src/MultiServerView.App` | WinForms + WebView2: `Bridge.cs` (JSON-Nachrichten UI ↔ C#), RDP-Hosting (`Rdp/`), DPAPI, Auto-Sync, **Selbsttest** (`MainForm.Smoke.cs`) |
-| `ui/` | React + TypeScript (Vite): xterm.js, noVNC. `src/bridge.ts` enthält die API **und** einen Browser-Mock (Demo-Daten, Demo-Shell) |
-| `tests/` | xUnit (Core). SSH-/SFTP-/Tunnel-Integrationstests laufen nur mit `MSV_SSH_TEST_DIR` + lokalem sshd auf 127.0.0.1:2222 (Benutzer `msvtest`), sonst tun sie nichts |
-| `.github/workflows/build.yml` | Windows-Build, Tests, Selbsttest auf echtem Windows, Artefakt `MultiServerView-win-x64` |
+| `src/MultiServerView.Core` | Vault + crypto (PBKDF2 → AES-GCM), merge/sync (shared folder or Supabase), SSH/SFTP/tunnels (SSH.NET), VNC proxy, importers (mRemoteNG, ssh_config, PuTTY, CSV, Proxmox, VMware). net8.0, platform independent, easy to test |
+| `src/MultiServerView.App` | WinForms + WebView2: `Bridge.cs` (JSON messages UI ↔ C#), RDP hosting (`Rdp/`), DPAPI, auto-sync, custom title bar, **self-test** (`MainForm.Smoke.cs`) |
+| `ui/` | React + TypeScript (Vite): xterm.js, noVNC. `src/bridge.ts` contains the API **and** a browser mock (demo data, demo shell) |
+| `tests/` | xUnit (Core). SSH/SFTP/tunnel integration tests only run with `MSV_SSH_TEST_DIR` + a local sshd on 127.0.0.1:2222 (user `msvtest`), otherwise they do nothing |
+| `.github/workflows/` | `build.yml`: Windows build, tests, self-test on real Windows, artifact `MultiServerView-win-x64`. `release.yml`: installer + portable ZIP on version tags |
+| `installer/` | Inno Setup script for the Windows installer |
 
-## Befehle
+## Commands
 ```bash
-dotnet test tests/MultiServerView.Core.Tests        # Core-Tests
-cd ui && npm install && npm run dev                  # UI im Browser mit Demo-Daten
-cd ui && npm run build                               # baut nach src/MultiServerView.App/wwwroot
-dotnet run --project src/MultiServerView.App         # Windows: echte App (baut das UI bei Bedarf)
-src\MultiServerView.App\bin\...\MultiServerView.exe --smoke <ordner>   # Selbsttest + Screenshots + report.txt
+dotnet test tests/MultiServerView.Core.Tests        # Core tests
+cd ui && npm install && npm run dev                  # UI in the browser with demo data
+cd ui && npm run build                               # builds into src/MultiServerView.App/wwwroot
+dotnet run --project src/MultiServerView.App         # Windows: the real app
+src\MultiServerView.App\bin\...\MultiServerView.exe --smoke <folder>   # self-test + screenshots + report.txt
 ```
-Umgebungsvariablen: `MSV_DEV_URL` (UI vom Vite-Devserver laden), `MSV_DATA_DIR` (eigener Datenordner, z. B. zum Testen).
+Environment variables: `MSV_DEV_URL` (load the UI from the Vite dev server), `MSV_DATA_DIR` (own data folder, e.g. for testing).
 
-## Regeln des Besitzers
-- **Commits nur unter dem Namen jxhnch** (`123569094+jxhnch@users.noreply.github.com`), **keine** «Co-Authored-By»-/Claude-Zeilen in Commits oder PRs.
-- **Kein Force-Push ohne ausdrückliches Okay.**
-- Oberfläche und Texte auf Deutsch, Schweizer Schreibweise (ss statt ß), Anführungszeichen «so».
-- Ehrlich über den Teststatus berichten: Was gelaufen ist, was nur kompiliert wurde, was ungetestet ist.
+## Owner rules
+- **Commits only under the name jxhnch** (`123569094+jxhnch@users.noreply.github.com`), **no** "Co-Authored-By" / Claude lines in commits or PRs.
+- **No force-push without explicit approval.**
+- UI, messages, comments, tests and docs are written in **English** (the project is open source).
+- Report the test status honestly: what ran, what was only compiled, what is untested.
 
-## Stand
-Fertig und auf Windows (CI-Selbsttest, rund 40 Prüfungen) bestätigt: Vault, Master-Passwort ändern, DPAPI, Einstellungen, RDP-Control im Tab, SSH-Terminal, SFTP (Doppelfenster, Ordner), Jump Hosts, Port Forwarding (-L/-R/-D), Snippets, Identities, Known Hosts, Logs, geteilte Ansicht mit Broadcast, Importe (mRemoteNG, ssh_config, PuTTY, CSV), Hell/Dunkel, 10 Terminal-Themes, OS-Logos.
+## Status
+Done and confirmed on Windows (CI self-test): vault, master password change, DPAPI, settings, RDP control in a tab, SSH terminal, SFTP (two panes, folders, remote text editor), jump hosts, port forwarding (-L/-R/-D), snippets (with variables), identities, SSH key generator + install on host, known hosts, logs, split view with broadcast, workspaces, imports (mRemoteNG, ssh_config, PuTTY, CSV, Proxmox, VMware Workstation), folder sync with conflict copies, custom title bar, light/dark, 10 terminal themes, OS logos.
 
-**Ungetestet** (nur der Besitzer kann das): seine eigenen Server, RDP mit gespeichertem Passwort zu einem echten Ziel, VNC gegen echten Server unter Windows, echtes Supabase-Projekt.
+**Untested** (only the owner can do this): their own servers, RDP with a saved password to a real target, VNC against a real server on Windows, a real Supabase project, a real Proxmox server.
 
-**Ideen / offen:** integrierte Titelleiste (WebView2 `IsNonClientRegionSupportEnabled`, Fensterränder selbst steuern – riskant, erst nach Test des Besitzers), Telnet/Serial/Mosh, Remote-Dateien mit eigenem Editor bearbeiten, Snippet-Variablen und -Pakete, `known_hosts`-Import, SSH-Zertifikate/FIDO2, Terminal-Logs aufzeichnen. Vergleich mit Termius: `docs/termius-vergleich.md`. Checkliste für den ersten Start: `docs/ERSTER-START.md`.
+**Ideas / open:** Telnet/Serial/Mosh, snippet packages, `known_hosts` import, SSH certificates/FIDO2, recording terminal logs, code signing, auto-update. Comparison with Termius: `docs/comparison-with-termius.md`. First-run checklist: `docs/first-run-checklist.md`.
 
-## Stolpersteine (schon einmal passiert)
-- SSH.NET ruft Fortschritts-Callbacks auf dem Threadpool auf: **dort nie Exceptions werfen** (reisst den Prozess). Für Abbruch die async-API mit `CancellationToken` benutzen.
-- Befehle für Fernabfragen ohne Umleitungen wie `2>/dev/null` – `cmd.exe` (Windows-OpenSSH) versteht sie nicht (siehe `OsDetector.ProbeCommand`).
-- RDP: ActiveX per Late-Binding (`dynamic`), Passwort nur über `IMsTscNonScriptable`; alles auf dem UI-Thread. Beim Schliessen kann das Aufräumen blockieren → Wächter in `MainForm.OnFormClosed`, nach 3 s harter Exit.
-- Vite: `build.target = 'esnext'` (noVNC nutzt Top-Level-await); noVNC wird als `@novnc/novnc` importiert.
-- UI ohne `<StrictMode>` (würde im Dev-Modus Sessions doppelt öffnen).
-- Cloud-Sync: Merge pro Eintrag nach `UpdatedAt`, Löschungen als Tombstones. Master-Passwort ändern → neuer Salt → Cloud mit `ForceUpload` überschreiben, andere Geräte nutzen `AdoptCloudPassword`.
-- Der Windows-Selbsttest braucht auf dem Runner einen OpenSSH-Server (Setup im Workflow, inkl. `AllowGroups`-Anpassung). Screenshots stehen zusätzlich als Base64 im Build-Log (`PNGDATA`), weil Artefakt-Downloads in manchen Umgebungen gesperrt sind.
+## Pitfalls (already happened once)
+- SSH.NET calls progress callbacks on the thread pool: **never throw exceptions there** (it kills the process). Use the async API with a `CancellationToken` to cancel.
+- Remote probe commands without redirections like `2>/dev/null` – `cmd.exe` (Windows OpenSSH) does not understand them (see `OsDetector.ProbeCommand`). The German Windows phrase in `OsDetector` is intentional.
+- RDP: ActiveX via late binding (`dynamic`), password only via `IMsTscNonScriptable`; everything on the UI thread. Cleanup can block on close → watchdog in `MainForm.OnFormClosed`, hard exit after 3 s.
+- Vite: `build.target = 'esnext'` (noVNC uses top-level await); noVNC is imported as `@novnc/novnc`.
+- UI without `<StrictMode>` (it would open sessions twice in dev mode).
+- **`dotnet publish` does not rebuild the UI**: run `cd ui && npm run build` first, otherwise the published app contains a stale UI.
+- Some strings are coupled between UI and C# (e.g. `PasswordPrompt.tsx` checks the message prefix `Authentication failed`, `SftpView.tsx` checks `Cancelled.`, `RemoteEditor.tsx` checks the "changed on the server" text). Change both sides together.
+- Sync: merge per entry by `UpdatedAt`, deletions as tombstones. Changing the master password → new salt → overwrite the remote with `ForceUpload`, other devices use `AdoptCloudPassword`.
+- The Windows self-test needs an OpenSSH server on the runner (set up in the workflow, including the `AllowGroups` tweak). Screenshots are also in the build log as base64 (`PNGDATA`) because artifact downloads are blocked in some environments.

@@ -14,6 +14,12 @@ export interface Server {
   identityId: string;
   jumpHostId: string;
   os: string;
+  /** Top level (e.g. a teacher): the UI shows only one workspace at a time. */
+  workspace: string;
+  /** Origin if the host was imported from Proxmox (empty = created by hand). */
+  proxmoxRef: string;
+  /** Origin if the host was imported from VMware Workstation (path of the .vmx, lowercase). */
+  vmwareRef: string;
   group: string;
   tags: string[];
   favorite: boolean;
@@ -21,16 +27,18 @@ export interface Server {
   notes: string;
 }
 
-/** Private Keys bleiben im Host (C#). Das UI sieht nur diese Infos. */
+/** Private keys stay in the host (C#). The UI only sees this info. */
 export interface KeyInfo {
   id: string;
   name: string;
   kind: string;
   hasPassphrase: boolean;
+  publicKey: string;
+  fingerprint: string;
   updatedAt: string;
 }
 
-/** Wiederverwendbare Zugangsdaten. Das Passwort selbst bleibt im Host. */
+/** Reusable credentials. The password itself stays in the host. */
 export interface Identity {
   id: string;
   name: string;
@@ -94,7 +102,7 @@ export interface BrowseResult {
   entries: FileEntry[];
 }
 
-/** Einstellungen des Host-Prozesses (C#). */
+/** Settings of the host process (C#). */
 export interface HostSettings {
   sshKeepAliveSeconds: number;
   sshConnectTimeoutSeconds: number;
@@ -107,6 +115,8 @@ export interface HostSettings {
 
 export interface SyncInfo {
   configured: boolean;
+  mode: 'folder' | 'supabase';
+  folder: string;
   url: string;
   anonKey: string;
   email: string;
@@ -121,7 +131,7 @@ export interface SyncStatus {
   at?: string;
 }
 
-/** Lebenszyklus einer Session (für den Punkt am Tab). */
+/** Lifecycle of a session (for the dot on the tab). */
 export type SessionStatus = 'connecting' | 'connected' | 'closed' | 'error';
 
 export const DEFAULT_PORT: Record<Protocol, number> = { ssh: 22, rdp: 3389, vnc: 5900 };
@@ -142,10 +152,57 @@ export function emptyServer(): Server {
     identityId: '',
     jumpHostId: '',
     os: '',
+    workspace: '',
+    proxmoxRef: '',
+    vmwareRef: '',
     group: '',
     tags: [],
     favorite: false,
     lastUsed: null,
     notes: '',
   };
+}
+
+/** A saved Proxmox connection. The token secret stays in the host (C#). */
+export interface ProxmoxInfo {
+  id: string;
+  name: string;
+  url: string;
+  tokenId: string;
+  hasSecret: boolean;
+  /** Pinned certificate fingerprint ('' = the certificate is trusted system-wide). */
+  certFingerprint: string;
+  updatedAt: string;
+}
+
+export interface ProxmoxCert {
+  fingerprint: string;
+  subject: string;
+  notAfter: string;
+  trusted: boolean;
+}
+
+export interface ProxmoxVmInfo {
+  node: string;
+  vmid: number;
+  type: 'qemu' | 'lxc';
+  name: string;
+  status: string;
+  pool: string;
+  tags: string[];
+  template: boolean;
+  imported: boolean;
+}
+
+/** A VM from the VMware Workstation library. */
+export interface VmwareVmInfo {
+  vmx: string;
+  name: string;
+  guestOs: string;
+  os: string;
+  protocol: 'ssh' | 'rdp' | 'vnc';
+  connection: string;
+  running: boolean;
+  ip: string | null;
+  imported: boolean;
 }

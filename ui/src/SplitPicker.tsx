@@ -4,7 +4,7 @@ import { IconClose, IconSearch } from './Icons';
 import { filterServers } from './search';
 import type { Server } from './types';
 
-/** Mehrere SSH-Hosts auswählen, die zusammen in einer geteilten Ansicht geöffnet werden. */
+/** Choose several SSH hosts that are opened together in a split view. */
 export function SplitPicker({ servers, onConfirm, onClose }: { servers: Server[]; onConfirm: (ids: string[]) => void; onClose: () => void }) {
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
@@ -15,15 +15,15 @@ export function SplitPicker({ servers, onConfirm, onClose }: { servers: Server[]
     <div className="overlay" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <div className="modal-head">
-          <h2>Geteilte Ansicht</h2>
+          <h2>Split view</h2>
           <button className="ghost icon-only" onClick={onClose}>
             <IconClose size={16} />
           </button>
         </div>
-        <p className="hint">Wähle mindestens 2 SSH-Hosts. Sie öffnen sich nebeneinander in einem Tab; mit «Broadcast» geht deine Eingabe an alle gleichzeitig.</p>
+        <p className="hint">Choose at least 2 SSH hosts. They open side by side in one tab; with "Broadcast" your input goes to all of them at once.</p>
         <div className="searchbar">
           <IconSearch size={16} />
-          <input autoFocus placeholder="Hosts filtern…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input autoFocus placeholder="Filter hosts…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <div className="pick-list">
           {list.map((s) => (
@@ -35,14 +35,14 @@ export function SplitPicker({ servers, onConfirm, onClose }: { servers: Server[]
               {s.group && <span className="chip">{s.group}</span>}
             </label>
           ))}
-          {list.length === 0 && <div className="muted pad-sm">Keine SSH-Hosts gefunden.</div>}
+          {list.length === 0 && <div className="muted pad-sm">No SSH hosts found.</div>}
         </div>
         <div className="actions">
-          <span className="muted small">{picked.length} ausgewählt</span>
+          <span className="muted small">{picked.length} selected</span>
           <span className="grow" />
-          <button onClick={onClose}>Abbrechen</button>
+          <button onClick={onClose}>Cancel</button>
           <button className="primary" disabled={picked.length < 2} onClick={() => onConfirm(picked)}>
-            Öffnen
+            Open
           </button>
         </div>
       </div>

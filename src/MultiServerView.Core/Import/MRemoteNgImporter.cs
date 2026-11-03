@@ -5,10 +5,10 @@ namespace MultiServerView.Core.Import;
 public sealed record ImportResult(List<ServerEntry> Servers, int Skipped);
 
 /// <summary>
-/// Liest eine mRemoteNG-Datei (confCons.xml). Ordner werden zu Gruppen.
-/// Unterstützt: RDP, SSH (1/2), VNC. Alles andere (Telnet, HTTP, ...) wird übersprungen.
-/// Passwörter werden bewusst NICHT importiert (mRemoteNG verschlüsselt sie mit eigener Methode) -
-/// bitte nach dem Import neu eintragen.
+/// Reads an mRemoteNG file (confCons.xml). Folders become groups.
+/// Supported: RDP, SSH (1/2), VNC. Everything else (Telnet, HTTP, ...) is skipped.
+/// Passwords are deliberately NOT imported (mRemoteNG encrypts them with its own method) -
+/// please enter them again after the import.
 /// </summary>
 public static class MRemoteNgImporter
 {
@@ -18,11 +18,11 @@ public static class MRemoteNgImporter
         try { doc = XDocument.Parse(xml); }
         catch (System.Xml.XmlException)
         {
-            throw new ArgumentException("Das ist keine gültige mRemoteNG-Datei (confCons.xml).");
+            throw new ArgumentException("This is not a valid mRemoteNG file (confCons.xml).");
         }
 
         if (doc.Root == null || !doc.Root.Name.LocalName.Equals("Connections", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Das ist keine mRemoteNG-Datei (Wurzel «Connections» fehlt).");
+            throw new ArgumentException("This is not an mRemoteNG file (the root \"Connections\" is missing).");
 
         var servers = new List<ServerEntry>();
         var skipped = 0;

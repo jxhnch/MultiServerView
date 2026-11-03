@@ -6,6 +6,8 @@ import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
 import { Keychain } from './Keychain';
 import { CloudPanel } from './CloudPanel';
+import { ImportPage, type ImportKind } from './ImportPage';
+import { VmwareImportDialog } from './VmwareImport';
 import { TerminalView } from './TerminalView';
 import { VncView } from './VncView';
 import { RdpView } from './RdpView';
@@ -16,15 +18,32 @@ import { KnownHostsPage } from './KnownHostsPage';
 import { LogsPage } from './LogsPage';
 import { HostTile } from './HostTile';
 import { SettingsPage } from './SettingsPage';
+import { WindowControls } from './WindowControls';
 import { SplitView, type SplitPane } from './SplitView';
 import { SplitPicker } from './SplitPicker';
-import { HostsPage, type ImportKind } from './HostsPage';
+import { HostsPage } from './HostsPage';
 import { getUiSettings, onUiSettings, setUiSettings } from './uiSettings';
 import { readTextAuto } from './files';
-import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSettings, IconShield, IconSun } from './Icons';
+import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSettings, IconShield, IconSun, IconUpload } from './Icons';
+import { askConfirm, ConfirmHost } from './Confirm';
+
+const readLocal = (key: string, fallback: string) => {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+const writeLocal = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage not available - the app then simply does not remember it */
+  }
+};
 
 type Phase = 'loading' | 'locked' | 'ready';
-type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud' | 'settings';
+type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud' | 'import' | 'settings';
 type Theme = 'light' | 'dark';
 interface Tab {
   id: string;
@@ -63,7 +82,23 @@ export function App() {
   const [theme, setThemeState] = useState<Theme>(getUiSettings().theme);
   const [splitPicker, setSplitPicker] = useState(false);
 
+  // Workspaces: top level of the host list (e.g. a teacher). Which one is open and empty, newly created
+  // workspaces are remembered by this device only; which host belongs where is stored in the vault and synced.
+  const [workspace, setWorkspaceRaw] = useState(() => readLocal('msv-workspace', ''));
+  const [localWorkspaces, setLocalWorkspaces] = useState<string[]>(() => {
+    try {
+      return JSON.parse(readLocal('msv-workspaces', '[]')) as string[];
+    } catch {
+      return [];
+    }
+  });
+
   const byId = useMemo(() => new Map(servers.map((s) => [s.id, s])), [servers]);
+  const workspaces = useMemo(
+    () => [...new Set([...servers.map((s) => s.workspace).filter(Boolean), ...localWorkspaces])].sort((a, b) => a.localeCompare(b)),
+    [servers, localWorkspaces],
+  );
+  const activeWorkspace = workspaces.includes(workspace) ? workspace : '';
   const groups = useMemo(() => [...new Set(servers.map((s) => s.group).filter(Boolean))].sort(), [servers]);
   const openServerIds = useMemo(() => new Set(tabs.map((t) => t.serverId)), [tabs]);
   const themeClass = theme === 'light' ? 'theme-light' : 'theme-dark';
@@ -78,14 +113,14 @@ export function App() {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), kind === 'error' ? 7000 : 3200);
   }, []);
 
-  // ---------------------------------------------------------------- Laden
+  // ---------------------------------------------------------------- Loading
   const refresh = useCallback(async () => {
     const [s, k, ids, sync] = await Promise.all([api.serversList(), api.keysList(), api.identitiesList(), api.syncGet()]);
     setServers(s);
     setKeys(k);
     setIdentities(ids);
     setSyncInfo(sync);
-    setSyncStatus((prev) => (sync.configured ? (prev.state === 'off' ? { state: 'ok', message: 'Verbunden' } : prev) : { state: 'off', message: '' }));
+    setSyncStatus((prev) => (sync.configured ? (prev.state === 'off' ? { state: 'ok', message: 'Connected' } : prev) : { state: 'off', message: '' }));
   }, []);
 
   useEffect(() => {
@@ -148,7 +183,7 @@ export function App() {
         const updated = await api.serversTouch(s.id);
         setServers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
       } catch {
-        /* "zuletzt benutzt" ist nicht kritisch */
+        /* "last used" is not critical */
       }
     },
     [tabs],
@@ -207,14 +242,14 @@ export function App() {
   const newHost = useCallback(() => {
     setSection('hosts');
     setActive(HOME);
-    openPanel(emptyServer());
-  }, [openPanel]);
+    openPanel({ ...emptyServer(), workspace: activeWorkspace });
+  }, [openPanel, activeWorkspace]);
 
-  // ---------------------------------------------------------------- Tastenkürzel
-  // Im Terminal gehören einfache Strg-Kombinationen der Shell (Strg+K, Strg+W, ...). Deshalb:
-  //   Strg+K  (nicht im Terminal)  /  Strg+Umschalt+K (überall)  -> Schnell verbinden
-  //   Strg+Tab, Strg+Umschalt+Tab  -> Tab wechseln          Strg+1…9 -> Tab direkt
-  //   Strg+Umschalt+W / N / D      -> Tab schliessen / neuer Host / Session duplizieren
+  // ---------------------------------------------------------------- Keyboard shortcuts
+  // Inside a terminal, plain Ctrl combinations belong to the shell (Ctrl+K, Ctrl+W, ...). Therefore:
+  //   Ctrl+K  (not in a terminal)  /  Ctrl+Shift+K (everywhere)  -> quick connect
+  //   Ctrl+Tab, Ctrl+Shift+Tab  -> switch tab          Ctrl+1…9 -> tab directly
+  //   Ctrl+Shift+W / N / D      -> close tab / new host / duplicate session
   useEffect(() => {
     if (phase !== 'ready') return;
     function onKey(e: KeyboardEvent) {
@@ -240,11 +275,11 @@ export function App() {
         e.stopPropagation();
       }
     }
-    window.addEventListener('keydown', onKey, true); // capture: vor xterm
+    window.addEventListener('keydown', onKey, true); // capture: before xterm
     return () => window.removeEventListener('keydown', onKey, true);
   }, [phase, tabs, active, cycle, closeTab, duplicate, newHost]);
 
-  // Automatisch sperren nach Untätigkeit (Einstellung «Sicherheit»)
+  // Auto-lock after inactivity (setting "Security")
   const lastActivity = useRef(Date.now());
   useEffect(() => {
     if (phase !== 'ready') return;
@@ -262,14 +297,16 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  // RDP ist ein natives Fenster über dem UI -> bei Overlays kurz ausblenden
+  // RDP is a native window above the UI -> hide it briefly while overlays are open
   const drawerOpen = panel !== null && active !== HOME;
-  const overlayOpen = paletteOpen || drawerOpen;
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [vmwareOpen, setVmwareOpen] = useState(false);
+  const overlayOpen = paletteOpen || drawerOpen || confirmOpen || vmwareOpen;
   useEffect(() => {
     if (isNative && phase === 'ready') void api.rdpSuspend(overlayOpen).catch(() => undefined);
   }, [overlayOpen, phase]);
 
-  // ---------------------------------------------------------------- Speichern / Löschen / Import
+  // ---------------------------------------------------------------- Save / delete / import
   const save = useCallback(async (s: Server): Promise<Server> => {
     const saved = await api.serversSave(s);
     setServers((prev) => (prev.some((x) => x.id === saved.id) ? prev.map((x) => (x.id === saved.id ? saved : x)) : [...prev, saved]));
@@ -287,18 +324,91 @@ export function App() {
     await open(saved, false, 'sftp');
   }
 
-  async function remove(s: Server) {
-    await api.serversDelete(s.id);
-    setServers((prev) => prev.filter((x) => x.id !== s.id));
+  /** Removes the hosts from the list and closes their tabs (also single panes of the split view). */
+  function dropHosts(ids: Set<string>) {
+    setServers((prev) => prev.filter((x) => !ids.has(x.id)));
     setTabs((prev) =>
       prev.flatMap((t) => {
-        if (t.kind !== 'split') return t.serverId === s.id ? [] : [t];
-        const panes = (t.panes ?? []).filter((p) => p.serverId !== s.id);
+        if (t.kind !== 'split') return ids.has(t.serverId) ? [] : [t];
+        const panes = (t.panes ?? []).filter((p) => !ids.has(p.serverId));
         return panes.length === 0 ? [] : [{ ...t, panes, serverId: panes[0].serverId }];
       }),
     );
     setActive(HOME);
     setPanel(null);
+  }
+
+  async function remove(s: Server) {
+    await api.serversDelete(s.id);
+    dropHosts(new Set([s.id]));
+  }
+
+  async function removeImported(connectionId: string): Promise<number> {
+    const ids = new Set(servers.filter((s) => s.proxmoxRef.startsWith(connectionId + ':')).map((s) => s.id));
+    const r = await api.proxmoxRemoveImported(connectionId);
+    dropHosts(ids);
+    return r.removed;
+  }
+
+  async function removeImportedVmware(): Promise<number> {
+    const ids = new Set(servers.filter((s) => s.vmwareRef).map((s) => s.id));
+    const r = await api.vmwareRemoveImported();
+    dropHosts(ids);
+    return r.removed;
+  }
+
+  /** After "Clear vault": close everything that is open and reload. */
+  async function afterVaultCleared() {
+    setTabs([]);
+    setStatuses({});
+    setPanel(null);
+    setActive(HOME);
+    setWorkspace('');
+    rememberWorkspaces([]);
+    await refresh();
+  }
+
+  // ---------------------------------------------------------------- Workspaces
+  const setWorkspace = (w: string) => {
+    setWorkspaceRaw(w);
+    writeLocal('msv-workspace', w);
+  };
+  const rememberWorkspaces = (list: string[]) => {
+    setLocalWorkspaces(list);
+    writeLocal('msv-workspaces', JSON.stringify(list));
+  };
+
+  function createWorkspace(name: string) {
+    const n = name.trim();
+    if (!n) return;
+    if (!workspaces.includes(n)) rememberWorkspaces([...localWorkspaces, n]);
+    setWorkspace(n);
+  }
+
+  async function moveToWorkspace(list: Server[], target: string) {
+    try {
+      const t = target.trim();
+      await Promise.all(list.filter((s) => s.workspace !== t).map((s) => save({ ...s, workspace: t })));
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  async function renameWorkspace(from: string, to: string) {
+    const n = to.trim();
+    if (!n || n === from) return;
+    await moveToWorkspace(servers.filter((s) => s.workspace === from), n);
+    rememberWorkspaces(localWorkspaces.filter((w) => w !== from && w !== n).concat(n));
+    if (activeWorkspace === from) setWorkspace(n);
+    toast(`Workspace "${from}" is now called "${n}"`);
+  }
+
+  async function dissolveWorkspace(name: string) {
+    const list = servers.filter((s) => s.workspace === name);
+    if (!(await askConfirm(`Dissolve the workspace "${name}"?\n${list.length} host${list.length === 1 ? '' : 's'} will be kept and end up in no workspace.`, { title: 'Dissolve workspace', confirmLabel: 'Dissolve', danger: true }))) return;
+    await moveToWorkspace(list, '');
+    rememberWorkspaces(localWorkspaces.filter((w) => w !== name));
+    if (activeWorkspace === name) setWorkspace('');
   }
 
   async function toggleFav(s: Server) {
@@ -311,15 +421,15 @@ export function App() {
 
   async function duplicateHost(s: Server) {
     try {
-      await save({ ...s, id: '', name: `${s.name} (Kopie)`, lastUsed: null, favorite: false });
-      toast('Host dupliziert');
+      await save({ ...s, id: '', name: `${s.name} (copy)`, lastUsed: null, favorite: false });
+      toast('Host duplicated');
     } catch (e) {
       toast((e as Error).message, 'error');
     }
   }
 
   async function deleteHost(s: Server) {
-    if (!confirm(`«${s.name}» wirklich löschen?`)) return;
+    if (!(await askConfirm(`Really delete "${s.name}"?`, { title: 'Delete host', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await remove(s);
     } catch (e) {
@@ -331,15 +441,15 @@ export function App() {
     try {
       const text = file ? await readTextAuto(file) : '';
       const r =
-        kind === 'mremoteng' ? await api.importMremoteng(text)
-        : kind === 'sshconfig' ? await api.importSshConfig(text)
-        : kind === 'csv' ? await api.importCsv(text)
-        : await api.importPutty(kind === 'putty-reg' ? text : undefined);
+        kind === 'mremoteng' ? await api.importMremoteng(text, activeWorkspace)
+        : kind === 'sshconfig' ? await api.importSshConfig(text, activeWorkspace)
+        : kind === 'csv' ? await api.importCsv(text, activeWorkspace)
+        : await api.importPutty(kind === 'putty-reg' ? text : undefined, activeWorkspace);
       await refresh();
-      const parts = [`${r.imported} Host${r.imported === 1 ? '' : 's'} importiert`];
-      if (r.duplicates) parts.push(`${r.duplicates} schon vorhanden`);
-      if (r.skipped) parts.push(`${r.skipped} übersprungen (nicht unterstützt)`);
-      toast(parts.join(', ') + (kind === 'csv' ? '.' : '. Passwörter bitte neu eintragen.'));
+      const parts = [`${r.imported} host${r.imported === 1 ? '' : 's'} imported`];
+      if (r.duplicates) parts.push(`${r.duplicates} already present`);
+      if (r.skipped) parts.push(`${r.skipped} skipped (not supported)`);
+      toast(parts.join(', ') + (kind === 'csv' ? '.' : '. Please enter the passwords again.'));
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -356,7 +466,7 @@ export function App() {
   }
 
   // ---------------------------------------------------------------- Render
-  if (phase === 'loading') return <div className={`fill center muted ${themeClass}`}>Lade…</div>;
+  if (phase === 'loading') return <div className={`fill center muted ${themeClass}`}>Loading…</div>;
   if (phase === 'locked')
     return (
       <div className={`fill ${themeClass}`}>
@@ -370,6 +480,7 @@ export function App() {
       initial={panel.server}
       drawer={active !== HOME}
       groups={groups}
+      workspaces={workspaces}
       keys={keys}
       identities={identities}
       jumpCandidates={servers}
@@ -385,6 +496,23 @@ export function App() {
 
   return (
     <div className={`app ${themeClass}`}>
+      {vmwareOpen && (
+        <VmwareImportDialog
+          servers={servers}
+          identities={identities}
+          workspaces={workspaces}
+          activeWorkspace={activeWorkspace}
+          onClose={() => setVmwareOpen(false)}
+          onRemoveImported={removeImportedVmware}
+          onDone={async (text) => {
+            setVmwareOpen(false);
+            await refresh();
+            setWorkspace(''); // "All" shows everything new right away, even if it ended up in another workspace
+            toast(text);
+          }}
+        />
+      )}
+      <ConfirmHost onOpenChange={setConfirmOpen} />
       <div className="tabbar chrome">
         <button className={'tab home' + (active === HOME ? ' on' : '')} onClick={() => setActive(HOME)}>
           <IconServer size={16} /> Hosts
@@ -396,7 +524,7 @@ export function App() {
               <button
                 key={t.id}
                 className={'tab' + (active === t.id ? ' on' : '')}
-                title="Geteilte Ansicht"
+                title="Split view"
                 onClick={() => setActive(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
               >
@@ -408,7 +536,7 @@ export function App() {
                 <span
                   className="x"
                   role="button"
-                  aria-label="Tab schliessen"
+                  aria-label="Close tab"
                   onClick={(e) => {
                     e.stopPropagation();
                     closeTab(t.id);
@@ -440,7 +568,7 @@ export function App() {
               <span
                 className="x"
                 role="button"
-                aria-label="Tab schliessen"
+                aria-label="Close tab"
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(t.id);
@@ -451,21 +579,22 @@ export function App() {
             </button>
           );
         })}
-        <button className="tab-add" title="Neue Verbindung (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
+        <button className="tab-add" title="New connection (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
           <IconPlus size={17} />
         </button>
         <span className="grow" />
         <button
           className="bar-btn"
-          title={syncInfo?.configured ? `Cloud: ${syncStatus.message || 'verbunden'}` : 'Cloud einrichten'}
+          title={syncInfo?.configured ? `Sync: ${syncStatus.message || 'connected'}` : 'Set up sync'}
           onClick={() => goTo('cloud')}
         >
           <IconCloud size={17} />
           <span className={`badge ${!syncInfo?.configured ? 'off' : syncStatus.state === 'syncing' ? 'syncing' : syncStatus.state === 'error' ? 'error' : 'ok'}`} />
         </button>
-        <button className="bar-btn" title="Vault sperren" onClick={lock}>
+        <button className="bar-btn" title="Lock vault" onClick={lock}>
           <IconLock size={17} />
         </button>
+        <WindowControls />
       </div>
 
       <div className="body">
@@ -476,7 +605,7 @@ export function App() {
                 <IconServer size={17} /> Hosts
               </button>
               <button className={'nav-item' + (section === 'keys' ? ' on' : '')} onClick={() => goTo('keys')}>
-                <IconKey size={17} /> Schlüssel
+                <IconKey size={17} /> Keys
               </button>
               <button className={'nav-item' + (section === 'snippets' ? ' on' : '')} onClick={() => goTo('snippets')}>
                 <IconCode size={17} /> Snippets
@@ -490,14 +619,17 @@ export function App() {
               <button className={'nav-item' + (section === 'logs' ? ' on' : '')} onClick={() => goTo('logs')}>
                 <IconClock size={17} /> Logs
               </button>
+              <button className={'nav-item' + (section === 'import' ? ' on' : '')} onClick={() => goTo('import')}>
+                <IconUpload size={17} /> Import
+              </button>
               <button className={'nav-item' + (section === 'cloud' ? ' on' : '')} onClick={() => goTo('cloud')}>
-                <IconCloud size={17} /> Cloud &amp; Sync
+                <IconCloud size={17} /> Sync
               </button>
               <div className="nav-foot">
                 <button className={'nav-item grow' + (section === 'settings' ? ' on' : '')} onClick={() => goTo('settings')}>
-                  <IconSettings size={17} /> Einstellungen
+                  <IconSettings size={17} /> Settings
                 </button>
-                <button className="ghost" title={theme === 'light' ? 'Dunkles Design' : 'Helles Design'} onClick={toggleTheme}>
+                <button className="ghost" title={theme === 'light' ? 'Dark theme' : 'Light theme'} onClick={toggleTheme}>
                   {theme === 'light' ? <IconMoon size={16} /> : <IconSun size={16} />}
                 </button>
               </div>
@@ -519,8 +651,14 @@ export function App() {
                   onDelete={(s) => void deleteHost(s)}
                   onSplit={() => setSplitPicker(true)}
                   onNew={newHost}
-                  onQuick={(draft) => openPanel({ ...emptyServer(), ...draft })}
-                  onImport={importFile}
+                  onQuick={(draft) => openPanel({ ...emptyServer(), workspace: activeWorkspace, ...draft })}
+                  workspace={activeWorkspace}
+                  workspaces={workspaces}
+                  onWorkspace={setWorkspace}
+                  onCreateWorkspace={createWorkspace}
+                  onRenameWorkspace={(from, to) => void renameWorkspace(from, to)}
+                  onDissolveWorkspace={(name) => void dissolveWorkspace(name)}
+                  onMove={(list, target) => void moveToWorkspace(list, target)}
                 />
               )}
               {section === 'keys' && <Keychain keys={keys} identities={identities} servers={servers} onChanged={refresh} toast={toast} />}
@@ -528,8 +666,25 @@ export function App() {
               {section === 'forwards' && <ForwardsPage servers={servers} toast={toast} />}
               {section === 'knownhosts' && <KnownHostsPage toast={toast} />}
               {section === 'logs' && <LogsPage toast={toast} />}
+              {section === 'import' && (
+                <ImportPage
+                  servers={servers}
+                  onRemoveProxmoxImported={removeImported}
+                  onVmware={() => setVmwareOpen(true)}
+                  onImport={importFile}
+                  identities={identities}
+                  workspaces={workspaces}
+                  activeWorkspace={activeWorkspace}
+                  onProxmoxImported={async () => {
+                    await refresh();
+                    setWorkspace(''); // "All" shows everything new right away, even if it ended up in other workspaces
+                    goTo('hosts');
+                  }}
+                  toast={toast}
+                />
+              )}
               {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
-              {section === 'settings' && <SettingsPage onLock={() => void lock()} toast={toast} />}
+              {section === 'settings' && <SettingsPage onLock={() => void lock()} onCleared={afterVaultCleared} toast={toast} />}
             </div>
 
             {active === HOME && section === 'hosts' && panelEl}
@@ -601,7 +756,7 @@ export function App() {
           </div>
         ))}
       </div>
-      {!isNative && <div className="devbadge">Browser-Mock (unverschlüsselt)</div>}
+      {!isNative && <div className="devbadge">Browser mock (unencrypted)</div>}
     </div>
   );
 }

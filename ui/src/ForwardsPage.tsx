@@ -2,17 +2,18 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, onEvent } from './bridge';
 import { IconClose, IconEdit, IconForward, IconPlay, IconPlus, IconStop, IconTrash } from './Icons';
 import type { ForwardItem, ForwardRule, ForwardType, Server } from './types';
+import { askConfirm } from './Confirm';
 
-const TYPE_LABEL: Record<ForwardType, string> = { local: 'Lokal', remote: 'Remote', dynamic: 'SOCKS' };
+const TYPE_LABEL: Record<ForwardType, string> = { local: 'Local', remote: 'Remote', dynamic: 'SOCKS' };
 const TYPE_HELP: Record<ForwardType, string> = {
-  local: 'Ein Port auf diesem PC führt zu einem Ziel hinter dem SSH-Server (z. B. eine Datenbank). Entspricht ssh -L.',
-  remote: 'Ein Port auf dem SSH-Server führt zu einem Ziel auf diesem PC. Entspricht ssh -R.',
-  dynamic: 'Ein SOCKS5-Proxy auf diesem PC, der den Verkehr über den SSH-Server schickt. Entspricht ssh -D.',
+  local: 'A port on this PC leads to a target behind the SSH server (e.g. a database). Equivalent to ssh -L.',
+  remote: 'A port on the SSH server leads to a target on this PC. Equivalent to ssh -R.',
+  dynamic: 'A SOCKS5 proxy on this PC that sends traffic through the SSH server. Equivalent to ssh -D.',
 };
 
 const describe = (r: ForwardRule) =>
   r.type === 'dynamic'
-    ? `SOCKS5 auf ${r.bindHost}:${r.bindPort}`
+    ? `SOCKS5 on ${r.bindHost}:${r.bindPort}`
     : r.type === 'local'
       ? `${r.bindHost}:${r.bindPort}  →  ${r.destHost}:${r.destPort}`
       : `Server:${r.bindPort}  →  ${r.destHost}:${r.destPort}`;
@@ -22,18 +23,18 @@ export function ForwardsPage({ servers, toast }: { servers: Server[]; toast: (ms
   const [editing, setEditing] = useState<ForwardRule | null>(null);
   const [busy, setBusy] = useState<string>('');
   const ssh = servers.filter((s) => s.protocol === 'ssh');
-  const nameOf = (id: string) => servers.find((s) => s.id === id)?.name ?? '(Host gelöscht)';
+  const nameOf = (id: string) => servers.find((s) => s.id === id)?.name ?? '(host deleted)';
 
   const load = useCallback(() => api.forwardsList().then(setItems).catch((e: Error) => toast(e.message, 'error')), [toast]);
   useEffect(() => void load(), [load]);
 
-  // Laufzustand live nachführen (auch wenn die Verbindung von selbst abbricht)
+  // Keep the running state up to date live (also when the connection drops by itself)
   useEffect(
     () =>
       onEvent((e) => {
         if (e.event !== 'forward.status') return;
         setItems((prev) => prev.map((i) => (i.rule.id === e.ruleId ? { ...i, running: e.running } : i)));
-        if (!e.running && e.error) toast(`Weiterleitung beendet: ${e.error}`, 'error');
+        if (!e.running && e.error) toast(`Forwarding stopped: ${e.error}`, 'error');
       }),
     [toast],
   );
@@ -52,7 +53,7 @@ export function ForwardsPage({ servers, toast }: { servers: Server[]; toast: (ms
   }
 
   async function remove(item: ForwardItem) {
-    if (!confirm(`Regel «${item.rule.name}» löschen?`)) return;
+    if (!(await askConfirm(`Delete the rule "${item.rule.name}"?`, { title: 'Delete rule', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.forwardsDelete(item.rule.id);
       await load();
@@ -68,18 +69,18 @@ export function ForwardsPage({ servers, toast }: { servers: Server[]; toast: (ms
       <div className="page-head">
         <div>
           <h1>Port Forwarding</h1>
-          <p className="muted">Tunnel über deine SSH-Hosts. Regeln laufen unabhängig von Terminal-Tabs, bis du sie stoppst oder den Vault sperrst.</p>
+          <p className="muted">Tunnels through your SSH hosts. Rules run independently of terminal tabs until you stop them or lock the vault.</p>
         </div>
-        <button className="primary" disabled={ssh.length === 0} title={ssh.length === 0 ? 'Zuerst einen SSH-Host anlegen' : ''} onClick={() => setEditing(blank)}>
-          <IconPlus size={15} /> Neue Regel
+        <button className="primary" disabled={ssh.length === 0} title={ssh.length === 0 ? 'Create an SSH host first' : ''} onClick={() => setEditing(blank)}>
+          <IconPlus size={15} /> New rule
         </button>
       </div>
 
       {items.length === 0 ? (
         <div className="empty-card">
           <IconForward size={28} />
-          <h3>Noch keine Regeln</h3>
-          <p>Zum Beispiel eine Datenbank, die nur im Server-Netz erreichbar ist, lokal auf Port 5433 verfügbar machen.</p>
+          <h3>No rules yet</h3>
+          <p>For example, make a database that is only reachable in the server network available locally on port 5433.</p>
         </div>
       ) : (
         <div className="list">
@@ -89,17 +90,17 @@ export function ForwardsPage({ servers, toast }: { servers: Server[]; toast: (ms
               <div className="grow">
                 <div className="list-title">{it.rule.name}</div>
                 <div className="muted small">
-                  <span className="mono">{describe(it.rule)}</span> · über {nameOf(it.rule.serverId)}
+                  <span className="mono">{describe(it.rule)}</span> · via {nameOf(it.rule.serverId)}
                 </div>
               </div>
               <span className={'pill ' + (it.running ? 'connected' : '')}>
                 <span className="dot-sm" />
-                {it.running ? 'Aktiv' : 'Gestoppt'}
+                {it.running ? 'Active' : 'Stopped'}
               </span>
               <button className={it.running ? '' : 'primary'} disabled={busy === it.rule.id} onClick={() => void toggle(it)}>
                 {it.running ? (
                   <>
-                    <IconStop size={14} /> Stopp
+                    <IconStop size={14} /> Stop
                   </>
                 ) : (
                   <>
@@ -107,10 +108,10 @@ export function ForwardsPage({ servers, toast }: { servers: Server[]; toast: (ms
                   </>
                 )}
               </button>
-              <button className="ghost icon-only" title="Bearbeiten" onClick={() => setEditing(it.rule)}>
+              <button className="ghost icon-only" title="Edit" onClick={() => setEditing(it.rule)}>
                 <IconEdit size={16} />
               </button>
-              <button className="ghost icon-only danger" title="Löschen" onClick={() => void remove(it)}>
+              <button className="ghost icon-only danger" title="Delete" onClick={() => void remove(it)}>
                 <IconTrash size={16} />
               </button>
             </div>
@@ -126,7 +127,7 @@ export function ForwardsPage({ servers, toast }: { servers: Server[]; toast: (ms
           onSaved={async () => {
             setEditing(null);
             await load();
-            toast('Regel gespeichert');
+            toast('Rule saved');
           }}
         />
       )}
@@ -157,7 +158,7 @@ function ForwardForm({ initial, hosts, onClose, onSaved }: { initial: ForwardRul
     <div className="overlay" onMouseDown={onClose}>
       <form className="modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <div className="modal-head">
-          <h2>{initial.id ? 'Regel bearbeiten' : 'Neue Regel'}</h2>
+          <h2>{initial.id ? 'Edit rule' : 'New rule'}</h2>
           <button type="button" className="ghost icon-only" onClick={onClose}>
             <IconClose size={16} />
           </button>
@@ -173,7 +174,7 @@ function ForwardForm({ initial, hosts, onClose, onSaved }: { initial: ForwardRul
         <p className="hint">{TYPE_HELP[r.type]}</p>
 
         <label>
-          Über SSH-Host
+          Via SSH host
           <select value={r.serverId} onChange={(e) => set('serverId', e.target.value)}>
             {hosts.map((h) => (
               <option key={h.id} value={h.id}>
@@ -184,18 +185,18 @@ function ForwardForm({ initial, hosts, onClose, onSaved }: { initial: ForwardRul
         </label>
         <label>
           Name (optional)
-          <input value={r.name} onChange={(e) => set('name', e.target.value)} placeholder="z. B. Postgres Produktion" />
+          <input value={r.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Postgres production" />
         </label>
 
         <div className="row">
           {r.type !== 'remote' && (
             <label className="grow">
-              Lokale Adresse
+              Local address
               <input value={r.bindHost} onChange={(e) => set('bindHost', e.target.value)} placeholder="127.0.0.1" />
             </label>
           )}
           <label style={{ width: 120 }}>
-            {r.type === 'remote' ? 'Port auf dem Server' : 'Lokaler Port'}
+            {r.type === 'remote' ? 'Port on the server' : 'Local port'}
             <input type="number" value={r.bindPort} onChange={(e) => set('bindPort', Number(e.target.value))} />
           </label>
         </div>
@@ -203,11 +204,11 @@ function ForwardForm({ initial, hosts, onClose, onSaved }: { initial: ForwardRul
         {r.type !== 'dynamic' && (
           <div className="row">
             <label className="grow">
-              {r.type === 'local' ? 'Ziel-Adresse (vom Server aus gesehen)' : 'Ziel-Adresse (auf diesem PC)'}
-              <input value={r.destHost} onChange={(e) => set('destHost', e.target.value)} placeholder="127.0.0.1 oder db.intern" />
+              {r.type === 'local' ? 'Destination address (as seen from the server)' : 'Destination address (on this PC)'}
+              <input value={r.destHost} onChange={(e) => set('destHost', e.target.value)} placeholder="127.0.0.1 or db.internal" />
             </label>
             <label style={{ width: 120 }}>
-              Ziel-Port
+              Destination port
               <input type="number" value={r.destPort} onChange={(e) => set('destPort', Number(e.target.value))} />
             </label>
           </div>
@@ -215,7 +216,7 @@ function ForwardForm({ initial, hosts, onClose, onSaved }: { initial: ForwardRul
 
         {r.bindHost && !['127.0.0.1', 'localhost', '::1'].includes(r.bindHost.trim()) && r.type !== 'remote' && (
           <p className="hint" style={{ color: 'var(--warn)' }}>
-            Achtung: Mit «{r.bindHost}» kann auch jeder andere im Netzwerk diesen Tunnel benutzen. Für nur diesen PC: 127.0.0.1.
+            Warning: with "{r.bindHost}" anyone else on the network can use this tunnel too. For this PC only: 127.0.0.1.
           </p>
         )}
 
@@ -223,10 +224,10 @@ function ForwardForm({ initial, hosts, onClose, onSaved }: { initial: ForwardRul
         <div className="actions">
           <span className="grow" />
           <button type="button" onClick={onClose}>
-            Abbrechen
+            Cancel
           </button>
           <button className="primary" disabled={busy || !r.serverId}>
-            Speichern
+            Save
           </button>
         </div>
       </form>

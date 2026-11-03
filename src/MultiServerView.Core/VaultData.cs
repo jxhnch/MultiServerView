@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace MultiServerView.Core;
 
-/// <summary>Der komplette (entschlüsselte) Inhalt des Vaults.</summary>
+/// <summary>The complete (decrypted) content of the vault.</summary>
 public sealed class VaultData
 {
     public int Version { get; set; } = 3;
@@ -11,11 +11,12 @@ public sealed class VaultData
     public List<IdentityEntry> Identities { get; set; } = new();
     public List<SnippetEntry> Snippets { get; set; } = new();
     public List<PortForwardEntry> Forwards { get; set; } = new();
+    public List<ProxmoxEntry> Proxmox { get; set; } = new();
 
     /// <summary>"host:port" -> SHA256-Fingerprint (Trust on first use).</summary>
     public Dictionary<string, string> KnownHosts { get; set; } = new();
 
-    /// <summary>Id -> Zeitpunkt der Löschung. Damit Löschungen beim Cloud-Sync nicht "wiederauferstehen".</summary>
+    /// <summary>Id -> time of deletion. So that deletions do not "come back to life" during sync.</summary>
     public Dictionary<string, DateTimeOffset> Tombstones { get; set; } = new();
 
     public VaultData Clone() =>
@@ -24,9 +25,9 @@ public sealed class VaultData
 }
 
 /// <summary>
-/// Führt zwei Stände desselben Vaults zusammen (lokal + Cloud).
-/// Pro Eintrag gewinnt der neuere <c>UpdatedAt</c>; Löschungen (Tombstones) gewinnen gegen ältere Änderungen.
-/// Das Ergebnis ist deterministisch sortiert, damit zwei gleiche Stände auch gleich serialisieren.
+/// Merges two states of the same vault (local + synced).
+/// Per entry the newer <c>UpdatedAt</c> wins; deletions (tombstones) win against older changes.
+/// The result is sorted deterministically so two identical states also serialize identically.
 /// </summary>
 public static class VaultMerge
 {
@@ -36,7 +37,7 @@ public static class VaultMerge
         var b = y.Clone();
         var result = new VaultData();
 
-        // Tombstones: pro Id der spätere Zeitpunkt
+        // Tombstones: the later time per id
         foreach (var src in new[] { a.Tombstones, b.Tombstones })
             foreach (var (id, at) in src)
                 result.Tombstones[id] = result.Tombstones.TryGetValue(id, out var cur) && cur > at ? cur : at;
@@ -44,7 +45,7 @@ public static class VaultMerge
         result.Servers = MergeById(a.Servers, b.Servers, s => s.Id, s => s.UpdatedAt, result.Tombstones,
             (winner, loser) =>
             {
-                // "Zuletzt benutzt" ist unabhängig von Änderungen: immer der spätere Wert.
+                // "Last used" is independent of changes: always the later value.
                 if (loser.LastUsed.HasValue && (!winner.LastUsed.HasValue || loser.LastUsed > winner.LastUsed))
                     winner.LastUsed = loser.LastUsed;
             });
@@ -53,12 +54,13 @@ public static class VaultMerge
         result.Identities = MergeById(a.Identities, b.Identities, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
         result.Snippets = MergeById(a.Snippets, b.Snippets, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
         result.Forwards = MergeById(a.Forwards, b.Forwards, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
+        result.Proxmox = MergeById(a.Proxmox, b.Proxmox, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
 
         foreach (var src in new[] { a.KnownHosts, b.KnownHosts })
             foreach (var (host, fp) in src)
                 result.KnownHosts.TryAdd(host, fp);
 
-        // Deterministische Reihenfolge (Dictionary behält die Einfügereihenfolge beim Serialisieren).
+        // Deterministic order (a dictionary keeps the insertion order when serializing).
         result.KnownHosts = result.KnownHosts.OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .ToDictionary(kv => kv.Key, kv => kv.Value);
         result.Tombstones = result.Tombstones.OrderBy(kv => kv.Key, StringComparer.Ordinal)
@@ -67,7 +69,7 @@ public static class VaultMerge
         return result;
     }
 
-    /// <summary>Stabile, vergleichbare Darstellung (für "hat sich etwas geändert?").</summary>
+    /// <summary>Stable, comparable representation (for "did something change?").</summary>
     public static string Fingerprint(VaultData d) =>
         JsonSerializer.Serialize(Merge(d, new VaultData()), Json.Options);
 
@@ -88,7 +90,7 @@ public static class VaultMerge
                 continue;
             }
 
-            // Bei Gleichstand gewinnt der Cloud-Stand (b) - Hauptsache beide Seiten entscheiden gleich.
+            // On a tie the synced state (b) wins - what matters is that both sides decide the same way.
             var winner = updated(item) >= updated(existing) ? item : existing;
             var loser = ReferenceEquals(winner, item) ? existing : item;
             onPair?.Invoke(winner, loser);

@@ -5,7 +5,7 @@ import { SessionFrame } from './SessionFrame';
 import { getUiSettings } from './uiSettings';
 import type { Server, SessionStatus } from './types';
 
-/** VNC-Session über noVNC. Die Bytes laufen über eine lokale Brücke im Host (Einmal-Token). */
+/** VNC session via noVNC. The bytes go through a local bridge in the host (one-time token). */
 export function VncView({
   tabId,
   server,
@@ -66,12 +66,12 @@ export function VncView({
         });
         rfb.addEventListener('disconnect', (e) => {
           const clean = (e as CustomEvent<{ clean: boolean }>).detail?.clean;
-          setStatus(clean ? 'closed' : 'error', clean ? '' : 'Verbindung unterbrochen oder abgelehnt.');
+          setStatus(clean ? 'closed' : 'error', clean ? '' : 'Connection interrupted or refused.');
         });
         rfb.addEventListener('credentialsrequired', () => setNeedsPassword(true));
         rfb.addEventListener('securityfailure', (e) => {
           const reason = (e as CustomEvent<{ reason?: string }>).detail?.reason;
-          setStatus('error', 'Anmeldung fehlgeschlagen' + (reason ? `: ${reason}` : '.'));
+          setStatus('error', 'Authentication failed' + (reason ? `: ${reason}` : '.'));
         });
       })
       .catch((err: Error) => {
@@ -83,7 +83,7 @@ export function VncView({
       try {
         rfb?.disconnect();
       } catch {
-        /* schon getrennt */
+        /* already disconnected */
       }
       rfbRef.current = null;
       void api.vncClose(tabId).catch(() => undefined);
@@ -107,7 +107,7 @@ export function VncView({
       const text = await navigator.clipboard.readText();
       rfbRef.current?.clipboardPasteFrom(text);
     } catch {
-      /* Zwischenablage nicht erlaubt */
+      /* clipboard not allowed */
     }
   };
 
@@ -121,30 +121,30 @@ export function VncView({
       extraActions={
         <>
           <button onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={status !== 'connected'}>
-            Strg+Alt+Entf
+            Ctrl+Alt+Del
           </button>
           <button onClick={sendClipboard} disabled={status !== 'connected'}>
-            Zwischenablage senden
+            Send clipboard
           </button>
         </>
       }
     >
       <div className="vnc-wrap">
         <div className="vnc-box" ref={boxRef} />
-        {status === 'connecting' && !needsPassword && <div className="overlay-msg muted">Verbinde…</div>}
+        {status === 'connecting' && !needsPassword && <div className="overlay-msg muted">Connecting…</div>}
         {(status === 'error' || status === 'closed') && (
           <div className="overlay-msg">
-            <div className={status === 'error' ? 'error' : 'muted'}>{message || 'Verbindung getrennt.'}</div>
+            <div className={status === 'error' ? 'error' : 'muted'}>{message || 'Disconnected.'}</div>
             <button className="primary" onClick={onReconnect}>
-              Neu verbinden
+              Reconnect
             </button>
           </div>
         )}
         {needsPassword && (
           <form className="overlay-msg" onSubmit={sendPassword}>
-            <div>Dieser VNC-Server verlangt ein Passwort.</div>
-            <input type="password" autoFocus placeholder="VNC-Passwort" value={pw} onChange={(e) => setPw(e.target.value)} />
-            <button className="primary">Anmelden</button>
+            <div>This VNC server requires a password.</div>
+            <input type="password" autoFocus placeholder="VNC password" value={pw} onChange={(e) => setPw(e.target.value)} />
+            <button className="primary">Sign in</button>
           </form>
         )}
       </div>

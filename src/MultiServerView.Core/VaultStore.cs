@@ -5,24 +5,24 @@ namespace MultiServerView.Core;
 
 public sealed class WrongPasswordException : Exception
 {
-    public WrongPasswordException() : base("Falsches Passwort.") { }
+    public WrongPasswordException() : base("Wrong password.") { }
 }
 
 public enum HostKeyTrust
 {
-    /// <summary>Bekannt und identisch.</summary>
+    /// <summary>Known and identical.</summary>
     Trusted,
 
-    /// <summary>Erster Kontakt: Fingerprint wurde gespeichert (Trust on first use).</summary>
+    /// <summary>First contact: the fingerprint was stored (trust on first use).</summary>
     NewlyTrusted,
 
-    /// <summary>Bekannter Host, aber anderer Fingerprint - möglicher Angriff oder Server neu aufgesetzt.</summary>
+    /// <summary>Known host but a different fingerprint - possible attack or the server was set up again.</summary>
     Mismatch
 }
 
 /// <summary>
-/// Lokaler, verschlüsselter Vault (eine Datei). Alles ausser der Datei selbst bleibt nur im Speicher.
-/// Diese Datei ist auch der Blob, der in die Cloud synchronisiert wird.
+/// Local, encrypted vault (one file). Everything except the file itself stays in memory only.
+/// This file is also the blob that is synchronized.
 /// </summary>
 public sealed class VaultStore
 {
@@ -37,19 +37,19 @@ public sealed class VaultStore
     public bool Exists => File.Exists(_path);
     public bool IsUnlocked { get { lock (_gate) return _data != null; } }
 
-    /// <summary>Wird nach jeder Änderung durch den Benutzer ausgelöst (nicht bei Touch und nicht beim Sync-Apply).</summary>
+    /// <summary>Raised after every change by the user (not on touch and not on sync apply).</summary>
     public event Action? Changed;
 
-    // ------------------------------------------------------------------ Lebenszyklus
+    // ------------------------------------------------------------------ Lifecycle
 
     public void Create(string password)
     {
         if (string.IsNullOrEmpty(password) || password.Length < 8)
-            throw new ArgumentException("Das Master-Passwort muss mindestens 8 Zeichen haben.");
+            throw new ArgumentException("The master password must be at least 8 characters.");
 
         lock (_gate)
         {
-            if (Exists) throw new InvalidOperationException("Es existiert bereits ein Vault.");
+            if (Exists) throw new InvalidOperationException("A vault already exists.");
             _key = VaultCrypto.Derive(password);
             _data = new VaultData();
             Save();
@@ -60,7 +60,7 @@ public sealed class VaultStore
     {
         lock (_gate)
         {
-            if (!Exists) throw new InvalidOperationException("Es existiert noch kein Vault.");
+            if (!Exists) throw new InvalidOperationException("No vault exists yet.");
             try
             {
                 var blob = File.ReadAllBytes(_path);
@@ -85,13 +85,13 @@ public sealed class VaultStore
     }
 
     /// <summary>
-    /// Ändert das Master-Passwort (neuer Salt, neuer Schlüssel). Der Vault muss entsperrt sein.
-    /// Wirft <see cref="WrongPasswordException"/>, wenn das alte Passwort nicht stimmt.
+    /// Changes the master password (new salt, new key). The vault must be unlocked.
+    /// Throws <see cref="WrongPasswordException"/> if the old password is wrong.
     /// </summary>
     public void ChangePassword(string oldPassword, string newPassword)
     {
         if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 8)
-            throw new ArgumentException("Das neue Master-Passwort muss mindestens 8 Zeichen haben.");
+            throw new ArgumentException("The new master password must be at least 8 characters.");
 
         lock (_gate)
         {
@@ -109,7 +109,66 @@ public sealed class VaultStore
         }
     }
 
-    /// <summary>Ersetzt Schlüssel und Inhalt (z. B. wenn ein anderes Gerät das Master-Passwort geändert hat).</summary>
+    /// <summary>Checks the master password against the vault file. Throws <see cref="WrongPasswordException"/> if it is wrong.</summary>
+    public void VerifyPassword(string password)
+    {
+        lock (_gate)
+        {
+            Data();
+            try
+            {
+                VaultCrypto.Open(File.ReadAllBytes(_path), password, out _);
+            }
+            catch (AuthenticationTagMismatchException)
+            {
+                throw new WrongPasswordException();
+            }
+        }
+    }
+
+    /// <summary>How much is in the vault (for the warning before clearing).</summary>
+    public VaultSummary Summary()
+    {
+        lock (_gate)
+        {
+            var d = Data();
+            return new VaultSummary(d.Servers.Count, d.Keys.Count, d.Identities.Count, d.Snippets.Count, d.Forwards.Count, d.Proxmox.Count, d.KnownHosts.Count);
+        }
+    }
+
+    /// <summary>
+    /// Clears the vault: all hosts, keys, identities, snippets, port forwards, Proxmox connections and known host keys.
+    /// The master password stays. Every removed entry gets a tombstone so that it cannot "come back to life" from another
+    /// device during a sync (and is deleted there as well). Requires the master password as an additional safeguard.
+    /// </summary>
+    public VaultSummary Clear(string password)
+    {
+        VerifyPassword(password);
+        VaultSummary before;
+        lock (_gate)
+        {
+            var data = Data();
+            before = Summary();
+            var now = DateTimeOffset.UtcNow;
+            foreach (var id in data.Servers.Select(x => x.Id)
+                         .Concat(data.Keys.Select(x => x.Id)).Concat(data.Identities.Select(x => x.Id))
+                         .Concat(data.Snippets.Select(x => x.Id)).Concat(data.Forwards.Select(x => x.Id))
+                         .Concat(data.Proxmox.Select(x => x.Id)))
+                data.Tombstones[id] = now;
+            data.Servers.Clear();
+            data.Keys.Clear();
+            data.Identities.Clear();
+            data.Snippets.Clear();
+            data.Forwards.Clear();
+            data.Proxmox.Clear();
+            data.KnownHosts.Clear();
+            Save();
+        }
+        Changed?.Invoke();
+        return before;
+    }
+
+    /// <summary>Replaces key and content (e.g. when another device changed the master password).</summary>
     public void Rekey(VaultKey key, VaultData data)
     {
         lock (_gate)
@@ -121,7 +180,7 @@ public sealed class VaultStore
         }
     }
 
-    /// <summary>Kopiert die verschlüsselte Vault-Datei als Backup. Enthält nur verschlüsselte Daten.</summary>
+    /// <summary>Copies the encrypted vault file as a backup. Contains encrypted data only.</summary>
     public void ExportTo(string path)
     {
         lock (_gate)
@@ -131,12 +190,12 @@ public sealed class VaultStore
         }
     }
 
-    /// <summary>Schreibt einen aus der Cloud geladenen Blob als lokalen Vault (nur wenn noch keiner existiert).</summary>
+    /// <summary>Writes a downloaded blob as the local vault (only if none exists yet).</summary>
     public void InstallBlob(byte[] blob)
     {
         lock (_gate)
         {
-            if (Exists) throw new InvalidOperationException("Es existiert bereits ein lokaler Vault.");
+            if (Exists) throw new InvalidOperationException("A local vault already exists.");
             WriteAtomic(blob);
         }
     }
@@ -168,7 +227,7 @@ public sealed class VaultStore
         return entry;
     }
 
-    /// <summary>Mehrere Server auf einmal (Import) - ein Speichern, ein Changed.</summary>
+    /// <summary>Several servers at once (import) - one save, one Changed.</summary>
     public int UpsertMany(IEnumerable<ServerEntry> entries)
     {
         var count = 0;
@@ -189,6 +248,29 @@ public sealed class VaultStore
         return count;
     }
 
+    /// <summary>Deletes several hosts at once (one save, one sync trigger). Returns the number.</summary>
+    public int DeleteMany(IEnumerable<string> ids)
+    {
+        var set = ids.ToHashSet();
+        int removed;
+        lock (_gate)
+        {
+            var data = Data();
+            var now = DateTimeOffset.UtcNow;
+            var gone = data.Servers.Where(s => set.Contains(s.Id)).Select(s => s.Id).ToList();
+            removed = data.Servers.RemoveAll(s => set.Contains(s.Id));
+            foreach (var id in gone) data.Tombstones[id] = now;
+            foreach (var f in data.Forwards.Where(f => set.Contains(f.ServerId)).ToList())
+            {
+                data.Forwards.Remove(f);
+                data.Tombstones[f.Id] = now;
+            }
+            if (removed > 0) Save();
+        }
+        if (removed > 0) Changed?.Invoke();
+        return removed;
+    }
+
     public void Delete(string id)
     {
         lock (_gate)
@@ -205,13 +287,13 @@ public sealed class VaultStore
         Changed?.Invoke();
     }
 
-    /// <summary>Setzt "zuletzt benutzt" auf jetzt. Löst bewusst keinen Sync aus.</summary>
+    /// <summary>Sets "last used" to now. Deliberately does not trigger a sync.</summary>
     public ServerEntry Touch(string id)
     {
         lock (_gate)
         {
             var entry = Data().Servers.FirstOrDefault(s => s.Id == id)
-                        ?? throw new KeyNotFoundException("Server nicht gefunden.");
+                        ?? throw new KeyNotFoundException("Server not found.");
             entry.LastUsed = DateTimeOffset.UtcNow;
             Save();
             return entry;
@@ -261,7 +343,7 @@ public sealed class VaultStore
             var data = Data();
             if (data.Keys.RemoveAll(k => k.Id == id) > 0) data.Tombstones[id] = DateTimeOffset.UtcNow;
 
-            // Server, die diesen Key benutzt haben, fallen auf Passwort zurück.
+            // Servers that used this key fall back to a password.
             foreach (var s in data.Servers.Where(s => s.KeyId == id))
             {
                 s.KeyId = "";
@@ -273,7 +355,7 @@ public sealed class VaultStore
         Changed?.Invoke();
     }
 
-    // ------------------------------------------------------------------ Identities, Snippets, Port-Weiterleitungen
+    // ------------------------------------------------------------------ Identities, snippets, port forwards
 
     public IReadOnlyList<IdentityEntry> ListIdentities()
     {
@@ -326,7 +408,23 @@ public sealed class VaultStore
 
     public void DeleteForward(string id) => DeleteItem(d => d.Forwards, id);
 
-    /// <summary>Wendet die Zugangsdaten einer Identity auf eine Kopie des Servers an (Benutzer, Passwort, Auth, Key).</summary>
+    // ------------------------------------------------------------------ Proxmox connections
+
+    public IReadOnlyList<ProxmoxEntry> ListProxmox()
+    {
+        lock (_gate) return Data().Proxmox.ToList();
+    }
+
+    public ProxmoxEntry? FindProxmox(string id)
+    {
+        lock (_gate) return Data().Proxmox.FirstOrDefault(p => p.Id == id);
+    }
+
+    public ProxmoxEntry UpsertProxmox(ProxmoxEntry entry) => UpsertItem(d => d.Proxmox, entry);
+
+    public void DeleteProxmox(string id) => DeleteItem(d => d.Proxmox, id);
+
+    /// <summary>Applies the credentials of an identity to a copy of the server (username, password, auth, key).</summary>
     public ServerEntry Resolve(ServerEntry server)
     {
         lock (_gate)
@@ -349,7 +447,7 @@ public sealed class VaultStore
         lock (_gate) return Find(id) is { } s ? Resolve(s) : null;
     }
 
-    /// <summary>Merkt sich das erkannte Betriebssystem eines Hosts (für das Icon).</summary>
+    /// <summary>Remembers the detected operating system of a host (for the icon).</summary>
     public void SetOs(string serverId, string os)
     {
         lock (_gate)
@@ -418,7 +516,7 @@ public sealed class VaultStore
         return result;
     }
 
-    /// <summary>Alle bekannten Host-Keys ("host:port" -> Fingerprint), alphabetisch.</summary>
+    /// <summary>All known host keys ("host:port" -> fingerprint), alphabetical.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> ListKnownHosts()
     {
         lock (_gate) return Data().KnownHosts.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
@@ -446,13 +544,13 @@ public sealed class VaultStore
 
     // ------------------------------------------------------------------ Sync-Hooks
 
-    /// <summary>Tiefe Kopie des aktuellen Inhalts.</summary>
+    /// <summary>Deep copy of the current content.</summary>
     public VaultData Snapshot()
     {
         lock (_gate) return Data().Clone();
     }
 
-    /// <summary>Aktueller Stand als verschlüsselter Blob (das, was in die Cloud geht).</summary>
+    /// <summary>Current state as an encrypted blob (what goes into sync).</summary>
     public byte[] ExportBlob()
     {
         lock (_gate)
@@ -462,7 +560,7 @@ public sealed class VaultStore
         }
     }
 
-    /// <summary>Entschlüsselt einen Cloud-Blob mit dem Schlüssel dieses Vaults.</summary>
+    /// <summary>Decrypts a synced blob with the key of this vault.</summary>
     public VaultData OpenRemote(byte[] blob)
     {
         VaultKey key;
@@ -482,7 +580,7 @@ public sealed class VaultStore
         }
     }
 
-    /// <summary>Übernimmt einen zusammengeführten Stand (Sync). Löst kein Changed aus.</summary>
+    /// <summary>Applies a merged state (sync). Does not raise Changed.</summary>
     public void Apply(VaultData merged)
     {
         lock (_gate)
@@ -495,11 +593,11 @@ public sealed class VaultStore
 
     // ------------------------------------------------------------------ intern
 
-    private VaultData Data() => _data ?? throw new InvalidOperationException("Der Vault ist gesperrt.");
+    private VaultData Data() => _data ?? throw new InvalidOperationException("The vault is locked.");
 
     private void Save()
     {
-        if (_data == null || _key == null) throw new InvalidOperationException("Der Vault ist gesperrt.");
+        if (_data == null || _key == null) throw new InvalidOperationException("The vault is locked.");
         var plain = JsonSerializer.SerializeToUtf8Bytes(_data, Json.Options);
         WriteAtomic(VaultCrypto.Seal(plain, _key));
     }
@@ -509,9 +607,12 @@ public sealed class VaultStore
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        // Atomar schreiben: erst temp-Datei, dann ersetzen - so geht bei einem Absturz nichts verloren.
+        // Write atomically: temp file first, then replace - so nothing is lost on a crash.
         var tmp = _path + ".tmp";
         File.WriteAllBytes(tmp, blob);
         File.Move(tmp, _path, overwrite: true);
     }
 }
+
+/// <summary>Number of entries in the vault, by type.</summary>
+public sealed record VaultSummary(int Servers, int Keys, int Identities, int Snippets, int Forwards, int Proxmox, int KnownHosts);

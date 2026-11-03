@@ -7,7 +7,7 @@ using Xunit;
 
 namespace MultiServerView.Core.Tests;
 
-/// <summary>Simuliert die Supabase-API (Auth + Tabelle "vaults" mit optimistischer Versionsprüfung).</summary>
+/// <summary>Simulates the Supabase API (auth + table "vaults" with optimistic version check).</summary>
 internal sealed class FakeSupabase : HttpMessageHandler
 {
     public string Email = "me@example.com";
@@ -68,7 +68,7 @@ internal sealed class FakeSupabase : HttpMessageHandler
         new(code) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 }
 
-/// <summary>Ein "Gerät": eigener Vault, eigene Einstellungen, geteilte Fake-Cloud.</summary>
+/// <summary>A "device": own vault, own settings, shared fake cloud.</summary>
 internal sealed class Device : IDisposable
 {
     public readonly string Dir = Path.Combine(Path.GetTempPath(), "msv-sync-" + Guid.NewGuid().ToString("N"));
@@ -105,19 +105,19 @@ public class SyncTests
         using var a = new Device(cloud);
         using var b = new Device(cloud);
 
-        a.Store.Create("master-passwort");
-        a.Store.Upsert(new ServerEntry { Name = "web-1", Host = "h", Password = "geheim" });
+        a.Store.Create("master-password");
+        a.Store.Upsert(new ServerEntry { Name = "web-1", Host = "h", Password = "secret" });
         a.Sync.Save(Device.Config(cloud));
 
         var r1 = await a.Sync.SyncAsync();
         Assert.Equal(SyncOutcome.Created, r1.Outcome);
-        Assert.DoesNotContain("geheim", cloud.Blob!); // Base64 des Blobs enthält kein Klartext-Passwort
+        Assert.DoesNotContain("secret", cloud.Blob!); // Base64 of the blob contains no plain-text password
         Assert.DoesNotContain("web-1", Encoding.UTF8.GetString(Convert.FromBase64String(cloud.Blob!)));
 
         await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("master-passwort");
+        b.Store.Unlock("master-password");
         Assert.Equal("web-1", b.Store.List().Single().Name);
-        Assert.Equal("geheim", b.Store.List().Single().Password);
+        Assert.Equal("secret", b.Store.List().Single().Password);
     }
 
     [Fact]
@@ -127,21 +127,21 @@ public class SyncTests
         using var a = new Device(cloud);
         using var b = new Device(cloud);
 
-        a.Store.Create("master-passwort");
+        a.Store.Create("master-password");
         a.Sync.Save(Device.Config(cloud));
         await a.Sync.SyncAsync();
         await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("master-passwort");
+        b.Store.Unlock("master-password");
 
-        a.Store.Upsert(new ServerEntry { Name = "von-a", Host = "a" });
-        b.Store.Upsert(new ServerEntry { Name = "von-b", Host = "b" });
+        a.Store.Upsert(new ServerEntry { Name = "from-a", Host = "a" });
+        b.Store.Upsert(new ServerEntry { Name = "from-b", Host = "b" });
 
         Assert.Equal(SyncOutcome.Pushed, (await a.Sync.SyncAsync()).Outcome);
         Assert.Equal(SyncOutcome.Merged, (await b.Sync.SyncAsync()).Outcome);
         Assert.Equal(SyncOutcome.Pulled, (await a.Sync.SyncAsync()).Outcome);
 
-        Assert.Equal(new[] { "von-a", "von-b" }, a.Store.List().Select(s => s.Name).Order());
-        Assert.Equal(new[] { "von-a", "von-b" }, b.Store.List().Select(s => s.Name).Order());
+        Assert.Equal(new[] { "from-a", "from-b" }, a.Store.List().Select(s => s.Name).Order());
+        Assert.Equal(new[] { "from-a", "from-b" }, b.Store.List().Select(s => s.Name).Order());
         Assert.Equal(SyncOutcome.UpToDate, (await b.Sync.SyncAsync()).Outcome);
     }
 
@@ -152,12 +152,12 @@ public class SyncTests
         using var a = new Device(cloud);
         using var b = new Device(cloud);
 
-        a.Store.Create("master-passwort");
+        a.Store.Create("master-password");
         var s = a.Store.Upsert(new ServerEntry { Name = "weg", Host = "h" });
         a.Sync.Save(Device.Config(cloud));
         await a.Sync.SyncAsync();
         await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("master-passwort");
+        b.Store.Unlock("master-password");
 
         a.Store.Delete(s.Id);
         await a.Sync.SyncAsync();
@@ -173,16 +173,16 @@ public class SyncTests
         using var a = new Device(cloud);
         using var other = new Device(cloud);
 
-        a.Store.Create("master-passwort");
+        a.Store.Create("master-password");
         a.Sync.Save(Device.Config(cloud));
         await a.Sync.SyncAsync();
         await other.Sync.DownloadInitialAsync(Device.Config(cloud));
-        other.Store.Unlock("master-passwort");
+        other.Store.Unlock("master-password");
 
-        a.Store.Upsert(new ServerEntry { Name = "lokal", Host = "a" });
+        a.Store.Upsert(new ServerEntry { Name = "local", Host = "a" });
         other.Store.Upsert(new ServerEntry { Name = "anderes-geraet", Host = "b" });
 
-        // Das andere Gerät pusht genau zwischen "laden" und "hochladen" von a.
+        // The other device pushes exactly between "load" and "upload" of a.
         cloud.BeforePatch = async () => await other.Sync.SyncAsync();
 
         var r = await a.Sync.SyncAsync();
@@ -198,15 +198,15 @@ public class SyncTests
         using var a = new Device(cloud);
         using var b = new Device(cloud);
 
-        a.Store.Create("master-passwort");
+        a.Store.Create("master-password");
         a.Sync.Save(Device.Config(cloud));
         await a.Sync.SyncAsync();
 
-        b.Store.Create("master-passwort"); // selbes Passwort, aber getrennt erstellt -> anderer Salt
+        b.Store.Create("master-password"); // same password, but created separately -> different salt
         b.Sync.Save(Device.Config(cloud));
 
         var ex = await Assert.ThrowsAsync<SyncException>(() => b.Sync.SyncAsync());
-        Assert.Contains("Aus Cloud laden", ex.Message);
+        Assert.Contains("Load vault", ex.Message);
     }
 
     [Fact]
@@ -214,13 +214,13 @@ public class SyncTests
     {
         var cloud = new FakeSupabase();
         using var a = new Device(cloud);
-        a.Store.Create("master-passwort");
+        a.Store.Create("master-password");
         var cfg = Device.Config(cloud);
-        cfg.Password = "falsch";
+        cfg.Password = "wrong";
         a.Sync.Save(cfg);
 
         var ex = await Assert.ThrowsAsync<SyncException>(() => a.Sync.SyncAsync());
-        Assert.Contains("stimmt nicht", ex.Message);
+        Assert.Contains("is wrong", ex.Message);
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public class SyncTests
         using var b = new Device(cloud);
 
         var ex = await Assert.ThrowsAsync<SyncException>(() => b.Sync.DownloadInitialAsync(Device.Config(cloud)));
-        Assert.Contains("noch kein Vault", ex.Message);
+        Assert.Contains("no vault in the cloud", ex.Message);
     }
 
     [Fact]
@@ -246,10 +246,10 @@ public class SyncTests
         try
         {
             var store = new SyncSettingsStore(Path.Combine(dir, "sync.json"), new PlainProtector());
-            store.Save(new SyncSettings { Url = "https://x.supabase.co", AnonKey = "k", Email = "e@x.ch", Password = "klartext-pw" });
+            store.Save(new SyncSettings { Url = "https://x.supabase.co", AnonKey = "k", Email = "e@x.ch", Password = "plaintext-pw" });
 
-            Assert.DoesNotContain("klartext-pw", File.ReadAllText(Path.Combine(dir, "sync.json")));
-            Assert.Equal("klartext-pw", store.Load().Password);
+            Assert.DoesNotContain("plaintext-pw", File.ReadAllText(Path.Combine(dir, "sync.json")));
+            Assert.Equal("plaintext-pw", store.Load().Password);
         }
         finally
         {

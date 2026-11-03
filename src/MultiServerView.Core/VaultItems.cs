@@ -1,13 +1,13 @@
 namespace MultiServerView.Core;
 
-/// <summary>Alles, was im Vault liegt, per Id angesprochen wird und beim Cloud-Merge nach "neuester Stand gewinnt" behandelt wird.</summary>
+/// <summary>Everything that lives in the vault, is addressed by id and is merged by "newest state wins" during sync.</summary>
 public interface IVaultItem
 {
     string Id { get; set; }
     DateTimeOffset UpdatedAt { get; set; }
 }
 
-/// <summary>Wiederverwendbare Zugangsdaten (Benutzer + Passwort oder Key), die mehrere Hosts teilen.</summary>
+/// <summary>Reusable credentials (username + password or key) shared by several hosts.</summary>
 public sealed class IdentityEntry : IVaultItem
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -19,14 +19,14 @@ public sealed class IdentityEntry : IVaultItem
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-/// <summary>Gespeicherter Befehl, den man mit einem Klick ins Terminal schicken kann.</summary>
+/// <summary>A saved command that can be sent to the terminal with one click.</summary>
 public sealed class SnippetEntry : IVaultItem
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "";
     public string Command { get; set; } = "";
 
-    /// <summary>true = Enter wird gleich mitgesendet.</summary>
+    /// <summary>true = Enter is sent right away as well.</summary>
     public bool AutoRun { get; set; } = true;
 
     public DateTimeOffset UpdatedAt { get; set; }
@@ -34,17 +34,17 @@ public sealed class SnippetEntry : IVaultItem
 
 public enum ForwardType
 {
-    /// <summary>Lokaler Port -> Ziel hinter dem SSH-Server (ssh -L).</summary>
+    /// <summary>Local port -> target behind the SSH server (ssh -L).</summary>
     Local,
 
-    /// <summary>Port auf dem SSH-Server -> Ziel auf diesem PC (ssh -R).</summary>
+    /// <summary>Port on the SSH server -> target on this PC (ssh -R).</summary>
     Remote,
 
-    /// <summary>Lokaler SOCKS5-Proxy über den SSH-Server (ssh -D).</summary>
+    /// <summary>Local SOCKS5 proxy through the SSH server (ssh -D).</summary>
     Dynamic
 }
 
-/// <summary>Eine Port-Weiterleitung über einen SSH-Host.</summary>
+/// <summary>A port forward through an SSH host.</summary>
 public sealed class PortForwardEntry : IVaultItem
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -55,5 +55,29 @@ public sealed class PortForwardEntry : IVaultItem
     public int BindPort { get; set; }
     public string DestHost { get; set; } = "";
     public int DestPort { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A connection to a Proxmox VE server. The API token (like passwords) is only stored encrypted in the vault.
+/// </summary>
+public sealed class ProxmoxEntry : IVaultItem
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "";
+
+    /// <summary>Address with port, e.g. https://pve.example.com:8006</summary>
+    public string Url { get; set; } = "";
+
+    /// <summary>Token id in the format user@realm!tokenname</summary>
+    public string TokenId { get; set; } = "";
+
+    public string TokenSecret { get; set; } = "";
+
+    /// <summary>
+    /// SHA256 of the server certificate (pinned) if it is self-signed. Empty = the certificate must be trusted by the system.
+    /// </summary>
+    public string CertFingerprint { get; set; } = "";
+
     public DateTimeOffset UpdatedAt { get; set; }
 }

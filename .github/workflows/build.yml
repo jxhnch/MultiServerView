@@ -1,7 +1,7 @@
 name: Build (Windows)
 
-# Baut die echte Windows-App, führt die Tests aus und legt eine fertige, portable Version
-# (ohne Installation, .NET ist enthalten) als Download unter "Actions -> Artifacts" ab.
+# Builds the real Windows app, runs the tests and stores a ready-made, portable version
+# (no installation, .NET included) as a download under "Actions -> Artifacts".
 
 on:
   push:
@@ -28,29 +28,29 @@ jobs:
       - name: Tests (Core)
         run: dotnet test tests/MultiServerView.Core.Tests -c Release
 
-      - name: UI bauen
+      - name: Build UI
         working-directory: ui
         run: |
           npm ci
           npm run build
 
-      - name: App veröffentlichen (win-x64, self-contained)
+      - name: Publish app (win-x64, self-contained)
         run: >
           dotnet publish src/MultiServerView.App -c Release -r win-x64 --self-contained true
           -p:PublishReadyToRun=false -o publish
 
-      - name: WebView2-Runtime sicherstellen
+      - name: Ensure WebView2 runtime
         shell: pwsh
         run: |
           $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
-          if (Test-Path $key) { "WebView2 vorhanden: " + (Get-ItemProperty $key).pv }
+          if (Test-Path $key) { "WebView2 present: " + (Get-ItemProperty $key).pv }
           else {
             Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile wv2.exe
             Start-Process .\wv2.exe -ArgumentList '/silent','/install' -Wait
           }
 
-      # Ein echter SSH-Server auf dem Runner, damit Terminal, SFTP, Jump Host und Port Forwarding wirklich getestet werden.
-      - name: OpenSSH-Server für den Selbsttest einrichten
+      # A real SSH server on the runner so terminal, SFTP, jump host and port forwarding are really tested.
+      - name: Set up OpenSSH server for the self-test
         shell: pwsh
         continue-on-error: true
         run: |
@@ -59,10 +59,10 @@ jobs:
             if ($cap.State -ne 'Installed') { Add-WindowsCapability -Online -Name $cap.Name | Out-Null }
             $pw = 'Smoke-Test-Pw-123!'
             New-LocalUser -Name msvtest -Password (ConvertTo-SecureString $pw -AsPlainText -Force) -PasswordNeverExpires | Out-Null
-            # Ohne Gruppenmitgliedschaft fehlt dem Konto das Recht zur Netzwerk-Anmeldung (SSH)
+            # Without group membership the account lacks the right to sign in over the network (SSH)
             Add-LocalGroupMember -Group 'Users' -Member msvtest
             Start-Service sshd
-            # Das Runner-Image beschränkt SSH per AllowGroups - die Gruppe des Testbenutzers dazunehmen
+            # The runner image restricts SSH via AllowGroups - add the group of the test user
             $cfg = 'C:\ProgramData\ssh\sshd_config'
             $lines = Get-Content $cfg
             ($lines | Where-Object { $_ -match '^\s*(AllowGroups|AllowUsers|DenyGroups|DenyUsers|PasswordAuthentication)' }) | ForEach-Object { "sshd_config: $_" }
@@ -71,24 +71,24 @@ jobs:
             Restart-Service sshd
             "sshd: " + (Get-Service sshd).Status
             "MSV_SMOKE_SSH=127.0.0.1:22:msvtest:$pw" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          } catch { "OpenSSH-Server nicht verfügbar: $_" }
+          } catch { "OpenSSH server not available: $_" }
 
-      # Startet die fertige App wirklich (Fenster, WebView2, Vault, DPAPI, RDP-Control), bedient die Oberfläche
-      # per Skript und legt Screenshots + Bericht ab.
-      - name: Selbsttest der App auf Windows
+      # Really starts the finished app (window, WebView2, vault, DPAPI, RDP control), drives the interface
+      # by script and stores screenshots + report.
+      - name: App self-test on Windows
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force smoke | Out-Null
           $out = (Resolve-Path smoke).Path
           $p = Start-Process -FilePath .\publish\MultiServerView.exe -ArgumentList '--smoke', $out -PassThru
           $null = $p.Handle
-          if (-not $p.WaitForExit(240000)) { $p.Kill(); Add-Content "$out\report.txt" "FEHL Zeitüberschreitung (App hat sich nicht beendet)"; Get-Content "$out\report.txt"; if (Test-Path "$out\exit.log") { "--- Beenden ---"; Get-Content "$out\exit.log" }; exit 1 }
-          if (Test-Path "$out\report.txt") { Get-Content "$out\report.txt" } else { "Kein Bericht erzeugt" }
-          if (Test-Path "$out\exit.log") { "--- Beenden ---"; Get-Content "$out\exit.log" }
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); Add-Content "$out\report.txt" "FAIL Timeout (the app did not exit)"; Get-Content "$out\report.txt"; if (Test-Path "$out\exit.log") { "--- Exit ---"; Get-Content "$out\exit.log" }; exit 1 }
+          if (Test-Path "$out\report.txt") { Get-Content "$out\report.txt" } else { "No report produced" }
+          if (Test-Path "$out\exit.log") { "--- Exit ---"; Get-Content "$out\exit.log" }
           exit $p.ExitCode
 
-      # Die Screenshots zusätzlich als Text ins Log schreiben (für die Auswertung ohne Artefakt-Download)
-      - name: Screenshots als Text ausgeben
+      # Also write the screenshots as text into the log (for evaluation without an artifact download)
+      - name: Print screenshots as text
         if: always()
         shell: pwsh
         run: |
@@ -99,7 +99,7 @@ jobs:
             "===ENDPNG==="
           }
 
-      - name: Diagnose OpenSSH (nur bei Fehler)
+      - name: OpenSSH diagnostics (on failure only)
         if: failure()
         shell: pwsh
         continue-on-error: true
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Selbsttest-Screenshots
+          name: Selftest-Screenshots
           path: |
             smoke/*.png
             smoke/report.txt

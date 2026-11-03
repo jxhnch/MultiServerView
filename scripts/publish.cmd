@@ -1,5 +1,5 @@
 @echo off
-rem Baut eine portable Version nach .\publish\MultiServerView.exe  (braucht .NET 8 SDK und Node.js)
+rem Builds a portable version into .\publish\MultiServerView.exe  (needs the .NET 8 SDK and Node.js)
 setlocal
 cd /d "%~dp0\.."
 
@@ -16,10 +16,10 @@ echo [3/3] App...
 dotnet publish src\MultiServerView.App -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=false -o publish || goto :fail
 
 echo.
-echo Fertig: %CD%\publish\MultiServerView.exe
+echo Done: %CD%\publish\MultiServerView.exe
 exit /b 0
 
 :fail
 echo.
-echo FEHLER - siehe oben.
+echo ERROR - see above.
 exit /b 1

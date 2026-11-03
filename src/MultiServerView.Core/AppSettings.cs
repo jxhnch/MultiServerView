@@ -3,30 +3,30 @@ using System.Text.Json;
 namespace MultiServerView.Core;
 
 /// <summary>
-/// Einstellungen, die der Host-Prozess (C#) braucht: Verbindungen und RDP.
-/// Rein oberflächliche Einstellungen (Theme, Terminal-Aussehen, Auto-Sperre) liegen im UI.
-/// Bleiben lokal auf diesem PC (nicht im Vault, nicht in der Cloud).
+/// Settings the host process (C#) needs: connections and RDP.
+/// Purely cosmetic settings (theme, terminal appearance, auto-lock) live in the UI.
+/// Stay local on this PC (not in the vault, not synced).
 /// </summary>
 public sealed class AppSettings
 {
-    /// <summary>Sekunden zwischen Keep-Alive-Paketen (0 = aus). Hält SSH-Sitzungen hinter Firewalls offen.</summary>
+    /// <summary>Seconds between keep-alive packets (0 = off). Keeps SSH sessions open behind firewalls.</summary>
     public int SshKeepAliveSeconds { get; set; } = 30;
 
-    /// <summary>Wie lange auf den Verbindungsaufbau gewartet wird.</summary>
+    /// <summary>How long to wait for the connection to be established.</summary>
     public int SshConnectTimeoutSeconds { get; set; } = 15;
 
-    /// <summary>16, 24 oder 32 Bit.</summary>
+    /// <summary>16, 24 or 32 bit.</summary>
     public int RdpColorDepth { get; set; } = 32;
 
     public bool RdpClipboard { get; set; } = true;
 
-    /// <summary>Lokale Laufwerke im Remote-PC einbinden (Dateien per Explorer kopieren).</summary>
+    /// <summary>Redirect local drives into the remote PC (copy files with Explorer).</summary>
     public bool RdpDrives { get; set; }
 
-    /// <summary>Auflösung beim Ändern der Fenstergrösse anpassen (statt nur zu skalieren).</summary>
+    /// <summary>Adjust the resolution when the window size changes (instead of just scaling).</summary>
     public bool RdpDynamicResize { get; set; } = true;
 
-    /// <summary>Bei Zertifikatsproblemen des Servers warnen (sicherer, aber bei selbstsignierten Zertifikaten lästig).</summary>
+    /// <summary>Warn on certificate problems of the server (safer, but annoying with self-signed certificates).</summary>
     public bool RdpWarnOnCertificate { get; set; }
 
     public void Normalize()
@@ -80,11 +80,11 @@ public sealed class AppSettingsStore
                 return s;
             }
         }
-        catch (Exception ex) when (ex is IOException or JsonException) { /* kaputte Datei -> Standardwerte */ }
+        catch (Exception ex) when (ex is IOException or JsonException) { /* broken file -> defaults */ }
         return new AppSettings();
     }
 
-    /// <summary>Überträgt die Werte auf die globalen SSH-Voreinstellungen.</summary>
+    /// <summary>Applies the values to the global SSH defaults.</summary>
     private static void Apply(AppSettings s)
     {
         Ssh.SshConnector.ConnectTimeout = TimeSpan.FromSeconds(s.SshConnectTimeoutSeconds);

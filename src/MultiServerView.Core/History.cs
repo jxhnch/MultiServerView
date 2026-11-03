@@ -9,21 +9,21 @@ public sealed class HistoryEntry
     public string ServerName { get; set; } = "";
     public string Host { get; set; } = "";
 
-    /// <summary>"ssh", "sftp", "rdp", "vnc" oder "forward".</summary>
+    /// <summary>"ssh", "sftp", "rdp", "vnc" or "forward".</summary>
     public string Kind { get; set; } = "";
 
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset? EndedAt { get; set; }
 
-    /// <summary>"running", "ok" oder "error".</summary>
+    /// <summary>"running", "ok" or "error".</summary>
     public string Result { get; set; } = "running";
 
     public string Message { get; set; } = "";
 }
 
 /// <summary>
-/// Verbindungsverlauf ("Logs"). Liegt nur lokal (nicht im Vault, nicht in der Cloud) und enthält nie Passwörter
-/// oder Terminal-Inhalte - nur wann welcher Host verbunden war und ob es geklappt hat.
+/// Connection history ("Logs"). Stays local only (not in the vault, not synced) and never contains passwords
+/// or terminal content - only when which host was connected and whether it worked.
 /// </summary>
 public sealed class HistoryStore
 {
@@ -70,7 +70,7 @@ public sealed class HistoryStore
         }
     }
 
-    /// <summary>Neueste zuerst.</summary>
+    /// <summary>Newest first.</summary>
     public IReadOnlyList<HistoryEntry> List(int limit = 200)
     {
         lock (_gate) return _items.AsEnumerable().Reverse().Take(limit).ToList();
@@ -92,7 +92,7 @@ public sealed class HistoryStore
             if (File.Exists(_path))
                 return JsonSerializer.Deserialize<List<HistoryEntry>>(File.ReadAllText(_path), Json.Options) ?? new();
         }
-        catch (Exception ex) when (ex is IOException or JsonException) { /* kaputte Datei -> neu anfangen */ }
+        catch (Exception ex) when (ex is IOException or JsonException) { /* broken file -> start over */ }
         return new();
     }
 
@@ -104,6 +104,6 @@ public sealed class HistoryStore
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllText(_path, JsonSerializer.Serialize(_items, Json.Options));
         }
-        catch (IOException) { /* Verlauf ist nicht kritisch */ }
+        catch (IOException) { /* history is not critical */ }
     }
 }

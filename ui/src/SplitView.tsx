@@ -11,8 +11,8 @@ export interface SplitPane {
 }
 
 /**
- * Geteilte Ansicht: mehrere SSH-Terminals nebeneinander in einem Tab.
- * Mit "Broadcast" geht alles, was man in einem Terminal tippt, gleichzeitig an alle anderen.
+ * Split view: several SSH terminals side by side in one tab.
+ * With "Broadcast", everything you type into one terminal goes to all others at the same time.
  */
 export function SplitView({
   tabId,
@@ -44,7 +44,7 @@ export function SplitView({
   const senders = useRef(new Map<string, (text: string) => void>());
   const addRef = useRef<HTMLDivElement>(null);
 
-  // Gesamtstatus fürs Tab-Symbol
+  // Overall status for the tab icon
   useEffect(() => {
     const all = panes.map((p) => statuses[p.id] ?? 'connecting');
     onStatus(tabId, all.includes('error') ? 'error' : all.includes('connecting') ? 'connecting' : all.length > 0 && all.every((s) => s === 'closed') ? 'closed' : 'connected');
@@ -77,11 +77,11 @@ export function SplitView({
         <span className="tile sm md-neutral">
           <IconGrid size={13} />
         </span>
-        <span className="session-title">Geteilte Ansicht</span>
+        <span className="session-title">Split view</span>
         <span className="muted small">{panes.length} Terminals</span>
         <span className="grow" />
-        <button className={'bc-btn' + (broadcast ? ' on' : '')} onClick={() => setBroadcast((b) => !b)} title="Eingaben an alle Terminals gleichzeitig senden">
-          <IconBroadcast size={15} /> Broadcast {broadcast ? 'an' : 'aus'}
+        <button className={'bc-btn' + (broadcast ? ' on' : '')} onClick={() => setBroadcast((b) => !b)} title="Send input to all terminals at once">
+          <IconBroadcast size={15} /> Broadcast {broadcast ? 'on' : 'off'}
         </button>
         <div className="pop-anchor" ref={addRef}>
           <button onClick={() => setAdding((a) => !a)}>
@@ -111,9 +111,9 @@ export function SplitView({
 
       {broadcast && (
         <div className="bc-banner">
-          <IconBroadcast size={15} /> Broadcast aktiv: Alles, was du tippst, geht an alle {panes.length} Terminals. Vorsicht bei Befehlen mit Wirkung!
+          <IconBroadcast size={15} /> Broadcast active: everything you type goes to all {panes.length} terminals. Be careful with commands that have an effect!
           <button className="link" onClick={() => setBroadcast(false)}>
-            Ausschalten
+            Turn off
           </button>
         </div>
       )}
@@ -126,20 +126,20 @@ export function SplitView({
             <div key={p.id} className={'split-pane' + (focused === p.id ? ' focus' : '') + (broadcast ? ' bc' : '')} onFocusCapture={() => setFocused(p.id)}>
               <div className="pane-head">
                 {server ? <HostTile server={server} size="sm" /> : null}
-                <span className="pane-name">{server?.name ?? '(Host gelöscht)'}</span>
+                <span className="pane-name">{server?.name ?? '(host deleted)'}</span>
                 <span className={`status-dot ${st}`} />
                 <span className="grow" />
                 {server && (
-                  <button className="ghost icon-only" title="Host-Details" onClick={() => onEdit(server)}>
+                  <button className="ghost icon-only" title="Host details" onClick={() => onEdit(server)}>
                     <IconEdit size={13} />
                   </button>
                 )}
-                <button className="ghost icon-only" title="Neu verbinden" onClick={() => bump(p.id)}>
+                <button className="ghost icon-only" title="Reconnect" onClick={() => bump(p.id)}>
                   <IconRefresh size={14} />
                 </button>
                 <button
                   className="ghost icon-only"
-                  title="Dieses Terminal schliessen"
+                  title="Close this terminal"
                   onClick={() => {
                     senders.current.delete(p.id);
                     onPanesChange(panes.filter((x) => x.id !== p.id));
@@ -170,7 +170,7 @@ export function SplitView({
             </div>
           );
         })}
-        {panes.length === 0 && <div className="muted pad-sm">Keine Terminals mehr. Mit «+ Host» fügst du eines hinzu.</div>}
+        {panes.length === 0 && <div className="muted pad-sm">No terminals left. Add one with "+ Host".</div>}
       </div>
     </div>
   );

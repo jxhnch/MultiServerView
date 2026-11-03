@@ -229,7 +229,7 @@ export const IconDuplicate = (p: IconProps) => (
   </Svg>
 );
 
-/** Passendes Icon zum Protokoll. */
+/** Matching icon for the protocol. */
 export function ProtocolIcon({ protocol, size = 16 }: { protocol: Protocol; size?: number }) {
   if (protocol === 'rdp') return <IconMonitor size={size} />;
   if (protocol === 'vnc') return <IconScreen size={size} />;
@@ -254,5 +254,11 @@ export const IconBroadcast = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="2" />
     <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2" />
+  </Svg>
+);
+export const IconCube = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" />
+    <path d="m4 7.5 8 4.5 8-4.5M12 12v9" />
   </Svg>
 );

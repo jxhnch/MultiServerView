@@ -1,12 +1,12 @@
 import type { Server } from './types';
 
-/** Alle Woerter der Suche muessen irgendwo vorkommen. Treffer am Wortanfang / im Namen zaehlen mehr. */
+/** All words of the search must occur somewhere. Hits at the start of a word / in the name count more. */
 export function scoreServer(s: Server, query: string): number {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return 1;
 
   const name = s.name.toLowerCase();
-  const rest = [s.host, s.group, s.username, s.protocol, ...s.tags].join(' ').toLowerCase();
+  const rest = [s.host, s.workspace, s.group, s.username, s.protocol, ...s.tags].join(' ').toLowerCase();
 
   let score = 0;
   for (const t of tokens) {
@@ -30,17 +30,17 @@ export function filterServers(servers: Server[], query: string): Server[] {
 export const recency = (s: Server) => (s.lastUsed ? Date.parse(s.lastUsed) : 0);
 
 export function timeAgo(iso: string | null): string {
-  if (!iso) return 'nie';
+  if (!iso) return 'never';
   const min = Math.round((Date.now() - Date.parse(iso)) / 60_000);
-  if (min < 1) return 'gerade eben';
-  if (min < 60) return `vor ${min} Min`;
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
   const h = Math.round(min / 60);
-  if (h < 24) return `vor ${h} Std`;
+  if (h < 24) return `${h} h ago`;
   const d = Math.round(h / 24);
-  return `vor ${d} ${d === 1 ? 'Tag' : 'Tagen'}`;
+  return `${d} ${d === 1 ? 'day' : 'days'} ago`;
 }
 
-/** Erkennt "[ssh://|rdp://|vnc://][user@]host[:port]" (auch mit führendem "ssh "). */
+/** Recognizes "[ssh://|rdp://|vnc://][user@]host[:port]" (also with a leading "ssh "). */
 export function parseTarget(input: string): Partial<Server> | null {
   const text = input.trim().replace(/^ssh\s+/i, '');
   const m = /^(?:(ssh|rdp|vnc):\/\/)?(?:([^@\s]+)@)?([A-Za-z0-9._-]+|\[[0-9a-fA-F:]+\])(?::(\d{1,5}))?$/.exec(text);

@@ -11,7 +11,7 @@ public class FeatureStoreTests : IDisposable
     private VaultStore NewStore()
     {
         var s = new VaultStore(Path.Combine(_dir, "vault.msv"));
-        s.Create("master-passwort");
+        s.Create("master-password");
         return s;
     }
     public void Dispose()
@@ -23,17 +23,17 @@ public class FeatureStoreTests : IDisposable
     public void Identity_overrides_credentials_and_deleting_it_detaches_hosts()
     {
         var store = NewStore();
-        var id = store.UpsertIdentity(new IdentityEntry { Name = "admin", Username = "root", Password = "geheim" });
-        var server = store.Upsert(new ServerEntry { Name = "a", Host = "h", Username = "alt", Password = "alt", IdentityId = id.Id });
+        var id = store.UpsertIdentity(new IdentityEntry { Name = "admin", Username = "root", Password = "secret" });
+        var server = store.Upsert(new ServerEntry { Name = "a", Host = "h", Username = "old", Password = "old", IdentityId = id.Id });
 
         var resolved = store.FindResolved(server.Id)!;
         Assert.Equal("root", resolved.Username);
-        Assert.Equal("geheim", resolved.Password);
-        Assert.Equal("alt", store.Find(server.Id)!.Username); // Original bleibt unverändert
+        Assert.Equal("secret", resolved.Password);
+        Assert.Equal("old", store.Find(server.Id)!.Username); // original stays unchanged
 
         store.DeleteIdentity(id.Id);
         Assert.Equal("", store.Find(server.Id)!.IdentityId);
-        Assert.Equal("alt", store.FindResolved(server.Id)!.Username);
+        Assert.Equal("old", store.FindResolved(server.Id)!.Username);
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class FeatureStoreTests : IDisposable
         store.UpsertSnippet(new SnippetEntry { Name = "Updates", Command = "apt update && apt upgrade -y" });
         store.UpsertForward(new PortForwardEntry { Name = "DB", ServerId = server.Id, BindPort = 5433, DestHost = "127.0.0.1", DestPort = 5432 });
         store.Lock();
-        store.Unlock("master-passwort");
+        store.Unlock("master-password");
 
         Assert.Equal("apt update && apt upgrade -y", store.ListSnippets().Single().Command);
         Assert.Equal(5432, store.ListForwards().Single().DestPort);
@@ -94,7 +94,7 @@ public class FeatureStoreTests : IDisposable
     public void New_item_types_survive_a_cloud_merge()
     {
         var store = NewStore();
-        store.UpsertSnippet(new SnippetEntry { Name = "lokal", Command = "ls" });
+        store.UpsertSnippet(new SnippetEntry { Name = "local", Command = "ls" });
         var local = store.Snapshot();
         var remote = new VaultData { Snippets = { new SnippetEntry { Id = "r1", Name = "cloud", Command = "pwd", UpdatedAt = DateTimeOffset.UtcNow } } };
 
@@ -116,21 +116,21 @@ public class HistoryTests : IDisposable
     public void Records_start_and_end_and_lists_newest_first()
     {
         var h = new HistoryStore(_path);
-        var s1 = new ServerEntry { Id = "1", Name = "eins", Host = "h1", Port = 22 };
-        var s2 = new ServerEntry { Id = "2", Name = "zwei", Host = "h2", Port = 22 };
+        var s1 = new ServerEntry { Id = "1", Name = "one", Host = "h1", Port = 22 };
+        var s2 = new ServerEntry { Id = "2", Name = "two", Host = "h2", Port = 22 };
         var a = h.Begin(s1, "ssh");
         h.End(a, true);
         var b = h.Begin(s2, "sftp");
-        h.End(b, false, "Zeitüberschreitung");
+        h.End(b, false, "Timeout");
 
         var list = h.List();
-        Assert.Equal(new[] { "zwei", "eins" }, list.Select(x => x.ServerName));
+        Assert.Equal(new[] { "two", "one" }, list.Select(x => x.ServerName));
         Assert.Equal("error", list[0].Result);
         Assert.Equal("ok", list[1].Result);
 
-        // bleibt nach Neustart erhalten, enthält keine Passwörter
+        // survives a restart, contains no passwords
         Assert.Equal(2, new HistoryStore(_path).List().Count);
-        Assert.DoesNotContain("Passwort", File.ReadAllText(_path));
+        Assert.DoesNotContain("Password", File.ReadAllText(_path));
     }
 }
 
@@ -163,12 +163,12 @@ public class LocalFsTests : IDisposable
     [Fact]
     public void Browse_lists_folders_first_and_gives_parent()
     {
-        Directory.CreateDirectory(Path.Combine(_dir, "b-ordner"));
-        File.WriteAllText(Path.Combine(_dir, "a-datei.txt"), "hallo");
+        Directory.CreateDirectory(Path.Combine(_dir, "b-folder"));
+        File.WriteAllText(Path.Combine(_dir, "a-file.txt"), "hallo");
 
         var r = LocalFs.Browse(_dir);
 
-        Assert.Equal(new[] { "b-ordner", "a-datei.txt" }, r.Entries.Select(e => e.Name));
+        Assert.Equal(new[] { "b-folder", "a-file.txt" }, r.Entries.Select(e => e.Name));
         Assert.True(r.Entries[0].IsDir);
         Assert.Equal(5, r.Entries[1].Size);
         Assert.Equal(Directory.GetParent(_dir)!.FullName, r.Parent);
@@ -177,7 +177,7 @@ public class LocalFsTests : IDisposable
     [Fact]
     public void Browse_throws_for_missing_folder()
     {
-        Assert.Throws<DirectoryNotFoundException>(() => LocalFs.Browse(Path.Combine(_dir, "gibts-nicht")));
+        Assert.Throws<DirectoryNotFoundException>(() => LocalFs.Browse(Path.Combine(_dir, "does-not-exist")));
     }
 
     [Theory]

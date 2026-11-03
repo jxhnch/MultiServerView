@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 
-/** Kleiner Eingabedialog (statt window.prompt, das in WebView2 hässlich und unzuverlässig ist). */
+/** Small input dialog (instead of window.prompt, which is ugly and unreliable in WebView2). */
 export function PromptDialog({
   title,
   label,
@@ -38,7 +38,7 @@ export function PromptDialog({
         <div className="actions">
           <span className="grow" />
           <button type="button" onClick={onClose}>
-            Abbrechen
+            Cancel
           </button>
           <button className="primary" disabled={!value.trim()}>
             {confirmLabel}

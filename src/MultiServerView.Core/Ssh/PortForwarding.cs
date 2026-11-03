@@ -3,7 +3,7 @@ using Renci.SshNet;
 
 namespace MultiServerView.Core.Ssh;
 
-/// <summary>Eine laufende Port-Weiterleitung. Hat eine eigene SSH-Verbindung, damit sie unabhängig von Terminal-Tabs läuft.</summary>
+/// <summary>A running port forward. Has its own SSH connection so it runs independently of terminal tabs.</summary>
 public sealed class ForwardRunner : IDisposable
 {
     private readonly PortForwardEntry _rule;
@@ -15,7 +15,7 @@ public sealed class ForwardRunner : IDisposable
     private SshClient? _client;
     private int _stopped;
 
-    /// <summary>Weiterleitung wurde beendet (Grund oder null bei normalem Stopp).</summary>
+    /// <summary>The forward ended (reason, or null on a normal stop).</summary>
     public event Action<string?>? Stopped;
 
     public ForwardRunner(PortForwardEntry rule, ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check, JumpResolver? jumps = null)
@@ -29,9 +29,9 @@ public sealed class ForwardRunner : IDisposable
 
     public async Task StartAsync()
     {
-        if (_rule.BindPort is < 1 or > 65535) throw new ArgumentException("Der lokale Port muss zwischen 1 und 65535 liegen.");
+        if (_rule.BindPort is < 1 or > 65535) throw new ArgumentException("The local port must be between 1 and 65535.");
         if (_rule.Type != ForwardType.Dynamic && (string.IsNullOrWhiteSpace(_rule.DestHost) || _rule.DestPort is < 1 or > 65535))
-            throw new ArgumentException("Ziel-Adresse und Ziel-Port fehlen.");
+            throw new ArgumentException("Destination address and port are missing.");
 
         var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check);
         var client = new SshClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
@@ -67,27 +67,27 @@ public sealed class ForwardRunner : IDisposable
         catch (Exception ex)
         {
             Dispose();
-            throw new SshConnectException($"Port {_rule.BindPort} konnte nicht geöffnet werden: {ex.Message}", ex);
+            throw new SshConnectException($"Port {_rule.BindPort} could not be opened: {ex.Message}", ex);
         }
     }
 
     private void Stop(string? reason)
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
-        try { _client?.Dispose(); } catch { /* egal beim Aufräumen */ }
-        try { _tunnel?.Dispose(); } catch { /* egal beim Aufräumen */ }
+        try { _client?.Dispose(); } catch { /* does not matter during cleanup */ }
+        try { _tunnel?.Dispose(); } catch { /* does not matter during cleanup */ }
         Stopped?.Invoke(reason);
     }
 
     public void Dispose() => Stop(null);
 }
 
-/// <summary>Verwaltet alle laufenden Port-Weiterleitungen (nach Regel-Id).</summary>
+/// <summary>Manages all running port forwards (by rule id).</summary>
 public sealed class PortForwardManager : IDisposable
 {
     private readonly ConcurrentDictionary<string, ForwardRunner> _running = new();
 
-    /// <summary>(Regel-Id, läuft, Fehler/Grund)</summary>
+    /// <summary>(rule id, running, error/reason)</summary>
     public event Action<string, bool, string?>? StatusChanged;
 
     public bool IsRunning(string ruleId) => _running.ContainsKey(ruleId);
