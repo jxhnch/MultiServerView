@@ -112,7 +112,7 @@ dotnet run --project src/MultiServerView.App
 | Vault, Crypto, Merge, Sync-Logik, SSH, SFTP, Port Forwarding, VNC-Brücke, Import | **Automatisch getestet** (92 Tests; SSH, SFTP und alle drei Weiterleitungs-Arten gegen einen echten sshd, Sync gegen simulierte Supabase-API) |
 | UI (Tabs, Palette, Keychain, SFTP, Snippets, Weiterleitungen, Formulare, Terminal) | Im Browser mit Playwright durchgespielt (Demo-Daten und Demo-Shell) |
 | VNC Ende-zu-Ende | Getestet: noVNC → C#-Brücke → echter VNC-Server |
-| Windows-Fenster (WebView2), **RDP-Control**, DPAPI, SSH/SFTP/Jump/Tunnel auf Windows | **Bei jedem Build auf einem echten Windows-Rechner getestet** (die App startet, wird per Skript bedient, macht Screenshots; gegen einen echten OpenSSH-Server). Noch nicht getestet: deine eigenen Server und ein RDP-Zielrechner mit gespeichertem Passwort. Falls RDP hakt: «In Windows-RDP öffnen» startet mstsc als Ausweg |
+| Windows-Fenster (WebView2), **RDP-Control**, DPAPI, SSH/SFTP/Jump/Tunnel auf Windows | **Bei jedem Build auf einem echten Windows-Rechner getestet** (rund 40 Prüfungen: die App startet, wird per Skript bedient, macht Screenshots; gegen einen echten OpenSSH-Server). Noch nicht getestet: deine eigenen Server und ein RDP-Zielrechner mit gespeichertem Passwort. Falls RDP hakt: «In Windows-RDP öffnen» startet mstsc als Ausweg |
 | Echter Supabase-Server | Noch nicht gegen ein echtes Projekt getestet (nur gegen die Simulation) |
 
 ## Bekannte Einschränkungen

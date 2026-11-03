@@ -9,9 +9,10 @@
 Unter **Artifacts** liegt auch `Selbsttest-Screenshots`: Bilder der App, aufgenommen auf einem echten Windows-Rechner beim automatischen Test.
 
 ## Was schon automatisch auf Windows geprüft wurde (bei jedem Build)
-Fenster und Oberfläche starten, Vault erstellen/sperren/entsperren, Master-Passwort ändern, Windows-Verschlüsselung (DPAPI),
-Einstellungen speichern, **RDP-Control im Tab**, **SSH-Terminal** (echte Verbindung), **SFTP** mit Ordnern, **Jump Host**, **Port Forwarding**,
-Schliessen ohne hängenden Prozess.
+Rund 40 Prüfungen auf einem echten Windows-Rechner, unter anderem: Fenster und Oberfläche starten, Vault erstellen/sperren/entsperren,
+Master-Passwort ändern, Windows-Verschlüsselung (DPAPI), Einstellungen speichern, **RDP-Control im Tab** (inkl. schnelles Schliessen),
+**SSH-Terminal** gegen einen echten OpenSSH-Server (Befehl, Fenstergrösse, Host-Key, Betriebssystem-Erkennung), **SFTP** mit Ordnern und
+Windows-Pfaden, **Jump Host**, **Port Forwarding**, Terminal und SFTP in der echten Oberfläche, Schliessen ohne hängenden Prozess.
 
 ## Was nur du prüfen kannst (5 Minuten)
 - [ ] **Deine echten Server**: Ersten SSH-Host anlegen (Passwort **und** Key probieren), verbinden, Befehle tippen, Fenster verkleinern/vergrössern.
