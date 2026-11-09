@@ -2526,3 +2526,15 @@ label {
     animation-duration: 3s;
   }
 }
+
+.code-block {
+  margin: 6px 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}

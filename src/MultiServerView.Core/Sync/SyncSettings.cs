@@ -21,8 +21,9 @@ public sealed class SyncSettings
 {
     public const string ModeSupabase = "supabase";
     public const string ModeFolder = "folder";
+    public const string ModeWebDav = "webdav";
 
-    /// <summary>"supabase" (default) or "folder".</summary>
+    /// <summary>"supabase" (default), "folder" or "webdav" (Url = folder address, Email = user name, Password = (app) password).</summary>
     public string Mode { get; set; } = ModeSupabase;
 
     /// <summary>Sync folder (only with Mode = folder), e.g. a folder in OneDrive.</summary>
@@ -35,9 +36,12 @@ public sealed class SyncSettings
     public DateTimeOffset? LastSync { get; set; }
 
     public bool IsFolder => Mode == ModeFolder;
+    public bool IsWebDav => Mode == ModeWebDav;
 
     public bool IsConfigured =>
-        IsFolder ? Folder.Length > 0 : Url.Length > 0 && AnonKey.Length > 0 && Email.Length > 0 && Password.Length > 0;
+        IsFolder ? Folder.Length > 0
+        : IsWebDav ? Url.Length > 0 && Email.Length > 0 && Password.Length > 0
+        : Url.Length > 0 && AnonKey.Length > 0 && Email.Length > 0 && Password.Length > 0;
 }
 
 /// <summary>Stores <see cref="SyncSettings"/> locally; the cloud password is stored protected.</summary>
@@ -71,7 +75,7 @@ public sealed class SyncSettingsStore
             var d = JsonSerializer.Deserialize<Disk>(File.ReadAllText(_path), Json.Options) ?? new Disk();
             return new SyncSettings
             {
-                Mode = d.Mode == SyncSettings.ModeFolder ? SyncSettings.ModeFolder : SyncSettings.ModeSupabase,
+                Mode = d.Mode is SyncSettings.ModeFolder or SyncSettings.ModeWebDav ? d.Mode : SyncSettings.ModeSupabase,
                 Folder = d.Folder,
                 Url = d.Url,
                 AnonKey = d.AnonKey,

@@ -26,6 +26,13 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - name: Version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}'.TrimStart('v')
+          "v=$v" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
       - name: Tests (Core)
         run: dotnet test tests/MultiServerView.Core.Tests -c Release
 
@@ -38,7 +45,7 @@ jobs:
       - name: Publish app (win-x64, self-contained)
         run: >
           dotnet publish src/MultiServerView.App -c Release -r win-x64 --self-contained true
-          -p:PublishReadyToRun=false -o publish
+          -p:PublishReadyToRun=false -p:Version=${{ steps.ver.outputs.v }} -o publish
 
       - name: Create portable ZIP
         shell: pwsh

@@ -143,7 +143,7 @@ function loadMock(): MockState {
     snippets: [],
     forwards: [],
     history: [],
-    settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false },
+    settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false, mcpEnabled: false, mcpPort: 7676, mcpToken: '' },
     sync: { configured: false, mode: 'folder', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSync: null },
   };
 }
@@ -457,6 +457,12 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return null;
     case 'teamviewer.open':
       return onlyNative('TeamViewer');
+    case 'mcp.status':
+      return { running: false, error: null };
+    case 'update.check':
+      return { current: 'dev', available: false, version: '', notes: '', pageUrl: '', canInstall: false };
+    case 'update.install':
+      return onlyNative('Updating');
     case 'rdp.external':
       return onlyNative('RDP');
 
@@ -542,7 +548,9 @@ async function callMock(method: string, params: any): Promise<unknown> {
         configured:
           params.mode === 'folder'
             ? !!params.folder
-            : !!(params.url && params.anonKey && params.email && (params.password || mock.sync.hasPassword)),
+            : params.mode === 'webdav'
+              ? !!(params.url && params.email && (params.password || mock.sync.hasPassword))
+              : !!(params.url && params.anonKey && params.email && (params.password || mock.sync.hasPassword)),
         mode: params.mode,
         folder: params.folder ?? '',
         url: params.url,
@@ -775,6 +783,15 @@ export interface Rect {
   h: number;
 }
 
+export interface UpdateStatus {
+  current: string;
+  available: boolean;
+  version: string;
+  notes: string;
+  pageUrl: string;
+  canInstall: boolean;
+}
+
 export interface ImportOutcome {
   imported: number;
   skipped: number;
@@ -794,7 +811,7 @@ export interface ProxmoxInput {
 }
 
 export interface SyncConfigInput {
-  mode: 'folder' | 'supabase';
+  mode: 'folder' | 'webdav' | 'supabase';
   folder: string;
   url: string;
   anonKey: string;
@@ -850,6 +867,9 @@ export const api = {
   rdpSuspend: (suspended: boolean) => call<void>('rdp.suspend', { suspended }),
   rdpExternal: (serverId: string) => call<void>('rdp.external', { serverId }),
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
+  mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),
+  updateCheck: () => call<UpdateStatus>('update.check'),
+  updateInstall: () => call<void>('update.install'),
 
   identitiesList: () => call<Identity[]>('identities.list'),
   identitiesSave: (i: { id?: string; name: string; username: string; password?: string; auth: 'password' | 'key'; keyId: string }) =>

@@ -5,6 +5,7 @@ import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
 import { PromptDialog } from './Prompt';
+import { offerUpdate } from './updates';
 import { SessionCloseContext } from './SessionFrame';
 import { Keychain } from './Keychain';
 import { CloudPanel } from './CloudPanel';
@@ -324,6 +325,17 @@ export function App() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
+
+  // Once per start: look for a newer version (can be switched off in Settings).
+  const updateAsked = useRef(false);
+  useEffect(() => {
+    if (!isNative || phase !== 'ready' || updateAsked.current || !getUiSettings().checkUpdates) return;
+    updateAsked.current = true;
+    void api
+      .updateCheck()
+      .then((u) => (u.available ? offerUpdate(u, toast) : undefined))
+      .catch(() => undefined);
+  }, [phase, toast]);
 
   // RDP is a native window above the UI -> hide it briefly while overlays are open
   const drawerOpen = panel !== null && active !== HOME;

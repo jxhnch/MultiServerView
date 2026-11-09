@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using MultiServerView.Core;
+using MultiServerView.Core.Update;
 using MultiServerView.Core.Import;
 using MultiServerView.Core.Proxmox;
 using MultiServerView.Core.Vmware;
@@ -47,6 +48,7 @@ internal sealed class Bridge : IDisposable
     private readonly ConcurrentDictionary<string, string> _historyIds = new();
     private readonly PortForwardManager _forwards = new();
     private readonly WebSocketTcpProxy _vncProxy = new();
+    private readonly McpService _mcp;
 
     public Bridge(VaultStore vault, SyncService sync, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit,
         Func<string, Task<string?>> pickSavePath, Func<string, Task<string?>> pickFolder, Func<string, bool> window)
@@ -63,6 +65,8 @@ internal sealed class Bridge : IDisposable
         _rdp = rdp;
         _emit = emit;
         _auto = new AutoSync(vault, sync, emit);
+        _mcp = new McpService(vault, CheckHost, Jumps);
+        _mcp.Apply(settings.Current);
     }
 
     /// <summary>Resolves jump hosts (including credentials from identities and keys) for connection chains.</summary>
@@ -294,6 +298,29 @@ internal sealed class Bridge : IDisposable
                 return null;
             }
 
+            case "update.check":
+            {
+                var current = AppVersion;
+                var info = await UpdateChecker.CheckAsync(_http, current);
+                return new { current, available = info != null, version = info?.Version ?? "", notes = info?.Notes ?? "", pageUrl = info?.PageUrl ?? "", canInstall = info?.SetupUrl != null && IsInstalled() };
+            }
+            case "update.install":
+            {
+                var info = await UpdateChecker.CheckAsync(_http, AppVersion);
+                if (info?.SetupUrl == null || !UpdateChecker.IsGitHubUrl(info.SetupUrl)) throw new InvalidOperationException("No installer found for the new version. Download it from the releases page.");
+                if (!IsInstalled()) throw new InvalidOperationException("This is the portable version. Download the new ZIP from the releases page.");
+                var file = Path.Combine(Path.GetTempPath(), "MultiServerView-Setup-" + info.Version + ".exe");
+                using (var response = await _http.GetAsync(info.SetupUrl, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    response.EnsureSuccessStatusCode();
+                    await using var fs = File.Create(file);
+                    await response.Content.CopyToAsync(fs);
+                }
+                // Inno Setup: silent, closes this app, starts the new version when done.
+                Process.Start(new ProcessStartInfo(file, "/SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /NOCANCEL") { UseShellExecute = true });
+                _window("close");
+                return null;
+            }
             case "teamviewer.open":
             {
                 // Hands the ID and password to the installed TeamViewer client (no embedded session).
@@ -488,7 +515,13 @@ internal sealed class Bridge : IDisposable
             case "settings.get":
                 return _settings.Current;
             case "settings.save":
-                return _settings.Save(p.Deserialize<AppSettings>(Json.Options) ?? throw new ArgumentException("Invalid settings."));
+            {
+                var saved = _settings.Save(p.Deserialize<AppSettings>(Json.Options) ?? throw new ArgumentException("Invalid settings."));
+                _mcp.Apply(saved);
+                return saved;
+            }
+            case "mcp.status":
+                return new { running = _mcp.Running, error = _mcp.Error };
             case "vault.changePassword":
             {
                 _vault.ChangePassword(Str(p, "oldPassword"), Str(p, "newPassword"));
@@ -839,6 +872,13 @@ internal sealed class Bridge : IDisposable
         }
     }
 
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(5) };
+
+    private static string AppVersion => typeof(Bridge).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>Installed by the setup wizard (the uninstaller sits next to the exe) - otherwise it is the portable ZIP.</summary>
+    private static bool IsInstalled() => File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
+
     private static string? FindTeamViewer()
     {
         foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) })
@@ -1000,7 +1040,7 @@ internal sealed class Bridge : IDisposable
         var password = Opt(p, "password");
         return new SyncSettings
         {
-            Mode = Opt(p, "mode") == SyncSettings.ModeFolder ? SyncSettings.ModeFolder : SyncSettings.ModeSupabase,
+            Mode = Opt(p, "mode") is SyncSettings.ModeFolder or SyncSettings.ModeWebDav ? Opt(p, "mode") : SyncSettings.ModeSupabase,
             Folder = Opt(p, "folder").Trim(),
             Url = Opt(p, "url").Trim(),
             AnonKey = Opt(p, "anonKey").Trim(),
@@ -1051,6 +1091,7 @@ internal sealed class Bridge : IDisposable
     public void Dispose()
     {
         _auto.Dispose();
+        _mcp.Dispose();
         _forwards.Dispose();
         foreach (var id in _tunnels.Keys.ToList()) CloseTunnel(id);
         foreach (var t in _transfers.Values) t.Cancel();

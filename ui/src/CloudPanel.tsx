@@ -16,7 +16,7 @@ export function CloudPanel({
   onChanged: () => Promise<void>;
   toast: (msg: string, kind?: 'ok' | 'error') => void;
 }) {
-  const [mode, setMode] = useState<'folder' | 'supabase'>('folder');
+  const [mode, setMode] = useState<'folder' | 'webdav' | 'supabase'>('folder');
   const [folder, setFolder] = useState('');
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
@@ -35,7 +35,12 @@ export function CloudPanel({
   }, [info]);
 
   const cfg = (): SyncConfigInput => ({ mode, folder: folder.trim(), url: url.trim(), anonKey: anonKey.trim(), email: email.trim(), password });
-  const ready = mode === 'folder' ? !!folder.trim() : url.trim() && anonKey.trim() && email.trim() && (password || info?.hasPassword);
+  const ready =
+    mode === 'folder'
+      ? !!folder.trim()
+      : mode === 'webdav'
+        ? url.trim() && email.trim() && (password || info?.hasPassword)
+        : url.trim() && anonKey.trim() && email.trim() && (password || info?.hasPassword);
 
   async function pickFolder() {
     try {
@@ -119,6 +124,9 @@ export function CloudPanel({
           <button type="button" className={mode === 'folder' ? 'on' : ''} onClick={() => setMode('folder')}>
             Folder <span className="muted small">(OneDrive, iCloud, Syncthing …)</span>
           </button>
+          <button type="button" className={mode === 'webdav' ? 'on' : ''} onClick={() => setMode('webdav')}>
+            WebDAV <span className="muted small">(Nextcloud, NAS …)</span>
+          </button>
           <button type="button" className={mode === 'supabase' ? 'on' : ''} onClick={() => setMode('supabase')}>
             Supabase <span className="muted small">(own account)</span>
           </button>
@@ -137,6 +145,33 @@ export function CloudPanel({
             <p className="muted small">
               The app stores the encrypted file <code>MultiServerView-Vault.msv</code> there. Your folder service brings it to your other PCs,
               and the app merges the changes. Without the master password the file is unreadable. On the second PC, choose the same folder.
+            </p>
+          </>
+        ) : mode === 'webdav' ? (
+          <>
+            <label>
+              WebDAV folder address
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example.com/remote.php/dav/files/you/MultiServerView" className="mono" />
+            </label>
+            <div className="row">
+              <label className="grow">
+                User name
+                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you" />
+              </label>
+              <label className="grow">
+                Password (use an app password)
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={info?.hasPassword ? '•••••••• (unchanged)' : 'Password or app password'}
+                />
+              </label>
+            </div>
+            <p className="muted small">
+              Works with any WebDAV server: Nextcloud/ownCloud, Synology and other NAS boxes, nginx/Apache, many hosters. Create the folder first.
+              Only the encrypted file <code>MultiServerView-Vault.msv</code> is uploaded; without the master password it is unreadable.
+              The address must use https://. On the second PC choose the same folder and use "New device? Load vault …".
             </p>
           </>
         ) : (

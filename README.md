@@ -32,6 +32,7 @@
 - **SFTP** – two panes (this PC / server), drag & drop, whole folders with progress and cancel, rename, delete, **edit remote text files** in place (with a "changed on the server" safety check).
 - **RDP** – the native Windows RDP control (the same as mstsc / mRemoteNG) right inside a tab.
 - **VNC** – noVNC in a tab, including Ctrl+Alt+Del and clipboard.
+- **TeamViewer** – save a partner ID (and password) as a host and start the installed TeamViewer client with one click.
 - **Jump hosts** – chain one or more SSH hosts for SSH, SFTP, tunnels, VNC and RDP.
 - **Port forwarding** – local (-L), remote (-R) and SOCKS5 (-D), start/stop with one click.
 - **Split view** – several terminals side by side in one tab, with broadcast (type once, send to all).
@@ -48,9 +49,12 @@ Bring your servers with you. Duplicates are skipped, existing hosts stay untouch
 - **VMware Workstation** – reads your VM library, including addresses from running VMs and the VMware DHCP leases.
 - **mRemoteNG**, **OpenSSH config** (`~/.ssh/config`), **PuTTY** (directly from Windows or a `.reg` file) and **CSV**.
 
+### Let AI work on your servers
+An optional **MCP server** (off by default) lets AI tools such as Claude Code list your hosts, run commands and read, write and list files over SSH/SFTP. Enable it in *Settings → AI tools*, copy the ready-made `claude mcp add …` command and you are done. It listens on `127.0.0.1` only and needs the token shown there; anything that has the token can act on your hosts while the vault is unlocked, so only enable it when you want that.
+
 ### Protect and sync
 - **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
-- **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
+- **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …), a **WebDAV** server (Nextcloud, NAS, …) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
 - **Clear vault** – wipe everything with three confirmation steps. Change the master password, set an auto-lock, back up the vault.
 
 ## Download and install
@@ -59,7 +63,7 @@ Get the latest version from the **[Releases page](https://github.com/jxhnch/Mult
 
 | File | For |
 |---|---|
-| `MultiServerView-Setup-x.y.z.exe` | Installer wizard (no admin rights needed, Start menu entry, uninstaller) |
+| `MultiServerView-Setup-x.y.z.exe` | Installer wizard (no admin rights needed, Start menu entry, uninstaller). Updates itself: the app checks GitHub for a newer release at startup and installs it on request (switch off in *Settings → About*) |
 | `MultiServerView-x.y.z-portable-win-x64.zip` | Portable: unpack anywhere and run `MultiServerView.exe` |
 
 Nothing else has to be installed: .NET is bundled and the WebView2 runtime is part of Windows 10/11.
@@ -114,6 +118,8 @@ When the focus is inside an **RDP session**, all keys go to the remote PC (as in
 ## Set up sync
 
 **Shared folder (easiest):** open **Sync**, choose a folder that your folder service already syncs (for example in OneDrive) and connect. On the second PC choose *"New device? Load vault from a sync folder or cloud"* on the unlock screen, pick the same folder and unlock with the **same master password**.
+
+**WebDAV (Nextcloud, Synology and other NAS, nginx/Apache, many hosters):** create a folder on the server, open **Sync**, choose WebDAV, enter the folder address (https://), user name and password (use an app password where offered). Conflicts are detected with the ETag, so devices never overwrite each other. On the second PC choose the same folder under *"New device? Load vault …"*.
 
 **Supabase (about 3 minutes):**
 1. Create a free project on [supabase.com](https://supabase.com).

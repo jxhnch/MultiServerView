@@ -59,6 +59,43 @@ public sealed partial class MainForm
         catch (Exception ex) { Check("Bildschirmfoto " + name, false, ex.Message); }
     }
 
+    /// <summary>Turns the MCP server on, talks to it over real HTTP and turns it off again.</summary>
+    private async Task SmokeMcpAsync()
+    {
+        const int port = 47688;
+        try
+        {
+            await Call("settings.save", new { sshKeepAliveSeconds = 45, sshConnectTimeoutSeconds = 20, rdpColorDepth = 24, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false, mcpEnabled = true, mcpPort = port, mcpToken = "" });
+            var token = (await Call("settings.get")).GetProperty("mcpToken").GetString() ?? "";
+            Check("MCP: token generated", token.Length >= 32);
+            Check("MCP: server running", (await Call("mcp.status")).GetProperty("running").GetBoolean());
+
+            using var http = new HttpClient();
+            async Task<(int Status, string Body)> Post(string json, string? bearer)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}/mcp") { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+                if (bearer != null) req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + bearer);
+                using var res = await http.SendAsync(req);
+                return ((int)res.StatusCode, await res.Content.ReadAsStringAsync());
+            }
+
+            Check("MCP: request without token is refused", (await Post("{}", null)).Status == 401);
+            Check("MCP: wrong token is refused", (await Post("{}", "nope")).Status == 401);
+            var list = await Post("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", token);
+            Check("MCP: tools are listed", list.Status == 200 && list.Body.Contains("run_command") && list.Body.Contains("list_directory"), Snip(list.Body, 80));
+            var hosts = await Post("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_hosts\",\"arguments\":{}}}", token);
+            Check("MCP: list_hosts returns the vault hosts", hosts.Status == 200 && hosts.Body.Contains("isError\":false"), Snip(hosts.Body, 120));
+        }
+        catch (Exception ex)
+        {
+            Check("MCP server", false, ex.Message);
+        }
+        finally
+        {
+            await Call("settings.save", new { sshKeepAliveSeconds = 45, sshConnectTimeoutSeconds = 20, rdpColorDepth = 24, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false, mcpEnabled = false, mcpPort = port, mcpToken = "" });
+        }
+    }
+
     private async Task<JsonElement> Call(string method, object? args = null)
     {
         var req = JsonSerializer.Serialize(new { id = ++_smokeId, method, @params = args }, Json.Options);
@@ -300,6 +337,7 @@ public sealed partial class MainForm
         Check("Read settings", settings.GetProperty("sshKeepAliveSeconds").GetInt32() == 30);
         await Call("settings.save", new { sshKeepAliveSeconds = 45, sshConnectTimeoutSeconds = 20, rdpColorDepth = 24, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false });
         Check("Settings saved", File.Exists(Path.Combine(_smokeDir!, "data", "settings.json")) && (await Call("settings.get")).GetProperty("rdpColorDepth").GetInt32() == 24);
+        await SmokeMcpAsync();
         await Js("[...document.querySelectorAll('.nav-item')].find(e => e.textContent.includes('Settings')).click()");
         Check("Settings page opens", await WaitFor("document.querySelector('.settings .set-card')"));
         await Task.Delay(600);

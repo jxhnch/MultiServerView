@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, isNative } from './bridge';
 import { ClearVaultDialog } from './ClearVault';
-import { IconClose, IconLock } from './Icons';
+import { IconClose, IconLock, IconRefresh } from './Icons';
+import { offerUpdate } from './updates';
 import { FONTS, THEMES, findFont, findTheme, getTermSettings, onTermSettings, setTermSettings, type TermSettings } from './terminalThemes';
 import { getUiSettings, onUiSettings, setUiSettings, type UiSettings } from './uiSettings';
 import type { HostSettings } from './types';
@@ -82,12 +83,38 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
   const [info, setInfo] = useState<{ path: string; version: string } | null>(null);
   const [pwModal, setPwModal] = useState(false);
   const [clearModal, setClearModal] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [mcp, setMcp] = useState<{ running: boolean; error: string | null } | null>(null);
+  const mcpUrl = `http://127.0.0.1:${host?.mcpPort ?? 7676}/mcp`;
+  const mcpCommand = `claude mcp add --transport http multiserverview ${mcpUrl} --header "Authorization: Bearer ${host?.mcpToken ?? ''}"`;
+  const copyText = async (text: string, done: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(done);
+    } catch {
+      toast('Copying is not allowed here. Select the text and copy it by hand.', 'error');
+    }
+  };
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     void api.settingsGet().then(setHost).catch((e: Error) => toast(e.message, 'error'));
+    void api.mcpStatus().then(setMcp).catch(() => undefined);
     void api.vaultInfo().then(setInfo).catch(() => undefined);
   }, [toast]);
+
+  const checkNow = async () => {
+    setChecking(true);
+    try {
+      const u = await api.updateCheck();
+      if (!u.available) toast(`You have the latest version (${u.current}).`);
+      else await offerUpdate(u, toast);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const updateHost = useCallback(
     (patch: Partial<HostSettings>) => {
@@ -100,6 +127,7 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
             .settingsSave(next)
             .then((r) => {
               setHost(r);
+              void api.mcpStatus().then(setMcp).catch(() => undefined);
               setSaved(true);
               window.setTimeout(() => setSaved(false), 1600);
             })
@@ -288,6 +316,34 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
         </Row>
       </Card>
 
+      {host && (
+        <Card title="AI tools (MCP server)" subtitle="Lets AI tools such as Claude Code work on your servers through MultiServerView.">
+          <Row title="Enable MCP server" hint="Listens on 127.0.0.1 only and needs the token below. While it is on, any program that knows the token can run commands on your SSH hosts as long as the vault is unlocked.">
+            <input type="checkbox" checked={host.mcpEnabled} onChange={(e) => updateHost({ mcpEnabled: e.target.checked })} />
+          </Row>
+          {host.mcpEnabled && (
+            <>
+              {mcp?.error && <div className="error">{mcp.error}</div>}
+              <Row title="Port">
+                <input type="number" min={1024} max={65535} value={host.mcpPort} onChange={(e) => updateHost({ mcpPort: Number(e.target.value) })} />
+              </Row>
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Add it to Claude Code with this command (the token is part of it):
+              </p>
+              <pre className="code-block">{mcpCommand}</pre>
+              <div className="row">
+                <button onClick={() => void copyText(mcpCommand, 'Command copied')}>Copy command</button>
+                <button onClick={() => void copyText(host.mcpToken, 'Token copied')}>Copy token</button>
+              </div>
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Tools: <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>.
+                Other MCP clients: URL <code>{mcpUrl}</code>, header <code>Authorization: Bearer &lt;token&gt;</code>.
+              </p>
+            </>
+          )}
+        </Card>
+      )}
+
       <Card title="Data and backup">
         <Row title="Vault file" hint="Encrypted (AES-256). Unreadable without your master password.">
           <div className="path-field">
@@ -335,6 +391,14 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
       <Card title="About MultiServerView">
         <Row title="Version">
           <span>{info?.version || '–'}</span>
+        </Row>
+        <Row title="Updates" hint="Asks GitHub (github.com/jxhnch/MultiServerView) for a newer release. Nothing else is sent.">
+          <button disabled={checking} onClick={() => void checkNow()}>
+            <IconRefresh size={15} /> {checking ? 'Checking…' : 'Check for updates'}
+          </button>
+        </Row>
+        <Row title="Check at startup">
+          <input type="checkbox" checked={ui.checkUpdates} onChange={(e) => setUiSettings({ checkUpdates: e.target.checked })} />
         </Row>
       </Card>
 

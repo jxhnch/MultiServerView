@@ -111,11 +111,14 @@ export interface HostSettings {
   rdpDrives: boolean;
   rdpDynamicResize: boolean;
   rdpWarnOnCertificate: boolean;
+  mcpEnabled: boolean;
+  mcpPort: number;
+  mcpToken: string;
 }
 
 export interface SyncInfo {
   configured: boolean;
-  mode: 'folder' | 'supabase';
+  mode: 'folder' | 'webdav' | 'supabase';
   folder: string;
   url: string;
   anonKey: string;

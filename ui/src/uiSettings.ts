@@ -6,10 +6,12 @@ export interface UiSettings {
   vncScale: boolean;
   /** 0 (least data) to 9 (best quality). */
   vncQuality: number;
+  /** Ask GitHub for a newer version when the app starts. */
+  checkUpdates: boolean;
 }
 
 const KEY = 'msv-ui';
-const DEFAULTS: UiSettings = { theme: 'light', autoLockMinutes: 0, vncScale: true, vncQuality: 6 };
+const DEFAULTS: UiSettings = { theme: 'light', autoLockMinutes: 0, vncScale: true, vncQuality: 6, checkUpdates: true };
 let current: UiSettings = load();
 const listeners = new Set<(s: UiSettings) => void>();
 
