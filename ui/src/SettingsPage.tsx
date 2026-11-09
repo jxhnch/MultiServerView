@@ -84,22 +84,10 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
   const [pwModal, setPwModal] = useState(false);
   const [clearModal, setClearModal] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [mcp, setMcp] = useState<{ running: boolean; error: string | null } | null>(null);
-  const mcpUrl = `http://127.0.0.1:${host?.mcpPort ?? 7676}/mcp`;
-  const mcpCommand = `claude mcp add --transport http multiserverview ${mcpUrl} --header "Authorization: Bearer ${host?.mcpToken ?? ''}"`;
-  const copyText = async (text: string, done: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast(done);
-    } catch {
-      toast('Copying is not allowed here. Select the text and copy it by hand.', 'error');
-    }
-  };
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     void api.settingsGet().then(setHost).catch((e: Error) => toast(e.message, 'error'));
-    void api.mcpStatus().then(setMcp).catch(() => undefined);
     void api.vaultInfo().then(setInfo).catch(() => undefined);
   }, [toast]);
 
@@ -127,7 +115,6 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
             .settingsSave(next)
             .then((r) => {
               setHost(r);
-              void api.mcpStatus().then(setMcp).catch(() => undefined);
               setSaved(true);
               window.setTimeout(() => setSaved(false), 1600);
             })
@@ -315,34 +302,6 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
           <button onClick={onLock}>Lock vault</button>
         </Row>
       </Card>
-
-      {host && (
-        <Card title="AI tools (MCP server)" subtitle="Lets AI tools such as Claude Code work on your servers through MultiServerView.">
-          <Row title="Enable MCP server" hint="Listens on 127.0.0.1 only and needs the token below. While it is on, any program that knows the token can run commands on your SSH hosts as long as the vault is unlocked.">
-            <input type="checkbox" checked={host.mcpEnabled} onChange={(e) => updateHost({ mcpEnabled: e.target.checked })} />
-          </Row>
-          {host.mcpEnabled && (
-            <>
-              {mcp?.error && <div className="error">{mcp.error}</div>}
-              <Row title="Port">
-                <input type="number" min={1024} max={65535} value={host.mcpPort} onChange={(e) => updateHost({ mcpPort: Number(e.target.value) })} />
-              </Row>
-              <p className="muted small" style={{ marginTop: 8 }}>
-                Add it to Claude Code with this command (the token is part of it):
-              </p>
-              <pre className="code-block">{mcpCommand}</pre>
-              <div className="row">
-                <button onClick={() => void copyText(mcpCommand, 'Command copied')}>Copy command</button>
-                <button onClick={() => void copyText(host.mcpToken, 'Token copied')}>Copy token</button>
-              </div>
-              <p className="muted small" style={{ marginTop: 8 }}>
-                Tools: <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>.
-                Other MCP clients: URL <code>{mcpUrl}</code>, header <code>Authorization: Bearer &lt;token&gt;</code>.
-              </p>
-            </>
-          )}
-        </Card>
-      )}
 
       <Card title="Data and backup">
         <Row title="Vault file" hint="Encrypted (AES-256). Unreadable without your master password.">

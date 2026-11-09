@@ -2561,3 +2561,7 @@ label {
 .muted a {
   color: var(--accent);
 }
+
+.mode-switch.wrap {
+  flex-wrap: wrap;
+}

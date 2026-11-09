@@ -65,6 +65,8 @@ export function CloudPanel({
 
   const save = () =>
     run('save', async () => {
+      // Look at the target first: a vault from another installation there must stop us before anything is saved or written.
+      await api.syncTest(cfg());
       await api.syncSave(cfg());
       setPassword('');
       await onChanged();

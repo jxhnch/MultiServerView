@@ -50,7 +50,7 @@ Bring your servers with you. Duplicates are skipped, existing hosts stay untouch
 - **mRemoteNG**, **OpenSSH config** (`~/.ssh/config`), **PuTTY** (directly from Windows or a `.reg` file) and **CSV**.
 
 ### Let AI work on your servers
-An optional **MCP server** (off by default) lets AI tools such as Claude Code list your hosts, run commands and read, write and list files over SSH/SFTP. Enable it in *Settings → AI tools*, copy the ready-made `claude mcp add …` command and you are done. It listens on `127.0.0.1` only and needs the token shown there; anything that has the token can act on your hosts while the vault is unlocked, so only enable it when you want that.
+An optional **MCP server** (off by default) lets AI tools list your hosts, run commands and read, write and list files over SSH/SFTP. Open **AI tools** in the left menu, switch it on and pick your tool (**Claude Code, Codex, Cursor, VS Code Copilot, Gemini CLI, Claude Desktop** or any MCP client): the page shows the exact command or config text to paste. It listens on `127.0.0.1` only and needs the token shown there; anything that has the token can act on your hosts while the vault is unlocked, so only enable it when you want that.
 
 ### Protect and sync
 - **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.

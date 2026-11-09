@@ -269,3 +269,59 @@ public class SupabaseUrlTests
     public void Pasted_project_addresses_are_normalized(string input, string expected) =>
         Assert.Equal(expected, MultiServerView.Core.Sync.SupabaseClient.NormalizeUrl(input));
 }
+
+public class ExistingTargetTests
+{
+    [Fact]
+    public async Task Foreign_vault_stops_the_connection_and_is_not_overwritten()
+    {
+        var cloud = new FakeSupabase();
+        using var a = new Device(cloud);
+        using var b = new Device(cloud);
+        a.Store.Create("master-password");
+        a.Sync.Save(Device.Config(cloud));
+        await a.Sync.SyncAsync();
+        var before = cloud.Blob;
+
+        b.Store.Create("master-password"); // created separately -> different salt
+        var test = await Assert.ThrowsAsync<SyncException>(() => b.Sync.TestConnectionAsync(Device.Config(cloud)));
+        Assert.Contains("Nothing was overwritten", test.Message);
+        b.Sync.Save(Device.Config(cloud));
+        await Assert.ThrowsAsync<SyncException>(() => b.Sync.SyncAsync());
+        Assert.Equal(before, cloud.Blob);
+    }
+
+    [Fact]
+    public async Task A_file_that_is_not_a_vault_is_reported_and_left_alone()
+    {
+        var cloud = new FakeSupabase();
+        using var a = new Device(cloud);
+        a.Store.Create("master-password");
+        a.Sync.Save(Device.Config(cloud));
+        cloud.Blob = Convert.ToBase64String(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50 });
+        cloud.Version = 5;
+        var before = cloud.Blob;
+
+        var ex = await Assert.ThrowsAsync<SyncException>(() => a.Sync.SyncAsync());
+        Assert.Contains("not a readable MultiServerView vault", ex.Message);
+        Assert.Contains("Nothing was overwritten", ex.Message);
+        Assert.Equal(before, cloud.Blob);
+    }
+
+    [Fact]
+    public async Task The_same_vault_on_the_remote_is_merged_not_refused()
+    {
+        var cloud = new FakeSupabase();
+        using var a = new Device(cloud);
+        using var b = new Device(cloud);
+        a.Store.Create("master-password");
+        a.Store.Upsert(new ServerEntry { Name = "web", Host = "h" });
+        a.Sync.Save(Device.Config(cloud));
+        await a.Sync.SyncAsync();
+
+        await b.Sync.DownloadInitialAsync(Device.Config(cloud)); // proper way for a new device
+        b.Store.Unlock("master-password");
+        await b.Sync.TestConnectionAsync(Device.Config(cloud));
+        Assert.Single(b.Store.List());
+    }
+}

@@ -9,6 +9,7 @@ import { offerUpdate } from './updates';
 import { SessionCloseContext } from './SessionFrame';
 import { Keychain } from './Keychain';
 import { CloudPanel } from './CloudPanel';
+import { McpPage } from './McpPage';
 import { ImportPage, type ImportKind } from './ImportPage';
 import { VmwareImportDialog } from './VmwareImport';
 import { TerminalView } from './TerminalView';
@@ -27,7 +28,7 @@ import { SplitPicker } from './SplitPicker';
 import { HostsPage } from './HostsPage';
 import { getUiSettings, onUiSettings, setUiSettings } from './uiSettings';
 import { readTextAuto } from './files';
-import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSettings, IconShield, IconSun, IconUpload } from './Icons';
+import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSettings, IconShield, IconSparkle, IconSun, IconUpload } from './Icons';
 import { askConfirm, ConfirmHost } from './Confirm';
 
 const readLocal = (key: string, fallback: string) => {
@@ -46,7 +47,7 @@ const writeLocal = (key: string, value: string) => {
 };
 
 type Phase = 'loading' | 'locked' | 'ready';
-type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud' | 'import' | 'settings';
+type Section = 'hosts' | 'keys' | 'snippets' | 'forwards' | 'knownhosts' | 'logs' | 'cloud' | 'import' | 'mcp' | 'settings';
 type Theme = 'light' | 'dark';
 interface Tab {
   id: string;
@@ -675,6 +676,9 @@ export function App() {
               <button className={'nav-item' + (section === 'cloud' ? ' on' : '')} onClick={() => goTo('cloud')}>
                 <IconCloud size={17} /> Sync
               </button>
+              <button className={'nav-item' + (section === 'mcp' ? ' on' : '')} onClick={() => goTo('mcp')}>
+                <IconSparkle size={17} /> AI tools
+              </button>
               <div className="nav-foot">
                 <button className={'nav-item grow' + (section === 'settings' ? ' on' : '')} onClick={() => goTo('settings')}>
                   <IconSettings size={17} /> Settings
@@ -733,6 +737,7 @@ export function App() {
                   toast={toast}
                 />
               )}
+              {section === 'mcp' && <McpPage toast={toast} />}
               {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
               {section === 'settings' && <SettingsPage onLock={() => void lock()} onCleared={afterVaultCleared} toast={toast} />}
             </div>

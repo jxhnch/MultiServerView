@@ -95,12 +95,9 @@ public sealed class SyncService
         {
             remoteData = _store.OpenRemote(remote.Blob);
         }
-        catch (System.Security.Cryptography.CryptographicException)
+        catch (System.Security.Cryptography.CryptographicException ex)
         {
-            throw new SyncException(
-                "The synced vault does not match this device (different master password or created separately). " +
-                "On a new device: use \"Load vault\" instead of creating a new vault. " +
-                "If you changed the master password on another device: use \"Adopt new master password\" (Sync page).");
+            throw Explain(ex);
         }
 
         var local = _store.Snapshot();
@@ -224,8 +221,33 @@ public sealed class SyncService
     public async Task TestConnectionAsync(SyncSettings cfg, CancellationToken ct = default)
     {
         if (cfg.IsFolder) new FolderRemote(cfg.Folder).CheckWritable();
-        else await CreateRemote(cfg).GetAsync(ct);
+
+        // Look at what is already there WITHOUT writing anything: a vault of another installation must never be overwritten.
+        var remote = await CreateRemote(cfg).GetAsync(ct);
+        if (remote != null && _store.IsUnlocked)
+        {
+            try
+            {
+                _store.OpenRemote(remote.Blob);
+            }
+            catch (System.Security.Cryptography.CryptographicException ex)
+            {
+                throw Explain(ex);
+            }
+        }
     }
+
+    /// <summary>Plain-language error for a synced file that does not belong to this vault. Always says that nothing was changed.</summary>
+    private static SyncException Explain(System.Security.Cryptography.CryptographicException ex) =>
+        ex is VaultMismatchException
+            ? new SyncException(
+                "The sync location already contains a vault from another installation (created separately, or with a different master password). " +
+                "Nothing was overwritten. Please check that you picked the right folder or account. " +
+                "On a new device use \"Load vault\" instead of creating a new vault. " +
+                "If you changed the master password on another device, use \"Adopt new master password\" (Sync page).")
+            : new SyncException(
+                "The file at the sync location is not a readable MultiServerView vault (it is damaged or not a vault at all). " +
+                "Nothing was overwritten. Please check the folder or account, or move the file away if you are sure it is not needed.");
 
     public async Task<bool> SignUpAsync(SyncSettings cfg, CancellationToken ct = default)
     {
