@@ -74,10 +74,10 @@ public sealed class SyncService
     /// <summary>Where the vault lives: in the sync folder or at Supabase.</summary>
     private ISyncRemote CreateRemote(SyncSettings cfg) =>
         cfg.IsFolder ? new FolderRemote(cfg.Folder)
-        : cfg.IsWebDav ? new WebDavRemote(WebDavHttp, cfg.Url, cfg.Email, cfg.Password)
+        : cfg.IsGist ? new GistRemote(GistHttp, cfg.Password)
         : new SupabaseRemote(_clientFactory(cfg), cfg.Email, cfg.Password);
 
-    private static readonly HttpClient WebDavHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly HttpClient GistHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
 
     private async Task<SyncResult?> TryOnceAsync(ISyncRemote store, CancellationToken ct)
     {
@@ -150,13 +150,13 @@ public sealed class SyncService
     public async Task DownloadInitialAsync(SyncSettings cfg, CancellationToken ct = default)
     {
         if (_store.Exists) throw new SyncException("There is already a vault on this device.");
-        if (!cfg.IsConfigured) throw new SyncException(cfg.IsFolder ? "Please choose a sync folder." : cfg.IsWebDav ? "Please fill in the WebDAV address, user name and password." : "Please fill in all cloud fields.");
+        if (!cfg.IsConfigured) throw new SyncException(cfg.IsFolder ? "Please choose a sync folder." : cfg.IsGist ? "Please enter your GitHub token." : "Please fill in all cloud fields.");
 
         var remote = await CreateRemote(cfg).GetAsync(ct)
                      ?? throw new SyncException(cfg.IsFolder
                          ? $"There is no vault in this folder yet ({FolderRemote.FileName}). Wait until the folder service has downloaded the file from the other device."
-                         : cfg.IsWebDav
-                             ? $"There is no vault in this WebDAV folder yet ({WebDavRemote.FileName}). Sync once on the other device first."
+                         : cfg.IsGist
+                             ? "There is no vault in this GitHub account yet. Sync once on the other device first."
                              : "There is no vault in the cloud for this account yet.");
 
         _store.InstallBlob(remote.Blob);
@@ -230,7 +230,7 @@ public sealed class SyncService
     public async Task<bool> SignUpAsync(SyncSettings cfg, CancellationToken ct = default)
     {
         if (cfg.IsFolder) throw new SyncException("A sync folder needs no account.");
-        if (cfg.IsWebDav) throw new SyncException("WebDAV uses the account of your server. Create it there.");
+        if (cfg.IsGist) throw new SyncException("GitHub needs no account here. Create a token at github.com/settings/tokens.");
         return await _clientFactory(cfg).SignUpAsync(cfg.Email, cfg.Password, ct);
     }
 

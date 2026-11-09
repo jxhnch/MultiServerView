@@ -70,7 +70,7 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
 }
 
 function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onCancel: () => void }) {
-  const [mode, setMode] = useState<'folder' | 'webdav' | 'supabase'>('folder');
+  const [mode, setMode] = useState<'folder' | 'gist' | 'supabase'>('folder');
   const [folder, setFolder] = useState('');
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
@@ -99,8 +99,8 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
         <button type="button" className={mode === 'folder' ? 'on' : ''} onClick={() => setMode('folder')}>
           Folder
         </button>
-        <button type="button" className={mode === 'webdav' ? 'on' : ''} onClick={() => setMode('webdav')}>
-          WebDAV
+        <button type="button" className={mode === 'gist' ? 'on' : ''} onClick={() => setMode('gist')}>
+          GitHub
         </button>
         <button type="button" className={mode === 'supabase' ? 'on' : ''} onClick={() => setMode('supabase')}>
           Supabase
@@ -109,8 +109,8 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
       <p className="muted small">
         {mode === 'folder'
           ? 'The sync folder that contains the file MultiServerView-Vault.msv (e.g. in OneDrive). '
-          : mode === 'webdav'
-            ? 'The WebDAV folder (address, user name, password) that contains MultiServerView-Vault.msv. '
+          : mode === 'gist'
+            ? 'The GitHub token you used on the other device. The app finds the vault in your gists. '
             : 'Credentials of your Supabase account. '}
         Then you unlock with the <b>same master password</b> as on the other device.
       </p>
@@ -129,12 +129,8 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
             Choose…
           </button>
         </div>
-      ) : mode === 'webdav' ? (
-        <>
-          <input placeholder="WebDAV folder address (https://…)" value={url} onChange={(e) => setUrl(e.target.value)} />
-          <input placeholder="User name" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" placeholder="Password or app password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </>
+      ) : mode === 'gist' ? (
+        <input type="password" placeholder="GitHub token (ghp_…)" value={password} onChange={(e) => setPassword(e.target.value)} />
       ) : (
         <>
           <input placeholder="Supabase-URL (https://…supabase.co)" value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -149,7 +145,7 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
           Cancel
         </button>
         <span className="grow" />
-        <button className="primary" disabled={busy || (mode === 'folder' ? !folder.trim() : mode === 'webdav' ? !url || !email || !password : !url || !anonKey || !email || !password)}>
+        <button className="primary" disabled={busy || (mode === 'folder' ? !folder.trim() : mode === 'gist' ? !password : !url || !anonKey || !email || !password)}>
           {busy ? 'Loading…' : 'Load'}
         </button>
       </div>

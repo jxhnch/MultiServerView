@@ -16,7 +16,7 @@ export function CloudPanel({
   onChanged: () => Promise<void>;
   toast: (msg: string, kind?: 'ok' | 'error') => void;
 }) {
-  const [mode, setMode] = useState<'folder' | 'webdav' | 'supabase'>('folder');
+  const [mode, setMode] = useState<'folder' | 'gist' | 'supabase'>('folder');
   const [folder, setFolder] = useState('');
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
@@ -38,8 +38,8 @@ export function CloudPanel({
   const ready =
     mode === 'folder'
       ? !!folder.trim()
-      : mode === 'webdav'
-        ? url.trim() && email.trim() && (password || info?.hasPassword)
+      : mode === 'gist'
+        ? !!(password || info?.hasPassword)
         : url.trim() && anonKey.trim() && email.trim() && (password || info?.hasPassword);
 
   async function pickFolder() {
@@ -82,7 +82,17 @@ export function CloudPanel({
   const signUp = () =>
     run('signup', async () => {
       const r = await api.syncSignUp(cfg());
-      toast(r.signedIn ? 'Account created' : 'Account created – please confirm your e-mail, then click "Connect"', 'ok');
+      if (!r.signedIn) {
+        toast('Account created. Please confirm the e-mail from Supabase, then click "Connect".');
+        return;
+      }
+      // signed in right away: connect and synchronize in one go
+      await api.syncSave(cfg());
+      setPassword('');
+      await onChanged();
+      await api.syncNow();
+      await onChanged();
+      toast('Account created, sync connected and synchronized');
     });
 
   const now = () =>
@@ -105,7 +115,7 @@ export function CloudPanel({
         <div>
           <h1>Sync</h1>
           <p className="muted">
-            Your vault is <b>end-to-end encrypted</b>: only an unreadable blob is stored in the folder or at Supabase.
+            Your vault is <b>end-to-end encrypted</b>: only an unreadable blob is stored in the folder, your GitHub gist or at Supabase.
             Your master password never leaves this device.
           </p>
         </div>
@@ -119,13 +129,15 @@ export function CloudPanel({
 
       {!isNative && <div className="notice">Sync is not available in browser mode – it only works in the Windows app.</div>}
 
+      {mode === 'supabase' && !info?.configured && <Setup open />}
+
       <div className="card-form">
         <div className="mode-switch">
           <button type="button" className={mode === 'folder' ? 'on' : ''} onClick={() => setMode('folder')}>
             Folder <span className="muted small">(OneDrive, iCloud, Syncthing …)</span>
           </button>
-          <button type="button" className={mode === 'webdav' ? 'on' : ''} onClick={() => setMode('webdav')}>
-            WebDAV <span className="muted small">(Nextcloud, NAS …)</span>
+          <button type="button" className={mode === 'gist' ? 'on' : ''} onClick={() => setMode('gist')}>
+            GitHub <span className="muted small">(private gist, only a token)</span>
           </button>
           <button type="button" className={mode === 'supabase' ? 'on' : ''} onClick={() => setMode('supabase')}>
             Supabase <span className="muted small">(own account)</span>
@@ -147,31 +159,31 @@ export function CloudPanel({
               and the app merges the changes. Without the master password the file is unreadable. On the second PC, choose the same folder.
             </p>
           </>
-        ) : mode === 'webdav' ? (
+        ) : mode === 'gist' ? (
           <>
             <label>
-              WebDAV folder address
-              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cloud.example.com/remote.php/dav/files/you/MultiServerView" className="mono" />
+              GitHub token
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={info?.hasPassword ? '•••••••• (unchanged)' : 'ghp_…'}
+                className="mono"
+              />
             </label>
-            <div className="row">
-              <label className="grow">
-                User name
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you" />
-              </label>
-              <label className="grow">
-                Password (use an app password)
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={info?.hasPassword ? '•••••••• (unchanged)' : 'Password or app password'}
-                />
-              </label>
-            </div>
+            <ol className="muted small steps">
+              <li>
+                Open <a href="https://github.com/settings/tokens/new?scopes=gist&description=MultiServerView" target="_blank" rel="noreferrer">github.com/settings/tokens/new</a> (opens with
+                the right permission selected).
+              </li>
+              <li>Choose an expiry (or "No expiration"), click <b>Generate token</b> and paste it above.</li>
+              <li>
+                On your second PC use the same token under "New device? Load vault …". The app finds the vault by itself.
+              </li>
+            </ol>
             <p className="muted small">
-              Works with any WebDAV server: Nextcloud/ownCloud, Synology and other NAS boxes, nginx/Apache, many hosters. Create the folder first.
-              Only the encrypted file <code>MultiServerView-Vault.msv</code> is uploaded; without the master password it is unreadable.
-              The address must use https://. On the second PC choose the same folder and use "New device? Load vault …".
+              The app stores one <b>secret gist</b> with the encrypted vault in your GitHub account. Only the token holder can find it, and without
+              the master password the content is unreadable. Revoke the token on GitHub at any time to cut the access.
             </p>
           </>
         ) : (
@@ -210,7 +222,7 @@ export function CloudPanel({
         <div className="actions">
           {mode === 'supabase' && (
             <button onClick={signUp} disabled={!!busy || !url || !anonKey || !email || !password}>
-              Create account
+              {info?.configured ? 'Create account' : 'Create account and connect'}
             </button>
           )}
           <button onClick={test} disabled={!!busy || !ready}>
@@ -245,12 +257,12 @@ export function CloudPanel({
 
       {info?.configured && <PasswordTools toast={toast} onChanged={onChanged} />}
 
-      {mode === 'supabase' && <Setup />}
+      {mode === 'supabase' && info?.configured && <Setup open={false} />}
     </div>
   );
 }
 
-function Setup() {
+function Setup({ open }: { open: boolean }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -261,36 +273,37 @@ function Setup() {
       /* clipboard not allowed */
     }
   };
+  const link = (href: string, text: string) => (
+    <a href={href} target="_blank" rel="noreferrer">
+      {text}
+    </a>
+  );
 
   return (
-    <details className="card-form setup">
-      <summary>Setup in 3 minutes (one time)</summary>
-      <ol>
+    <details className="card-form setup" open={open}>
+      <summary>Setup in 4 steps (one time, about 3 minutes)</summary>
+      <ol className="steps">
         <li>
-          Create a free project on <b>supabase.com</b>.
+          <b>Create a free project</b>: {link('https://supabase.com/dashboard/new', 'supabase.com/dashboard/new')} (any name, choose a region near you and a database password you do not need again).
         </li>
         <li>
-          In the project: <b>SQL Editor</b> → paste the code below → <b>Run</b>.
+          <b>Create the table</b>: click <button className="ghost" onClick={copy}>{copied ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied ? 'Copied' : 'Copy SQL'}</button>, open the{' '}
+          {link('https://supabase.com/dashboard/project/_/sql/new', 'SQL editor')}, paste and press <b>Run</b>.
         </li>
         <li>
-          <b>Project Settings → API</b>: enter the <i>Project URL</i> and the <i>anon public</i> key above.
+          <b>Copy the address and key</b>: open {link('https://supabase.com/dashboard/project/_/settings/api', 'Project Settings → API')} and paste the <i>Project URL</i> (the project id alone also works) and the{' '}
+          <i>anon public</i> key below.
         </li>
         <li>
-          Optionally turn off "Confirm email" under <b>Authentication → Providers → Email</b> so sign-in works
-          immediately. Then click "Create account" and "Connect" here.
-        </li>
-        <li>
-          On the second PC: at first start choose "New device? Load from sync folder or cloud" and then unlock with the same master password
-          to open the vault.
+          <b>Choose an e-mail and a password</b> for your sync account and click <b>Create account and connect</b>. If Supabase sends a confirmation mail, confirm it
+          and click <b>Connect</b> (or switch off "Confirm email" under{' '}
+          {link('https://supabase.com/dashboard/project/_/auth/providers', 'Authentication → Providers → Email')}).
         </li>
       </ol>
-      <div className="code-head">
-        <span className="muted small">SQL</span>
-        <button className="ghost" onClick={copy}>
-          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <pre className="code">{SUPABASE_SQL}</pre>
+      <details>
+        <summary className="muted small">Show the SQL</summary>
+        <pre className="code">{SUPABASE_SQL}</pre>
+      </details>
     </details>
   );
 }

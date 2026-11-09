@@ -54,7 +54,7 @@ An optional **MCP server** (off by default) lets AI tools such as Claude Code li
 
 ### Protect and sync
 - **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
-- **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …), a **WebDAV** server (Nextcloud, NAS, …) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
+- **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …), a private **GitHub gist** (you only need a token) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
 - **Clear vault** – wipe everything with three confirmation steps. Change the master password, set an auto-lock, back up the vault.
 
 ## Download and install
@@ -119,7 +119,7 @@ When the focus is inside an **RDP session**, all keys go to the remote PC (as in
 
 **Shared folder (easiest):** open **Sync**, choose a folder that your folder service already syncs (for example in OneDrive) and connect. On the second PC choose *"New device? Load vault from a sync folder or cloud"* on the unlock screen, pick the same folder and unlock with the **same master password**.
 
-**WebDAV (Nextcloud, Synology and other NAS, nginx/Apache, many hosters):** create a folder on the server, open **Sync**, choose WebDAV, enter the folder address (https://), user name and password (use an app password where offered). Conflicts are detected with the ETag, so devices never overwrite each other. On the second PC choose the same folder under *"New device? Load vault …"*.
+**GitHub (only a token):** open **Sync**, choose GitHub, create a token at [github.com/settings/tokens/new](https://github.com/settings/tokens/new?scopes=gist&description=MultiServerView) (the link preselects the `gist` permission) and paste it. The app stores one secret gist with the encrypted vault and finds it again by itself. On the second PC choose GitHub under *"New device? Load vault …"* and enter the same token.
 
 **Supabase (about 3 minutes):**
 1. Create a free project on [supabase.com](https://supabase.com).

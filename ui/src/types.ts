@@ -118,7 +118,7 @@ export interface HostSettings {
 
 export interface SyncInfo {
   configured: boolean;
-  mode: 'folder' | 'webdav' | 'supabase';
+  mode: 'folder' | 'gist' | 'supabase';
   folder: string;
   url: string;
   anonKey: string;

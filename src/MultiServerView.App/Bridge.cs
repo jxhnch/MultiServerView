@@ -1040,7 +1040,7 @@ internal sealed class Bridge : IDisposable
         var password = Opt(p, "password");
         return new SyncSettings
         {
-            Mode = Opt(p, "mode") is SyncSettings.ModeFolder or SyncSettings.ModeWebDav ? Opt(p, "mode") : SyncSettings.ModeSupabase,
+            Mode = Opt(p, "mode") is SyncSettings.ModeFolder or SyncSettings.ModeGist ? Opt(p, "mode") : SyncSettings.ModeSupabase,
             Folder = Opt(p, "folder").Trim(),
             Url = Opt(p, "url").Trim(),
             AnonKey = Opt(p, "anonKey").Trim(),

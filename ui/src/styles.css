@@ -2538,3 +2538,26 @@ label {
   word-break: break-all;
   user-select: text;
 }
+
+.steps {
+  margin: 8px 0 6px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.steps li {
+  line-height: 1.5;
+}
+.steps button.ghost {
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.steps a,
+.setup a,
+.muted a {
+  color: var(--accent);
+}

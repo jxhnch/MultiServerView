@@ -257,3 +257,15 @@ public class SyncTests
         }
     }
 }
+
+public class SupabaseUrlTests
+{
+    [Theory]
+    [InlineData("https://abcdxyz.supabase.co", "https://abcdxyz.supabase.co")]
+    [InlineData("https://abcdxyz.supabase.co/", "https://abcdxyz.supabase.co")]
+    [InlineData("  https://abcdxyz.supabase.co/rest/v1/  ", "https://abcdxyz.supabase.co")]
+    [InlineData("abcdxyz.supabase.co", "https://abcdxyz.supabase.co")]
+    [InlineData("abcdxyz", "https://abcdxyz.supabase.co")]
+    public void Pasted_project_addresses_are_normalized(string input, string expected) =>
+        Assert.Equal(expected, MultiServerView.Core.Sync.SupabaseClient.NormalizeUrl(input));
+}

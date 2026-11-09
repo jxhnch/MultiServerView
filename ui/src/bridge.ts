@@ -548,8 +548,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
         configured:
           params.mode === 'folder'
             ? !!params.folder
-            : params.mode === 'webdav'
-              ? !!(params.url && params.email && (params.password || mock.sync.hasPassword))
+            : params.mode === 'gist'
+              ? !!(params.password || mock.sync.hasPassword)
               : !!(params.url && params.anonKey && params.email && (params.password || mock.sync.hasPassword)),
         mode: params.mode,
         folder: params.folder ?? '',
@@ -811,7 +811,7 @@ export interface ProxmoxInput {
 }
 
 export interface SyncConfigInput {
-  mode: 'folder' | 'webdav' | 'supabase';
+  mode: 'folder' | 'gist' | 'supabase';
   folder: string;
   url: string;
   anonKey: string;

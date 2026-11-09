@@ -27,11 +27,23 @@ public sealed class SupabaseClient
     public SupabaseClient(HttpClient http, string url, string anonKey)
     {
         _http = http;
-        _url = url.Trim().TrimEnd('/');
+        _url = NormalizeUrl(url);
         _anonKey = anonKey.Trim();
         if (!Uri.TryCreate(_url, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && !uri.IsLoopback))
             throw new SyncException("The Supabase URL must start with https://.");
         if (_anonKey.Length == 0) throw new SyncException("The Supabase anon key is missing.");
+    }
+
+    /// <summary>
+    /// Accepts what people paste: the project URL, a URL with a path (https://x.supabase.co/rest/v1/), or only the project id ("abcdxyz").
+    /// </summary>
+    public static string NormalizeUrl(string input)
+    {
+        var text = input.Trim();
+        if (text.Length == 0) return "";
+        if (!text.Contains("://", StringComparison.Ordinal))
+            text = text.Contains('.') ? "https://" + text : $"https://{text}.supabase.co";
+        return Uri.TryCreate(text, UriKind.Absolute, out var uri) ? uri.GetLeftPart(UriPartial.Authority) : text.TrimEnd('/');
     }
 
     // ------------------------------------------------------------------ Auth
