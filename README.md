@@ -184,7 +184,7 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 
 - While a palette or dialog is open, a running RDP window is hidden briefly (the native window would otherwise cover the UI). The session keeps running.
 - Convert PuTTY keys (`.ppk`) to OpenSSH format in PuTTYgen first.
-- The mRemoteNG import does not take over passwords (mRemoteNG encrypts them itself). There is no Termius import.
+- Import of saved passwords: mRemoteNG (decrypted with its master password, default or custom) and CSV; keys via `IdentityFile` of an OpenSSH config. PuTTY sessions and Proxmox/VMware have no readable passwords, and PuTTY `.ppk` keys must be converted to OpenSSH format first. There is no Termius import.
 - No Telnet/Serial/Mosh, no AI autocomplete, no teams. See the [comparison with Termius](docs/comparison-with-termius.md).
 - Windows only.
 

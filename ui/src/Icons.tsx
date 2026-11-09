@@ -232,7 +232,7 @@ export const IconDuplicate = (p: IconProps) => (
 /** Matching icon for the protocol. */
 export function ProtocolIcon({ protocol, size = 16 }: { protocol: Protocol; size?: number }) {
   if (protocol === 'rdp') return <IconMonitor size={size} />;
-  if (protocol === 'vnc') return <IconScreen size={size} />;
+  if (protocol === 'vnc' || protocol === 'teamviewer') return <IconScreen size={size} />;
   return <IconTerminal size={size} />;
 }
 

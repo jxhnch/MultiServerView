@@ -4,6 +4,8 @@ import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStat
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
+import { PromptDialog } from './Prompt';
+import { SessionCloseContext } from './SessionFrame';
 import { Keychain } from './Keychain';
 import { CloudPanel } from './CloudPanel';
 import { ImportPage, type ImportKind } from './ImportPage';
@@ -172,6 +174,17 @@ export function App() {
       setPaletteOpen(false);
       setPanel(null);
       setQuery('');
+      if (s.protocol === 'teamviewer') {
+        try {
+          await api.teamviewerOpen(s.id);
+          toast(`Opening TeamViewer for ${s.name}…`);
+          const updated = await api.serversTouch(s.id);
+          setServers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+        } catch (e) {
+          toast((e as Error).message, 'error');
+        }
+        return;
+      }
       const existing = forceNew ? undefined : tabs.find((t) => t.serverId === s.id && t.kind === kind);
       if (existing) setActive(existing.id);
       else {
@@ -186,7 +199,7 @@ export function App() {
         /* "last used" is not critical */
       }
     },
-    [tabs],
+    [tabs, toast],
   );
 
   const openSplit = useCallback((ids: string[]) => {
@@ -296,6 +309,21 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
+
+  // An open edit drawer follows the tab: switching to another host tab shows that host's edit panel
+  // (a split tab or an unsaved new host keeps / closes it as before).
+  useEffect(() => {
+    if (active === HOME) return;
+    const tab = tabs.find((t) => t.id === active);
+    setPanel((p) => {
+      if (!p || !p.server.id) return p;
+      if (!tab || tab.kind === 'split') return null;
+      const s = byId.get(tab.serverId);
+      if (!s || s.id === p.server.id) return p;
+      return { server: s, key: p.key + 1 };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // RDP is a native window above the UI -> hide it briefly while overlays are open
   const drawerOpen = panel !== null && active !== HOME;
@@ -437,11 +465,13 @@ export function App() {
     }
   }
 
-  async function importFile(kind: ImportKind, file?: File) {
+  const [mpwPrompt, setMpwPrompt] = useState<string | null>(null);
+
+  async function importFile(kind: ImportKind, file?: File, textOverride?: string, masterPassword?: string) {
     try {
-      const text = file ? await readTextAuto(file) : '';
+      const text = textOverride ?? (file ? await readTextAuto(file) : '');
       const r =
-        kind === 'mremoteng' ? await api.importMremoteng(text, activeWorkspace)
+        kind === 'mremoteng' ? await api.importMremoteng(text, activeWorkspace, masterPassword)
         : kind === 'sshconfig' ? await api.importSshConfig(text, activeWorkspace)
         : kind === 'csv' ? await api.importCsv(text, activeWorkspace)
         : await api.importPutty(kind === 'putty-reg' ? text : undefined, activeWorkspace);
@@ -449,9 +479,17 @@ export function App() {
       const parts = [`${r.imported} host${r.imported === 1 ? '' : 's'} imported`];
       if (r.duplicates) parts.push(`${r.duplicates} already present`);
       if (r.skipped) parts.push(`${r.skipped} skipped (not supported)`);
-      toast(parts.join(', ') + (kind === 'csv' ? '.' : '. Please enter the passwords again.'));
+      if (r.keysImported) parts.push(`${r.keysImported} key${r.keysImported === 1 ? '' : 's'} imported`);
+      if (r.keysSkipped) parts.push(`${r.keysSkipped} key file${r.keysSkipped === 1 ? '' : 's'} not usable (missing or protected by a passphrase)`);
+      if (r.passwordsFailed) parts.push(`${r.passwordsFailed} password${r.passwordsFailed === 1 ? '' : 's'} could not be decrypted`);
+      toast(parts.join(', ') + '.');
     } catch (e) {
-      toast((e as Error).message, 'error');
+      const msg = (e as Error).message;
+      if (kind === 'mremoteng' && msg.includes('MREMOTENG_PASSWORD')) {
+        setMpwPrompt(textOverride ?? (file ? await readTextAuto(file) : ''));
+        return;
+      }
+      toast(msg, 'error');
     }
   }
 
@@ -724,18 +762,35 @@ export function App() {
           };
           return (
             <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
+              <SessionCloseContext.Provider value={() => closeTab(t.id)}>
               {t.kind === 'sftp' && <SftpView {...common} />}
               {t.kind === 'session' && s.protocol === 'ssh' && (
                 <TerminalView {...common} onOpenSftp={() => void open(s, false, 'sftp')} onManageSnippets={() => goTo('snippets')} />
               )}
               {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
               {t.kind === 'session' && s.protocol === 'rdp' && <RdpView {...common} />}
+              </SessionCloseContext.Provider>
             </div>
           );
         })}
       </div>
 
       {drawerOpen && panelEl}
+
+      {mpwPrompt !== null && (
+        <PromptDialog
+          title="mRemoteNG master password"
+          label="This file uses a custom master password. Enter it to import the saved passwords."
+          confirmLabel="Import"
+          secret
+          onClose={() => setMpwPrompt(null)}
+          onSubmit={(pw) => {
+            const text = mpwPrompt;
+            setMpwPrompt(null);
+            void importFile('mremoteng', undefined, text, pw);
+          }}
+        />
+      )}
 
       {splitPicker && <SplitPicker servers={servers.filter((x) => x.protocol === 'ssh')} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
 

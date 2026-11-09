@@ -53,6 +53,7 @@ export function HostsPage({
   onDissolveWorkspace: (name: string) => void;
   onMove: (list: Server[], target: string) => void;
 }) {
+  const [picked, setPicked] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const [wsMenu, setWsMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | null>(null);
@@ -202,12 +203,12 @@ export function HostsPage({
                 {list.map((s) => (
                   <div
                     key={s.id}
-                    className={'hcard' + (selectedId === s.id ? ' sel' : '')}
+                    className={'hcard' + (selectedId === s.id ? ' sel' : '') + (picked === s.id ? ' picked' : '')}
                     tabIndex={0}
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData('text/msv-host', s.id)}
                     title={`${s.name} – ${s.host}:${s.port}`}
-                    onClick={() => onSelect(s)}
+                    onClick={() => setPicked(s.id)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setMenu({ x: e.clientX, y: e.clientY, server: s });
@@ -226,12 +227,26 @@ export function HostsPage({
                       </span>
                     )}
                     {openServerIds.has(s.id) && <span className="status-dot connected live-dot" title="Session open" />}
+                    <button
+                      type="button"
+                      className="edit-btn"
+                      title="Edit host"
+                      aria-label={`Edit ${s.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPicked(s.id);
+                        onSelect(s);
+                      }}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    >
+                      <IconEdit size={15} />
+                    </button>
                   </div>
                 ))}
               </div>
             </section>
           ))}
-          <p className="muted small">Double-click or Enter connects · click shows details · right-click for more · Shift opens an additional session</p>
+          <p className="muted small">Double-click or Enter connects · click selects · pencil edits · right-click for more · Shift opens an additional session</p>
         </>
       )}
 

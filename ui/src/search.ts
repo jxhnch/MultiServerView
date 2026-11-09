@@ -1,4 +1,4 @@
-import type { Server } from './types';
+import { DEFAULT_PORT, type Server } from './types';
 
 /** All words of the search must occur somewhere. Hits at the start of a word / in the name count more. */
 export function scoreServer(s: Server, query: string): number {
@@ -47,6 +47,6 @@ export function parseTarget(input: string): Partial<Server> | null {
   if (!m) return null;
   const protocol = (m[1]?.toLowerCase() as Server['protocol'] | undefined) ?? 'ssh';
   const host = m[3];
-  const port = m[4] ? Number(m[4]) : { ssh: 22, rdp: 3389, vnc: 5900 }[protocol];
+  const port = m[4] ? Number(m[4]) : DEFAULT_PORT[protocol];
   return { name: host, host, port, protocol, username: m[2] ?? '' };
 }

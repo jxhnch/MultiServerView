@@ -6,6 +6,7 @@ export function PromptDialog({
   label,
   initial = '',
   confirmLabel = 'OK',
+  secret = false,
   onSubmit,
   onClose,
 }: {
@@ -13,6 +14,7 @@ export function PromptDialog({
   label: string;
   initial?: string;
   confirmLabel?: string;
+  secret?: boolean;
   onSubmit: (value: string) => void;
   onClose: () => void;
 }) {
@@ -33,7 +35,7 @@ export function PromptDialog({
         <h2>{title}</h2>
         <label>
           {label}
-          <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onFocus={(e) => e.currentTarget.select()} />
+          <input autoFocus type={secret ? 'password' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} onFocus={(e) => e.currentTarget.select()} />
         </label>
         <div className="actions">
           <span className="grow" />

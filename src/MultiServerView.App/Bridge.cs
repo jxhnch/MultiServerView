@@ -165,7 +165,8 @@ internal sealed class Bridge : IDisposable
             }
             case "import.mremoteng":
             {
-                return ImportResult(MRemoteNgImporter.Parse(Str(p, "xml")), Opt(p, "workspace"));
+                var mpw = Opt(p, "masterPassword");
+                return ImportResult(MRemoteNgImporter.Parse(Str(p, "xml"), mpw.Length > 0 ? mpw : MRemoteNgCrypto.DefaultMasterPassword), Opt(p, "workspace"));
             }
 
             // ---------------------------------------------------------- Keys (private keys never leave the host towards the UI)
@@ -290,6 +291,25 @@ internal sealed class Bridge : IDisposable
                 // Fallback: normal Windows window (mstsc). You enter the credentials there yourself.
                 var server = _vault.FindResolved(Str(p, "serverId")) ?? throw new KeyNotFoundException("Server not found.");
                 Process.Start(new ProcessStartInfo("mstsc.exe", $"/v:{server.Host}:{server.Port}") { UseShellExecute = true });
+                return null;
+            }
+
+            case "teamviewer.open":
+            {
+                // Hands the ID and password to the installed TeamViewer client (no embedded session).
+                var server = _vault.FindResolved(Str(p, "serverId")) ?? throw new KeyNotFoundException("Server not found.");
+                var exe = FindTeamViewer() ?? throw new InvalidOperationException("TeamViewer is not installed on this PC (https://www.teamviewer.com).");
+                var id = new string(server.Host.Where(char.IsDigit).ToArray());
+                if (id.Length < 8) throw new ArgumentException("Please enter the TeamViewer ID of the partner (digits only).");
+                var info = new ProcessStartInfo(exe) { UseShellExecute = false };
+                info.ArgumentList.Add("-i");
+                info.ArgumentList.Add(id);
+                if (server.Password.Length > 0)
+                {
+                    info.ArgumentList.Add("--Password");
+                    info.ArgumentList.Add(server.Password);
+                }
+                Process.Start(info);
                 return null;
             }
 
@@ -767,8 +787,38 @@ internal sealed class Bridge : IDisposable
         foreach (var s in fresh)
             if (s.JumpHostId.Length > 0 && remap.TryGetValue(s.JumpHostId, out var mapped)) s.JumpHostId = mapped;
 
+        var keysImported = 0;
+        var keysSkipped = 0;
+        if (result.KeyFiles != null)
+        {
+            var byFile = new Dictionary<string, KeyEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in fresh)
+            {
+                if (!result.KeyFiles.TryGetValue(s.Id, out var file)) continue;
+                try
+                {
+                    var path = Environment.ExpandEnvironmentVariables(file.StartsWith("~") ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), file[1..].TrimStart('/', (char)92)) : file);
+                    if (!byFile.TryGetValue(path, out var key))
+                    {
+                        var text = File.ReadAllText(path);
+                        var kind = KeyTools.Inspect(text, "");
+                        key = _vault.UpsertKey(new KeyEntry { Name = Path.GetFileName(path), PrivateKey = text, Kind = kind });
+                        byFile[path] = key;
+                        keysImported++;
+                    }
+                    s.Auth = AuthMethod.Key;
+                    s.KeyId = key.Id;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SshConnectException or ArgumentException)
+                {
+                    keysSkipped++; // missing file, protected by a passphrase or not an OpenSSH key: the host just keeps password login
+                }
+            }
+        }
+
         var imported = _vault.UpsertMany(fresh);
-        return new { imported, skipped = result.Skipped, duplicates = result.Servers.Count - fresh.Count };
+        var passwordsFailed = result.PasswordsFailed;
+        return new { imported, skipped = result.Skipped, duplicates = result.Servers.Count - fresh.Count, keysImported, keysSkipped, passwordsFailed };
     }
 
     /// <summary>Reads saved PuTTY sessions directly from the Windows registry.</summary>
@@ -787,6 +837,17 @@ internal sealed class Bridge : IDisposable
                 k.GetValue("Protocol") as string ?? "ssh",
                 k.GetValue("UserName") as string ?? "");
         }
+    }
+
+    private static string? FindTeamViewer()
+    {
+        foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) })
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            var exe = Path.Combine(root, "TeamViewer", "TeamViewer.exe");
+            if (File.Exists(exe)) return exe;
+        }
+        return null;
     }
 
     private SftpSession Sftp(JsonElement p) =>

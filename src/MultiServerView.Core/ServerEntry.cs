@@ -4,7 +4,10 @@ public enum Protocol
 {
     Ssh,
     Rdp,
-    Vnc
+    Vnc,
+
+    /// <summary>Remote support through the TeamViewer client; Host = TeamViewer ID.</summary>
+    Teamviewer
 }
 
 public enum AuthMethod

@@ -5,7 +5,7 @@ import { HostTile } from './HostTile';
 import { DEFAULT_PORT, PROTOCOL_LABEL, type Identity, type KeyInfo, type Protocol, type Server } from './types';
 import { askConfirm } from './Confirm';
 
-const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc'];
+const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'teamviewer'];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -158,7 +158,7 @@ export function HostPanel({
               autoFocus={isNew && focusField === 'host'}
               value={s.host}
               onChange={(e) => set('host', e.target.value)}
-              placeholder="192.168.1.10 or server.example.com"
+              placeholder={s.protocol === 'teamviewer' ? 'TeamViewer ID, e.g. 123 456 789' : '192.168.1.10 or server.example.com'}
             />
           </div>
         </div>
@@ -193,6 +193,7 @@ export function HostPanel({
           </label>
         </div>
 
+        {s.protocol !== 'teamviewer' && (
         <div className="group-card">
           <div className="port-row">
             {PROTOCOL_LABEL[s.protocol]} on
@@ -200,7 +201,9 @@ export function HostPanel({
             Port
           </div>
         </div>
+        )}
 
+        {s.protocol !== 'teamviewer' && (
         <div className="group-card">
           <h3>Connection</h3>
           <Field label="Via jump host">
@@ -217,6 +220,7 @@ export function HostPanel({
           </Field>
           {s.jumpHostId && <p className="hint">The connection goes to the jump host first and from there to this server (also multi-hop if the jump host has one itself).</p>}
         </div>
+        )}
 
         <div className="group-card">
           <h3>Credentials</h3>
@@ -246,9 +250,11 @@ export function HostPanel({
                   </button>
                 </div>
               )}
-              <Field label={s.protocol === 'rdp' ? 'Username (DOMAIN\\user)' : 'Username'}>
-                <input autoFocus={isNew && focusField === 'user'} value={s.username} onChange={(e) => set('username', e.target.value)} />
-              </Field>
+              {s.protocol !== 'teamviewer' && (
+                <Field label={s.protocol === 'rdp' ? 'Username (DOMAIN\\user)' : 'Username'}>
+                  <input autoFocus={isNew && focusField === 'user'} value={s.username} onChange={(e) => set('username', e.target.value)} />
+                </Field>
+              )}
               {!usesKey ? (
                 <Field label="Password">
                   <div className="pw-wrap">

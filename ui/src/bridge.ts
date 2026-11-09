@@ -365,7 +365,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'hosts.forget':
       return null;
     case 'import.mremoteng':
-      return onlyNative('Der mRemoteNG-Import');
+      return onlyNative('The mRemoteNG import');
 
     case 'keys.list':
       need();
@@ -431,6 +431,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
             PROMPT,
         );
       }, 150);
+      await new Promise((r) => setTimeout(r, 1200)); // demo: show the connecting animation
       return null;
     }
     case 'ssh.input':
@@ -454,6 +455,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'rdp.close':
     case 'rdp.suspend':
       return null;
+    case 'teamviewer.open':
+      return onlyNative('TeamViewer');
     case 'rdp.external':
       return onlyNative('RDP');
 
@@ -776,6 +779,9 @@ export interface ImportOutcome {
   imported: number;
   skipped: number;
   duplicates?: number;
+  keysImported?: number;
+  keysSkipped?: number;
+  passwordsFailed?: number;
 }
 
 export interface ProxmoxInput {
@@ -821,7 +827,7 @@ export const api = {
   serversDelete: (id: string) => call<void>('servers.delete', { id }),
   serversTouch: (id: string) => call<Server>('servers.touch', { id }),
   hostsForget: (id: string) => call<void>('hosts.forget', { id }),
-  importMremoteng: (xml: string, workspace?: string) => call<ImportOutcome>('import.mremoteng', { xml, workspace }),
+  importMremoteng: (xml: string, workspace?: string, masterPassword?: string) => call<ImportOutcome>('import.mremoteng', { xml, workspace, masterPassword }),
 
   keysList: () => call<KeyInfo[]>('keys.list'),
   keysSave: (k: { id?: string; name: string; privateKey?: string; passphrase?: string }) => call<KeyInfo>('keys.save', k),
@@ -843,6 +849,7 @@ export const api = {
   rdpClose: (sessionId: string) => call<void>('rdp.close', { sessionId }),
   rdpSuspend: (suspended: boolean) => call<void>('rdp.suspend', { suspended }),
   rdpExternal: (serverId: string) => call<void>('rdp.external', { serverId }),
+  teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
 
   identitiesList: () => call<Identity[]>('identities.list'),
   identitiesSave: (i: { id?: string; name: string; username: string; password?: string; auth: 'password' | 'key'; keyId: string }) =>

@@ -3,14 +3,15 @@ namespace MultiServerView.Core.Import;
 /// <summary>
 /// Reads an OpenSSH configuration (~/.ssh/config). Every concrete "Host" entry becomes an SSH host.
 /// Taken over: HostName, User, Port, ProxyJump (as a jump host if the jump host is imported as well).
-/// Not taken over: wildcard entries (Host *), Match blocks, IdentityFile (import keys individually), ProxyCommand.
+/// IdentityFile is reported in <see cref="ImportResult.KeyFiles"/> so the app can import the key.
+/// Not taken over: wildcard entries (Host *), Match blocks, ProxyCommand.
 /// </summary>
 public static class SshConfigImporter
 {
     private sealed class Block
     {
         public string Alias = "";
-        public string? HostName, User, ProxyJump;
+        public string? HostName, User, ProxyJump, IdentityFile;
         public int? Port;
     }
 
@@ -60,6 +61,7 @@ public static class SshConfigImporter
                 case "hostname": target.HostName ??= value; break;
                 case "user": target.User ??= value; break;
                 case "port": if (int.TryParse(value, out var p)) target.Port ??= p; break;
+                case "identityfile": target.IdentityFile ??= value.Trim('"'); break;
                 case "proxyjump": target.ProxyJump ??= value.Split(',')[0].Trim(); break;
             }
         }
@@ -85,7 +87,14 @@ public static class SshConfigImporter
             if (match != null && match != servers[i]) servers[i].JumpHostId = match.Id;
         }
 
-        return new ImportResult(servers, skipped);
+        var keyFiles = new Dictionary<string, string>();
+        for (var i = 0; i < blocks.Count; i++)
+        {
+            var file = blocks[i].IdentityFile ?? defaults.IdentityFile;
+            if (!string.IsNullOrWhiteSpace(file) && !file.Equals("none", StringComparison.OrdinalIgnoreCase)) keyFiles[servers[i].Id] = file;
+        }
+
+        return new ImportResult(servers, skipped, keyFiles);
     }
 
     private static (string key, string value) Split(string line)

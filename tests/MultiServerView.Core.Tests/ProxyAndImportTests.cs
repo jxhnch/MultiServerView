@@ -105,7 +105,7 @@ public class ImporterTests
 {
     private const string Sample = """
         <?xml version="1.0" encoding="utf-8"?>
-        <Connections Name="Connections" Export="false" EncryptionEngine="AES" BlockCipherMode="GCM" KdfIterations="1000" FullFileEncryption="false" Protected="x" ConfVersion="2.6">
+        <Connections Name="Connections" Export="false" EncryptionEngine="AES" BlockCipherMode="GCM" KdfIterations="1000" FullFileEncryption="false" ConfVersion="2.6">
           <Node Name="Production" Type="Container" Expanded="true">
             <Node Name="web-01" Type="Connection" Descr="Frontend" Hostname="10.0.0.5" Protocol="SSH2" Port="2222" Username="deploy" Password="encrypted" />
             <Node Name="ad-01" Type="Connection" Hostname="ad.corp.local" Protocol="RDP" Port="3389" Username="admin" Domain="CORP" />
@@ -131,7 +131,7 @@ public class ImporterTests
         Assert.Equal(2222, web.Port);
         Assert.Equal("Production", web.Group);
         Assert.Equal("Frontend", web.Notes);
-        Assert.Equal("", web.Password); // passwords are not imported
+        Assert.Equal("", web.Password); // an undecryptable password is dropped, not imported as garbage
 
         var ad = result.Servers.Single(s => s.Name == "ad-01");
         Assert.Equal("CORP\\admin", ad.Username);
