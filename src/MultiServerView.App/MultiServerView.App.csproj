@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>MultiServerView</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <RootNamespace>MultiServerView.App</RootNamespace>
   </PropertyGroup>
 
