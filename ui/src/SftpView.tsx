@@ -1,64 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import { api, onEvent } from './bridge';
+import { askConfirm } from './Confirm';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
-  IconArrowLeft, IconArrowRight, IconArrowUp, IconClose, IconEdit, IconFile, IconFolder, IconPlus, IconRefresh, IconText, IconTrash,
+  IconArrowLeft, IconArrowRight, IconClose, IconCopy, IconDownload, IconEdit, IconFile, IconFolder, IconPlus, IconRefresh, IconText, IconTrash, IconUpload,
 } from './Icons';
 import { PasswordPrompt, isAuthError, type Credentials } from './PasswordPrompt';
 import { PromptDialog } from './Prompt';
 import { RemoteEditor } from './RemoteEditor';
+import { OverwriteDialog, PropertiesDialog, type OverwriteChoice } from './SftpDialogs';
+import { SftpPane } from './SftpPane';
+import { compareEntry, fmtSize, fmtSpeed, joinPath, loadBookmarks, matchesMask, saveBookmarks, type DiffState, type Side } from './sftpUtil';
 import type { BrowseResult, FileEntry, Server, SessionStatus } from './types';
-import { askConfirm } from './Confirm';
+import { useSftpPane } from './useSftpPane';
 
-type Side = 'local' | 'remote';
 interface Transfer {
   id: string;
   name: string;
   direction: 'up' | 'down';
+  move: boolean;
   done: number;
   total: number;
+  started: number;
   state: 'running' | 'done' | 'error' | 'cancelled';
   message?: string;
 }
 
-const fmtSize = (n: number) => {
-  if (n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
-};
-const fmtDate = (iso: string) => {
-  const d = new Date(iso);
-  return isNaN(d.getTime()) || d.getFullYear() < 1980
-    ? ''
-    : d.toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' });
-};
-
-/** Split a path into clickable parts (Windows "C:\\a\\b" or Unix "/a/b"). */
-function crumbs(path: string, side: Side): { label: string; path: string }[] {
-  if (side === 'remote') {
-    const parts = path.split('/').filter(Boolean);
-    return [{ label: '/', path: '/' }, ...parts.map((p, i) => ({ label: p, path: '/' + parts.slice(0, i + 1).join('/') }))];
-  }
-  const win = path.includes('\\') || /^[A-Za-z]:/.test(path);
-  const sep = win ? '\\' : '/';
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  const out: { label: string; path: string }[] = [{ label: 'This PC', path: '' }];
-  parts.forEach((p, i) => {
-    const joined = parts.slice(0, i + 1).join(sep);
-    out.push({ label: p, path: win ? (i === 0 ? joined + '\\' : joined) : '/' + joined });
-  });
-  return out;
-}
-
-const joinPath = (dir: string, name: string, side: Side) => {
-  const sep = side === 'remote' || !dir.includes('\\') ? '/' : '\\';
-  return dir.endsWith(sep) ? dir + name : dir + sep + name;
-};
+type PromptKind = 'mkdir' | 'newfile' | 'rename' | 'mask' | 'unmask';
 
 export function SftpView({
   tabId,
@@ -79,21 +47,31 @@ export function SftpView({
 }) {
   const [status, setStatusState] = useState<SessionStatus>('connecting');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const credRef = useRef<Credentials | undefined>(undefined);
   const [retry, setRetry] = useState(0);
   const [authPrompt, setAuthPrompt] = useState(false);
   const [editing, setEditing] = useState<FileEntry | null>(null);
-  const [local, setLocal] = useState<BrowseResult | null>(null);
-  const [remote, setRemote] = useState<BrowseResult | null>(null);
-  const [sel, setSel] = useState<Record<Side, Set<string>>>({ local: new Set(), remote: new Set() });
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [prompt, setPrompt] = useState<null | { kind: 'mkdir' | 'rename'; side: Side; entry?: FileEntry }>(null);
+  const [prompt, setPrompt] = useState<null | { kind: PromptKind; side: Side; entry?: FileEntry }>(null);
   const [dropSide, setDropSide] = useState<Side | null>(null);
-  const lastClick = useRef<Record<Side, string | null>>({ local: null, remote: null });
-  const remotePath = useRef('/');
-  const localPath = useRef('');
-  const activeRef = useRef(active);
-  activeRef.current = active;
+  const [focusSide, setFocusSide] = useState<Side>('remote');
+  const [compare, setCompare] = useState(false);
+  const [ctx, setCtx] = useState<null | { x: number; y: number; side: Side; entry: FileEntry | null }>(null);
+  const [props, setProps] = useState<null | { side: Side; entries: FileEntry[] }>(null);
+  const [overwrite, setOverwrite] = useState<null | { names: string[]; resolve: (c: OverwriteChoice) => void }>(null);
+  const dragFrom = useRef<Side | null>(null);
+  const paneEls = { local: useRef<HTMLElement>(null), remote: useRef<HTMLElement>(null) };
+  const noticeTimer = useRef<number | undefined>(undefined);
+
+  const loadLocal = useCallback((path: string): Promise<BrowseResult> => (path === '' ? api.localRoots() : api.localBrowse(path)), []);
+  const loadRemote = useCallback((path: string): Promise<BrowseResult> => api.sftpList(tabId, path), [tabId]);
+  const local = useSftpPane('local', loadLocal);
+  const remote = useSftpPane('remote', loadRemote);
+  const pane = (side: Side) => (side === 'local' ? local : remote);
+
+  const bmKey = (side: Side) => `msv-sftp-bm-${side === 'remote' ? server.id : 'local'}`;
+  const [bookmarks, setBookmarks] = useState<Record<Side, string[]>>(() => ({ local: loadBookmarks('msv-sftp-bm-local'), remote: loadBookmarks(`msv-sftp-bm-${server.id}`) }));
 
   const setStatus = useCallback(
     (s: SessionStatus) => {
@@ -103,31 +81,13 @@ export function SftpView({
     [onStatus, tabId],
   );
 
-  const loadLocal = useCallback(async (path: string) => {
-    try {
-      const r = path === '' ? await api.localRoots() : await api.localBrowse(path);
-      localPath.current = r.path;
-      setLocal(r);
-      setSel((s) => ({ ...s, local: new Set() }));
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const flash = useCallback((msg: string) => {
+    setNotice(msg);
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(''), 4000);
   }, []);
 
-  const loadRemote = useCallback(
-    async (path: string) => {
-      try {
-        const r = await api.sftpList(tabId, path);
-        remotePath.current = r.path;
-        setRemote(r);
-        setSel((s) => ({ ...s, remote: new Set() }));
-        setError('');
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    },
-    [tabId],
-  );
+  const fail = (e: unknown) => setError((e as Error).message);
 
   // Connect
   useEffect(() => {
@@ -141,7 +101,7 @@ export function SftpView({
       .then(async ({ home }) => {
         if (cancelled) return;
         setStatus('connected');
-        await loadRemote(home);
+        await remote.navigate(home);
       })
       .catch((e: Error) => {
         if (cancelled) return;
@@ -156,217 +116,403 @@ export function SftpView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, reconnectKey, retry]);
 
-  // Local view: start folder (home) the first time
+  // Local pane: start in the home folder the first time
   useEffect(() => {
-    if (!local) void api.localBrowse('').then((r) => { localPath.current = r.path; setLocal(r); }).catch(() => undefined);
+    void api.localBrowse('').then(local.show).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Progress
+  // Progress of transfers and saves of files opened with a local program
   useEffect(
     () =>
       onEvent((e) => {
-        if (e.event !== 'sftp.progress' || e.sessionId !== tabId) return;
-        setTransfers((prev) =>
-          prev.map((t) => (t.id === e.transferId ? { ...t, name: e.name, done: e.done, total: e.total, state: e.finished ? t.state : 'running' } : t)),
-        );
+        if (e.event === 'sftp.progress' && e.sessionId === tabId)
+          setTransfers((prev) => prev.map((t) => (t.id === e.transferId ? { ...t, done: e.done, total: e.total } : t)));
+        if (e.event === 'sftp.externalSaved' && e.sessionId === tabId) {
+          if (e.error) setError(`Could not upload "${e.name}": ${e.error}`);
+          else flash(`"${e.name}" was saved to the server.`);
+        }
       }),
-    [tabId],
+    [tabId, flash],
   );
 
-  // ------------------------------------------------------------------ Actions
-  const entriesOf = (side: Side) => (side === 'local' ? local?.entries : remote?.entries) ?? [];
-  const selected = (side: Side) => entriesOf(side).filter((e) => sel[side].has(e.path));
+  const connected = status === 'connected';
 
-  function select(side: Side, entry: FileEntry, e: React.MouseEvent) {
-    setSel((prev) => {
-      const next = new Set(e.ctrlKey || e.metaKey ? prev[side] : []);
-      const list = entriesOf(side);
-      if (e.shiftKey && lastClick.current[side]) {
-        const a = list.findIndex((x) => x.path === lastClick.current[side]);
-        const b = list.findIndex((x) => x.path === entry.path);
-        list.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((x) => next.add(x.path));
-      } else if ((e.ctrlKey || e.metaKey) && prev[side].has(entry.path)) next.delete(entry.path);
-      else next.add(entry.path);
-      return { ...prev, [side]: next };
+  // the keyboard works in the pane that had the focus last
+  useEffect(() => {
+    if (active && connected) paneEls[focusSide].current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, connected]);
+
+  const other = (side: Side): Side => (side === 'local' ? 'remote' : 'local');
+
+  // ------------------------------------------------------------------ Navigation and selection
+  const go = (side: Side, path: string) => {
+    pane(side)
+      .navigate(path)
+      .then(() => setError(''))
+      .catch(fail);
+  };
+
+  const reload = async (side: Side) => {
+    try {
+      await pane(side).reload();
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const toggleBookmark = (side: Side) => {
+    const path = pane(side).data?.path;
+    if (!path) return;
+    setBookmarks((prev) => {
+      const list = prev[side].includes(path) ? prev[side].filter((b) => b !== path) : [...prev[side], path];
+      saveBookmarks(bmKey(side), list);
+      return { ...prev, [side]: list };
     });
-    if (!e.shiftKey) lastClick.current[side] = entry.path;
-  }
+  };
 
-  async function transfer(direction: 'up' | 'down', entries: FileEntry[]) {
-    if (entries.length === 0) return;
-    const destList = direction === 'up' ? remote?.entries : local?.entries;
-    const clash = entries.filter((en) => destList?.some((d) => d.name === en.name));
-    if (clash.length > 0 && !(await askConfirm(`${clash.map((c) => c.name).join(', ')} already exists at the destination and will be overwritten. Continue?`, { title: 'Overwrite file', confirmLabel: 'Overwrite', danger: true }))) return;
+  const activate = (side: Side, entry: FileEntry) => {
+    if (entry.isDir) return go(side, entry.path);
+    if (side === 'local') void api.localOpen(entry.path).catch(fail);
+    else if (connected) void api.sftpOpenExternal(tabId, entry.path).then(() => flash(`Opened "${entry.name}". Saving it in your program uploads it again.`)).catch(fail);
+  };
+
+  const selectWhere = (side: Side, test: (e: FileEntry) => boolean, add = false) => {
+    const m = pane(side);
+    const next = new Set(add ? m.sel : []);
+    for (const e of m.view) if (test(e)) next.add(e.path);
+    m.setSel(next);
+  };
+
+  // ------------------------------------------------------------------ Compare folders
+  const diffs = useMemo(() => {
+    if (!compare || !local.data || !remote.data) return { local: null, remote: null };
+    const build = (mine: FileEntry[], theirs: FileEntry[]) => {
+      const map = new Map(theirs.map((e) => [e.name, e]));
+      return new Map<string, DiffState>(mine.map((e) => [e.path, compareEntry(e, map)]));
+    };
+    return { local: build(local.data.entries, remote.data.entries), remote: build(remote.data.entries, local.data.entries) };
+  }, [compare, local.data, remote.data]);
+
+  // ------------------------------------------------------------------ Transfers
+  const askOverwrite = (names: string[]) => new Promise<OverwriteChoice>((resolve) => setOverwrite({ names, resolve }));
+
+  async function transferEntries(from: Side, entries: FileEntry[], move: boolean) {
+    if (entries.length === 0 || !connected) return;
+    const to = other(from);
+    const target = pane(to).data;
+    if (!target || (to === 'local' && target.path === '')) {
+      setError('Open a folder on the other side first.');
+      return;
+    }
+
+    const existing = new Map(target.entries.map((e) => [e.name, e]));
+    let list = entries;
+    const clash = entries.filter((e) => existing.has(e.name));
+    if (clash.length > 0) {
+      const choice = await askOverwrite(clash.map((c) => c.name));
+      if (choice === 'cancel') return;
+      if (choice === 'skip') list = entries.filter((e) => !existing.has(e.name));
+      if (choice === 'newer')
+        list = entries.filter((e) => {
+          const o = existing.get(e.name);
+          return !o || e.isDir || new Date(e.modified).getTime() > new Date(o.modified).getTime() + 2000;
+        });
+    }
+    if (list.length === 0) {
+      flash('Nothing to transfer.');
+      return;
+    }
 
     const id = crypto.randomUUID();
-    const label = entries.length === 1 ? entries[0].name : `${entries.length} items`;
-    setTransfers((prev) => [{ id, name: label, direction, done: 0, total: 0, state: 'running' as const }, ...prev].slice(0, 8));
+    const label = list.length === 1 ? list[0].name : `${list.length} items`;
+    const direction = from === 'local' ? 'up' : 'down';
+    setTransfers((prev) => [{ id, name: label, direction: direction as 'up' | 'down', move, done: 0, total: 0, started: Date.now(), state: 'running' as const }, ...prev].slice(0, 8));
     try {
-      if (direction === 'up') await api.sftpUpload(tabId, id, entries.map((x) => x.path), remotePath.current);
-      else await api.sftpDownload(tabId, id, entries.map((x) => x.path), localPath.current);
+      if (direction === 'up') await api.sftpUpload(tabId, id, list.map((x) => x.path), pane('remote').data?.path ?? '/');
+      else await api.sftpDownload(tabId, id, list.map((x) => x.path), pane('local').data?.path ?? '');
+      if (move) {
+        if (from === 'local') await api.localDelete(list.map((x) => x.path));
+        else for (const it of list) await api.sftpDelete(tabId, it.path);
+      }
       setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, state: 'done', done: t.total } : t)));
-      if (direction === 'up') await loadRemote(remotePath.current);
-      else await loadLocal(localPath.current);
     } catch (e) {
       const msg = (e as Error).message;
       setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, state: msg === 'Cancelled.' ? 'cancelled' : 'error', message: msg } : t)));
     }
+    await Promise.all([reload('remote'), reload('local')]);
   }
 
-  async function removeSelected() {
-    const items = selected('remote');
-    if (items.length === 0) return;
-    if (!(await askConfirm(`Permanently delete ${items.length === 1 ? `"${items[0].name}"` : `${items.length} items`} from the server?${items.some((i) => i.isDir) ? '\nFolders are deleted with their contents.' : ''}`, { title: 'Delete from server', confirmLabel: 'Delete', danger: true }))) return;
-    try {
-      for (const it of items) await api.sftpDelete(tabId, it.path);
-    } catch (e) {
-      setError((e as Error).message);
+  /** Move inside one pane (drag onto a folder). */
+  async function moveInto(side: Side, entries: FileEntry[], folder: FileEntry) {
+    const moving = entries.filter((e) => e.path !== folder.path);
+    if (moving.length === 0) return;
+    const names = new Set((await (side === 'remote' ? api.sftpList(tabId, folder.path) : api.localBrowse(folder.path))).entries.map((e) => e.name));
+    const clash = moving.filter((m) => names.has(m.name));
+    if (clash.length > 0) {
+      setError(`"${clash[0].name}" already exists in "${folder.name}". Nothing was moved.`);
+      return;
     }
-    await loadRemote(remotePath.current);
+    try {
+      for (const e of moving) {
+        const to = joinPath(folder.path, e.name, side);
+        if (side === 'remote') await api.sftpRename(tabId, e.path, to);
+        else await api.localRename(e.path, to);
+      }
+      flash(`Moved ${moving.length === 1 ? `"${moving[0].name}"` : `${moving.length} items`} to "${folder.name}".`);
+    } catch (e) {
+      fail(e);
+    }
+    await reload(side);
+  }
+
+  async function deleteEntries(side: Side, items: FileEntry[]) {
+    if (items.length === 0) return;
+    const what = items.length === 1 ? `"${items[0].name}"` : `${items.length} items`;
+    const hasDir = items.some((i) => i.isDir);
+    const ok =
+      side === 'remote'
+        ? await askConfirm(`Permanently delete ${what} from the server?${hasDir ? '\nFolders are deleted with their contents.' : ''}`, { title: 'Delete from server', confirmLabel: 'Delete', danger: true })
+        : await askConfirm(`Move ${what} to the Recycle Bin?`, { title: 'Delete on this PC', confirmLabel: 'Move to Recycle Bin', danger: true });
+    if (!ok) return;
+    try {
+      if (side === 'remote') for (const it of items) await api.sftpDelete(tabId, it.path);
+      else await api.localDelete(items.map((i) => i.path));
+    } catch (e) {
+      fail(e);
+    }
+    await reload(side);
   }
 
   async function submitPrompt(value: string) {
     const p = prompt;
     setPrompt(null);
     if (!p) return;
+    const m = pane(p.side);
+    const dir = m.data?.path ?? '';
     try {
-      if (p.kind === 'mkdir') {
-        if (p.side === 'remote') {
-          await api.sftpMkdir(tabId, joinPath(remotePath.current, value, 'remote'));
-          await loadRemote(remotePath.current);
-        } else {
-          await api.localMkdir(joinPath(localPath.current, value, 'local'));
-          await loadLocal(localPath.current);
+      if (p.kind === 'mask' || p.kind === 'unmask') {
+        const test = (e: FileEntry) => matchesMask(e.name, value);
+        if (p.kind === 'mask') selectWhere(p.side, test, true);
+        else {
+          const next = new Set(m.sel);
+          for (const e of m.view) if (test(e)) next.delete(e.path);
+          m.setSel(next);
         }
-      } else if (p.entry) {
-        const dir = remotePath.current;
-        await api.sftpRename(tabId, p.entry.path, joinPath(dir, value, 'remote'));
-        await loadRemote(dir);
+        return;
       }
+      const target = joinPath(dir, value, p.side);
+      if (p.kind === 'mkdir') {
+        if (p.side === 'remote') await api.sftpMkdir(tabId, target);
+        else await api.localMkdir(target);
+      } else if (p.kind === 'newfile') {
+        if (p.side === 'remote') await api.sftpCreateFile(tabId, target);
+        else await api.localCreateFile(target);
+      } else if (p.entry) {
+        if (p.side === 'remote') await api.sftpRename(tabId, p.entry.path, target);
+        else await api.localRename(p.entry.path, target);
+      }
+      await reload(p.side);
     } catch (e) {
-      setError((e as Error).message);
+      fail(e);
     }
   }
 
-  // Drag & drop between the panes
-  const onDragStart = (side: Side, entry: FileEntry, e: React.DragEvent) => {
-    if (!sel[side].has(entry.path)) setSel((s) => ({ ...s, [side]: new Set([entry.path]) }));
+  const copyPath = (path: string) => void navigator.clipboard.writeText(path).then(() => flash('Path copied.')).catch(() => setError('Copying is not allowed here.'));
+
+  // ------------------------------------------------------------------ Drag & drop
+  const onDragStartEntry = (side: Side, entry: FileEntry, e: DragEvent) => {
+    const m = pane(side);
+    if (!m.sel.has(entry.path)) m.setSel(new Set([entry.path]));
+    dragFrom.current = side;
     e.dataTransfer.setData('application/x-msv-side', side);
-    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.effectAllowed = 'copyMove';
   };
-  const onDrop = (target: Side, e: React.DragEvent) => {
-    e.preventDefault();
-    setDropSide(null);
-    const from = e.dataTransfer.getData('application/x-msv-side') as Side | '';
+  const draggedEntries = (side: Side) => {
+    const m = pane(side);
+    return m.selected();
+  };
+  const onDropOnPane = (target: Side, _e: DragEvent) => {
+    const from = dragFrom.current;
+    dragFrom.current = null;
     if (!from || from === target) return;
-    const items = selected(from).length > 0 ? selected(from) : [];
-    void transfer(from === 'local' ? 'up' : 'down', items);
+    void transferEntries(from, draggedEntries(from), false);
+  };
+  const onDropOnFolder = (target: Side, folder: FileEntry, _e: DragEvent) => {
+    const from = dragFrom.current;
+    dragFrom.current = null;
+    if (!from) return;
+    if (from === target) void moveInto(target, draggedEntries(from), folder);
+    else void transferEntries(from, draggedEntries(from), false); // dropping on a folder of the other side = copy into the current folder there
   };
 
-  // Keyboard: Del deletes, F2 renames (server side only)
-  const onKey = (side: Side, e: React.KeyboardEvent) => {
-    if (side !== 'remote') return;
-    if (e.key === 'Delete') void removeSelected();
-    if (e.key === 'F4') {
-      const one = selected('remote');
-      if (one.length === 1 && !one[0].isDir) setEditing(one[0]);
+  // ------------------------------------------------------------------ Keyboard (like WinSCP)
+  const startRename = (side: Side) => {
+    const one = pane(side).selected();
+    if (one.length === 1) setPrompt({ kind: 'rename', side, entry: one[0] });
+  };
+
+  const onPaneKey = (side: Side, e: KeyboardEvent) => {
+    const m = pane(side);
+    const sel = m.selected();
+    const focused = m.view.find((x) => x.path === m.cursor) ?? sel[0];
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    if (e.altKey && e.key === 'ArrowLeft') return void m.back().catch(fail);
+    if (e.altKey && e.key === 'ArrowRight') return void m.forward().catch(fail);
+    if (e.altKey && e.key === 'Enter') {
+      if (sel.length > 0) setProps({ side, entries: sel });
+      return;
     }
-    if (e.key === 'F2') {
-      const one = selected('remote');
-      if (one.length === 1) setPrompt({ kind: 'rename', side, entry: one[0] });
+    if (ctrl) {
+      if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        return selectWhere(side, () => true);
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        return void reload(side);
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        return m.setShowHidden(!m.showHidden);
+      }
+      return;
     }
+
+    switch (e.key) {
+      case 'Enter':
+        if (focused) activate(side, focused);
+        break;
+      case 'Backspace':
+        if (m.data && m.data.parent !== m.data.path) go(side, m.data.parent);
+        break;
+      case 'Delete':
+      case 'F8':
+        e.preventDefault();
+        void deleteEntries(side, sel);
+        break;
+      case 'F2':
+        e.preventDefault();
+        startRename(side);
+        break;
+      case 'F4':
+        e.preventDefault();
+        if (sel.length === 1 && !sel[0].isDir) {
+          if (side === 'remote') setEditing(sel[0]);
+          else void api.localOpen(sel[0].path).catch(fail);
+        }
+        break;
+      case 'F5':
+        e.preventDefault();
+        void transferEntries(side, sel, false);
+        break;
+      case 'F6':
+        e.preventDefault();
+        void transferEntries(side, sel, true);
+        break;
+      case 'F7':
+        e.preventDefault();
+        setPrompt({ kind: 'mkdir', side });
+        break;
+      case 'Tab':
+        e.preventDefault();
+        paneEls[other(side)].current?.focus();
+        break;
+      case 'Escape':
+        m.setSel(new Set());
+        break;
+      case '*': {
+        const next = new Set(m.view.filter((x) => !m.sel.has(x.path)).map((x) => x.path));
+        m.setSel(next);
+        break;
+      }
+      case '+':
+        setPrompt({ kind: 'mask', side });
+        break;
+      case '-':
+        setPrompt({ kind: 'unmask', side });
+        break;
+      default:
+    }
+  };
+
+  // ------------------------------------------------------------------ Context menu
+  const contextItems = (): MenuItem[] => {
+    if (!ctx) return [];
+    const { side, entry } = ctx;
+    const m = pane(side);
+    const to = other(side);
+    const targets = entry ? (m.sel.has(entry.path) ? m.selected() : [entry]) : [];
+    const one = targets.length === 1 ? targets[0] : null;
+    const moveWord = side === 'local' ? 'Upload' : 'Download';
+    const items: MenuItem[] = [];
+
+    if (entry) {
+      items.push({ label: entry.isDir && one ? 'Open folder' : 'Open', icon: <IconFolder size={14} />, disabled: !one, onClick: () => one && activate(side, one) });
+      if (side === 'remote') items.push({ label: 'Edit (built-in editor)', icon: <IconText size={14} />, disabled: !one || one.isDir, onClick: () => one && setEditing(one) });
+      if (side === 'local') items.push({ label: 'Show in Explorer', icon: <IconFolder size={14} />, disabled: !one, onClick: () => one && void api.localReveal(one.path).catch(fail) });
+      items.push({ label: `${moveWord} (F5)`, icon: side === 'local' ? <IconUpload size={14} /> : <IconDownload size={14} />, separator: true, disabled: !connected, onClick: () => void transferEntries(side, targets, false) });
+      items.push({ label: `${moveWord} and delete here (F6)`, icon: side === 'local' ? <IconUpload size={14} /> : <IconDownload size={14} />, disabled: !connected, onClick: () => void transferEntries(side, targets, true) });
+      items.push({ label: 'Rename (F2)', icon: <IconEdit size={14} />, separator: true, disabled: !one, onClick: () => startRename(side) });
+      items.push({ label: side === 'remote' ? 'Delete (Del)' : 'Delete – Recycle Bin (Del)', icon: <IconTrash size={14} />, danger: true, onClick: () => void deleteEntries(side, targets) });
+      items.push({ label: side === 'remote' ? 'Properties and permissions (Alt+Enter)' : 'Properties (Alt+Enter)', icon: <IconFile size={14} />, separator: true, onClick: () => setProps({ side, entries: targets }) });
+      items.push({ label: 'Copy path', icon: <IconCopy size={14} />, disabled: !one, onClick: () => one && copyPath(one.path) });
+      void to;
+    }
+    items.push({ label: 'New file…', icon: <IconFile size={14} />, separator: !!entry, disabled: !m.data || (side === 'local' && m.data.path === ''), onClick: () => setPrompt({ kind: 'newfile', side }) });
+    items.push({ label: 'New folder… (F7)', icon: <IconPlus size={14} />, disabled: !m.data || (side === 'local' && m.data.path === ''), onClick: () => setPrompt({ kind: 'mkdir', side }) });
+    items.push({ label: 'Select all (Ctrl+A)', separator: true, onClick: () => selectWhere(side, () => true) });
+    items.push({ label: 'Select by mask… (+)', onClick: () => setPrompt({ kind: 'mask', side }) });
+    items.push({ label: 'Invert selection (*)', onClick: () => m.setSel(new Set(m.view.filter((x) => !m.sel.has(x.path)).map((x) => x.path))) });
+    if (compare)
+      items.push({
+        label: 'Select newer and missing files',
+        onClick: () => {
+          const d = diffs[side];
+          selectWhere(side, (x) => !x.isDir && (d?.get(x.path) === 'only' || d?.get(x.path) === 'newer' || d?.get(x.path) === 'differs'));
+        },
+      });
+    items.push({ label: 'Refresh (Ctrl+R)', icon: <IconRefresh size={14} />, separator: true, onClick: () => void reload(side) });
+    return items;
   };
 
   // ------------------------------------------------------------------ Layout
-  const pane = (side: Side) => {
-    const data = side === 'local' ? local : remote;
-    const title = side === 'local' ? 'This PC' : server.name;
-    const navigate = (p: string) => (side === 'local' ? loadLocal(p) : loadRemote(p));
-    const count = sel[side].size;
-    return (
-      <section
-        className={'sftp-pane' + (dropSide === side ? ' drop' : '')}
-        onDragOver={(e) => {
-          e.preventDefault();
-          if (dropSide !== side) setDropSide(side);
-        }}
-        onDragLeave={() => setDropSide((d) => (d === side ? null : d))}
-        onDrop={(e) => onDrop(side, e)}
-        onKeyDown={(e) => onKey(side, e)}
-        tabIndex={0}
-      >
-        <header>
-          <span className="sftp-title">{title}</span>
-          <span className="grow" />
-          <button className="ghost icon-only" title="Up one folder" disabled={!data || (data.parent === '' && data.path === '')} onClick={() => data && navigate(data.parent)}>
-            <IconArrowUp size={15} />
-          </button>
-          <button className="ghost icon-only" title="Reload" onClick={() => navigate(data?.path ?? '')}>
-            <IconRefresh size={15} />
-          </button>
-          <button className="ghost icon-only" title="New folder" disabled={!data || (side === 'local' && data.path === '')} onClick={() => setPrompt({ kind: 'mkdir', side })}>
-            <IconPlus size={15} />
-          </button>
-          {side === 'remote' && (
-            <>
-              <button className="ghost icon-only" title="Edit as text (F4)" disabled={count !== 1 || selected('remote')[0]?.isDir} onClick={() => setEditing(selected('remote')[0])}>
-                <IconText size={15} />
-              </button>
-              <button className="ghost icon-only" title="Rename (F2)" disabled={count !== 1} onClick={() => setPrompt({ kind: 'rename', side, entry: selected('remote')[0] })}>
-                <IconEdit size={15} />
-              </button>
-              <button className="ghost icon-only danger" title="Delete (Del)" disabled={count === 0} onClick={() => void removeSelected()}>
-                <IconTrash size={15} />
-              </button>
-            </>
-          )}
-        </header>
-        <nav className="crumbs">
-          {data &&
-            crumbs(data.path, side).map((c, i, arr) => (
-              <span key={c.path + i}>
-                <button className="crumb" onClick={() => navigate(c.path)}>
-                  {c.label}
-                </button>
-                {i < arr.length - 1 && <span className="sep">›</span>}
-              </span>
-            ))}
-        </nav>
-        <div className="file-head">
-          <span className="c-name">Name</span>
-          <span className="c-size">Size</span>
-          <span className="c-date">Modified</span>
-          {side === 'remote' && <span className="c-mode">Permissions</span>}
-        </div>
-        <div className="file-list">
-          {data?.entries.length === 0 && <div className="muted pad-sm">This folder is empty.</div>}
-          {data?.entries.map((en) => (
-            <div
-              key={en.path}
-              className={'file-row' + (sel[side].has(en.path) ? ' sel' : '')}
-              draggable
-              onDragStart={(e) => onDragStart(side, en, e)}
-              onClick={(e) => select(side, en, e)}
-              onDoubleClick={() => (en.isDir ? navigate(en.path) : void transfer(side === 'local' ? 'up' : 'down', [en]))}
-            >
-              <span className="c-name">
-                <span className={'f-ico' + (en.isDir ? ' dir' : '')}>{en.isDir ? <IconFolder size={16} /> : <IconFile size={16} />}</span>
-                <span className="f-name">{en.name}</span>
-              </span>
-              <span className="c-size muted">{en.isDir ? '' : fmtSize(en.size)}</span>
-              <span className="c-date muted">{fmtDate(en.modified)}</span>
-              {side === 'remote' && <span className="c-mode muted mono">{en.mode}</span>}
-            </div>
-          ))}
-        </div>
-        <footer className="muted small">
-          {data ? `${data.entries.length} entries` : ''}
-          {count > 0 ? ` · ${count} selected` : ''}
-        </footer>
-      </section>
-    );
+  const paneProps = (side: Side) => {
+    const m = pane(side);
+    return {
+      model: m,
+      title: side === 'local' ? 'This PC' : server.name,
+      paneRef: paneEls[side],
+      diff: diffs[side],
+      bookmarks: bookmarks[side],
+      enabled: side === 'local' || connected,
+      dropActive: dropSide === side,
+      setDropActive: (on: boolean) => setDropSide(on ? side : null),
+      go: (path: string) => go(side, path),
+      onToggleBookmark: () => toggleBookmark(side),
+      onNewFile: () => setPrompt({ kind: 'newfile', side }),
+      onNewFolder: () => setPrompt({ kind: 'mkdir', side }),
+      onActivate: (en: FileEntry) => activate(side, en),
+      onContext: (ev: MouseEvent, entry: FileEntry | null) => setCtx({ x: ev.clientX, y: ev.clientY, side, entry }),
+      onKeyDown: (ev: KeyboardEvent) => onPaneKey(side, ev),
+      onDragStartEntry: (en: FileEntry, ev: DragEvent) => onDragStartEntry(side, en, ev),
+      onDropOnPane: (ev: DragEvent) => onDropOnPane(side, ev),
+      onDropOnFolder: (folder: FileEntry, ev: DragEvent) => onDropOnFolder(side, folder, ev),
+      onFocusPane: () => setFocusSide(side),
+    };
   };
+
+  const promptTitle: Record<PromptKind, [string, string, string]> = {
+    mkdir: ['New folder', 'Folder name', 'Create'],
+    newfile: ['New file', 'File name', 'Create'],
+    rename: ['Rename', 'New name', 'Rename'],
+    mask: ['Select by mask', 'Mask (e.g. *.log;*.txt)', 'Select'],
+    unmask: ['Deselect by mask', 'Mask (e.g. *.log;*.txt)', 'Deselect'],
+  };
+
+  const running = transfers.filter((t) => t.state === 'running').length;
 
   return (
     <div className="sftp">
@@ -378,6 +524,9 @@ export function SftpView({
           {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting…' : 'Error'}
         </span>
         <span className="grow" />
+        <button className={'ghost' + (compare ? ' on' : '')} title="Mark files that differ between the two folders" onClick={() => setCompare((c) => !c)}>
+          Compare folders
+        </button>
         <button className="ghost" onClick={onReconnect}>
           <IconRefresh size={15} /> Reconnect
         </button>
@@ -386,7 +535,7 @@ export function SftpView({
         </button>
       </div>
 
-      {status === 'error' && !remote ? (
+      {status === 'error' && !remote.data ? (
         <div className="sftp-fail">
           <div className="error">{error || 'Connection failed.'}</div>
           <button className="primary" onClick={onReconnect}>
@@ -395,23 +544,36 @@ export function SftpView({
         </div>
       ) : (
         <div className="sftp-main">
-          {pane('local')}
+          <SftpPane {...paneProps('local')} />
           <div className="sftp-mid">
-            <button className="primary icon-only" title="Upload selection" disabled={sel.local.size === 0 || status !== 'connected'} onClick={() => void transfer('up', selected('local'))}>
+            <button className="primary icon-only" title="Upload selection (F5)" disabled={local.sel.size === 0 || !connected} onClick={() => void transferEntries('local', local.selected(), false)}>
               <IconArrowRight size={17} />
             </button>
-            <button className="primary icon-only" title="Download selection" disabled={sel.remote.size === 0 || status !== 'connected'} onClick={() => void transfer('down', selected('remote'))}>
+            <button className="primary icon-only" title="Download selection (F5)" disabled={remote.sel.size === 0 || !connected} onClick={() => void transferEntries('remote', remote.selected(), false)}>
               <IconArrowLeft size={17} />
             </button>
           </div>
-          {pane('remote')}
+          <SftpPane {...paneProps('remote')} />
         </div>
       )}
 
-      {error && status === 'connected' && (
-        <div className="sftp-error">
-          <span className="error">{error}</span>
-          <button className="ghost icon-only" onClick={() => setError('')}>
+      <div className="fkeys muted small">
+        <span><b>F2</b> Rename</span>
+        <span><b>F4</b> Edit</span>
+        <span><b>F5</b> Copy</span>
+        <span><b>F6</b> Move</span>
+        <span><b>F7</b> New folder</span>
+        <span><b>Del</b> Delete</span>
+        <span><b>Alt+Enter</b> Properties</span>
+        <span><b>Tab</b> Other side</span>
+        <span className="grow" />
+        <span>{focusSide === 'local' ? 'This PC' : server.name} is active</span>
+      </div>
+
+      {(error || notice) && (
+        <div className={'sftp-error' + (error ? '' : ' ok')}>
+          <span className={error ? 'error' : ''}>{error || notice}</span>
+          <button className="ghost icon-only" onClick={() => (error ? setError('') : setNotice(''))}>
             <IconClose size={14} />
           </button>
         </div>
@@ -419,41 +581,74 @@ export function SftpView({
 
       {transfers.length > 0 && (
         <div className="transfers">
-          {transfers.map((t) => (
-            <div key={t.id} className={'transfer ' + t.state}>
-              <span className="t-dir">{t.direction === 'up' ? '↑' : '↓'}</span>
-              <span className="t-name">{t.name}</span>
-              <div className="t-bar">
-                <i style={{ width: `${t.total > 0 ? Math.min(100, (t.done / t.total) * 100) : t.state === 'done' ? 100 : 4}%` }} />
+          {transfers.map((t) => {
+            const secs = Math.max((Date.now() - t.started) / 1000, 0.5);
+            const speed = t.done / secs;
+            const eta = speed > 0 && t.total > t.done ? Math.ceil((t.total - t.done) / speed) : 0;
+            return (
+              <div key={t.id} className={'transfer ' + t.state}>
+                <span className="t-dir">{t.direction === 'up' ? '↑' : '↓'}</span>
+                <span className="t-name">
+                  {t.name}
+                  {t.move && <span className="muted small"> (move)</span>}
+                </span>
+                <div className="t-bar">
+                  <i style={{ width: `${t.total > 0 ? Math.min(100, (t.done / t.total) * 100) : t.state === 'done' ? 100 : 4}%` }} />
+                </div>
+                <span className="t-info muted small">
+                  {t.state === 'running' && (t.total > 0 ? `${fmtSize(t.done)} / ${fmtSize(t.total)} · ${fmtSpeed(speed)}${eta ? ` · ${eta}s left` : ''}` : 'Starting…')}
+                  {t.state === 'done' && 'Done'}
+                  {t.state === 'cancelled' && 'Cancelled'}
+                  {t.state === 'error' && <span className="error">{t.message}</span>}
+                </span>
+                {t.state === 'running' ? (
+                  <button className="ghost icon-only" title="Cancel" onClick={() => void api.sftpCancel(t.id)}>
+                    <IconClose size={14} />
+                  </button>
+                ) : (
+                  <button className="ghost icon-only" title="Remove" onClick={() => setTransfers((p) => p.filter((x) => x.id !== t.id))}>
+                    <IconClose size={14} />
+                  </button>
+                )}
               </div>
-              <span className="t-info muted small">
-                {t.state === 'running' && (t.total > 0 ? `${fmtSize(t.done)} / ${fmtSize(t.total)}` : 'Starting…')}
-                {t.state === 'done' && 'Done'}
-                {t.state === 'cancelled' && 'Cancelled'}
-                {t.state === 'error' && <span className="error">{t.message}</span>}
-              </span>
-              {t.state === 'running' ? (
-                <button className="ghost icon-only" title="Cancel" onClick={() => void api.sftpCancel(t.id)}>
-                  <IconClose size={14} />
-                </button>
-              ) : (
-                <button className="ghost icon-only" title="Remove" onClick={() => setTransfers((p) => p.filter((x) => x.id !== t.id))}>
-                  <IconClose size={14} />
-                </button>
-              )}
-            </div>
-          ))}
+            );
+          })}
+          {transfers.length > 1 && running === 0 && (
+            <button className="ghost small" onClick={() => setTransfers([])}>
+              Clear list
+            </button>
+          )}
         </div>
       )}
 
+      {ctx && <ContextMenu x={ctx.x} y={ctx.y} items={contextItems()} onClose={() => setCtx(null)} />}
       {prompt && (
         <PromptDialog
-          title={prompt.kind === 'mkdir' ? 'New folder' : 'Rename'}
-          label={prompt.kind === 'mkdir' ? 'Folder name' : 'New name'}
-          initial={prompt.kind === 'rename' ? prompt.entry?.name : ''}
-          confirmLabel={prompt.kind === 'mkdir' ? 'Create' : 'Rename'}
+          title={promptTitle[prompt.kind][0]}
+          label={promptTitle[prompt.kind][1]}
+          initial={prompt.kind === 'rename' ? prompt.entry?.name : prompt.kind === 'mask' || prompt.kind === 'unmask' ? '*.*' : ''}
+          confirmLabel={promptTitle[prompt.kind][2]}
           onSubmit={(v) => void submitPrompt(v)}
           onClose={() => setPrompt(null)}
+        />
+      )}
+      {overwrite && (
+        <OverwriteDialog
+          names={overwrite.names}
+          onChoice={(c) => {
+            overwrite.resolve(c);
+            setOverwrite(null);
+          }}
+        />
+      )}
+      {props && (
+        <PropertiesDialog
+          side={props.side}
+          sessionId={tabId}
+          entries={props.entries}
+          onClose={() => setProps(null)}
+          onChanged={() => void reload(props.side)}
+          toast={(m, k) => (k === 'error' ? setError(m) : flash(m))}
         />
       )}
       {editing && <RemoteEditor sessionId={tabId} file={editing} onClose={() => setEditing(null)} />}
@@ -472,3 +667,4 @@ export function SftpView({
     </div>
   );
 }
+

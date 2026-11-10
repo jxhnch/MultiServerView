@@ -30,6 +30,40 @@ public class FeatureIntegrationTests : IDisposable
     private static Func<string, int, string, HostKeyTrust> Accept() => (_, _, _) => HostKeyTrust.NewlyTrusted;
 
     [Fact]
+    public async Task Sftp_stat_chmod_create_file_and_checksum()
+    {
+        if (Dir == null) return;
+        using var sftp = new SftpSession(Server(), null, Accept());
+        await sftp.ConnectAsync();
+        await sftp.MakeDirAsync(_remoteRoot);
+
+        var file = _remoteRoot + "/new.txt";
+        await sftp.CreateFileAsync(file);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sftp.CreateFileAsync(file)); // never overwrites
+
+        await sftp.WriteTextAsync(file, "abc", "lf", false, 0, 0, force: true);
+        Assert.Equal("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", await sftp.ChecksumAsync(file));
+
+        await sftp.ChmodAsync(file, 0x1A0, false); // 640
+        var stat = await sftp.StatAsync(file);
+        Assert.Equal(0x1A0, stat.Permissions);
+        Assert.Equal("-rw-r-----", stat.Mode);
+        Assert.Equal(3, stat.Size);
+
+        // folders: recursive size and recursive chmod
+        await sftp.MakeDirAsync(_remoteRoot + "/dir");
+        await sftp.WriteTextAsync(_remoteRoot + "/dir/a.txt", "12345", "lf", false, 0, 0, force: true).ContinueWith(_ => { });
+        var dirStat = await sftp.StatAsync(_remoteRoot);
+        Assert.True(dirStat.IsDir);
+        Assert.True(dirStat.Items >= 1);
+
+        await sftp.ChmodAsync(_remoteRoot, 0x1ED, true); // 755 for everything inside
+        Assert.Equal(0x1ED, (await sftp.StatAsync(file)).Permissions);
+
+        await sftp.DeleteAsync(_remoteRoot);
+    }
+
+    [Fact]
     public async Task Sftp_browse_upload_download_rename_delete()
     {
         if (Dir == null) return;
@@ -47,7 +81,7 @@ public class FeatureIntegrationTests : IDisposable
         var last = new TransferProgress("", 0, 0, false);
         await sftp.UploadAsync(src, _remoteRoot, p => last = p, CancellationToken.None);
         Assert.True(last.Finished);
-        Assert.Equal(10 + 300_000, last.Total);
+        Assert.Equal("hello world".Length + 300_000, last.Total);
 
         var listing = await sftp.ListAsync(_remoteRoot + "/project");
         Assert.Equal(new[] { "under", "a.txt" }, listing.Entries.Select(e => e.Name));

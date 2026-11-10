@@ -2,6 +2,7 @@ import type { Credentials } from './PasswordPrompt';
 import {
   DEFAULT_PORT,
   type BrowseResult,
+  type FileStat,
   type FileEntry,
   type HostSettings,
   type ForwardItem,
@@ -35,6 +36,7 @@ export type HostEvent =
   | { event: 'sync.status'; state: 'off' | 'syncing' | 'ok' | 'error'; message: string; at?: string }
   | { event: 'forward.status'; ruleId: string; running: boolean; error: string | null }
   | { event: 'sftp.progress'; sessionId: string; transferId: string; name: string; done: number; total: number; finished: boolean }
+  | { event: 'sftp.externalSaved'; sessionId: string; name: string; error: string | null }
   | { event: 'window.state'; maximized: boolean }
   | { event: 'vault.changed' };
 
@@ -758,6 +760,48 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'sftp.cancel':
     case 'sftp.close':
       return null;
+    case 'sftp.createFile':
+      fsAdd(remoteFs, params.path, false, 0, '/');
+      return null;
+    case 'sftp.stat':
+    case 'local.stat': {
+      const remote = method === 'sftp.stat';
+      const fs = remote ? remoteFs : localFs;
+      const sep = remote ? '/' : '\\';
+      const e = fs.get(params.path);
+      if (!e) throw new Error('Path not found.');
+      const inside = [...fs.values()].filter((x) => x.path.startsWith(e.path + sep) && !x.isDir);
+      return {
+        name: e.name, path: e.path, isDir: e.isDir, isLink: false,
+        size: e.isDir ? inside.reduce((a, x) => a + x.size, 0) : e.size, items: inside.length,
+        permissions: remote ? (e.isDir ? 0o755 : 0o644) : -1, mode: e.mode, owner: 1000, group: 1000, modified: e.modified, accessed: e.modified,
+      };
+    }
+    case 'sftp.chmod': {
+      const bits = (params.mode as number) & 0o777;
+      const rwx = (b: number) => ((b & 4) ? 'r' : '-') + ((b & 2) ? 'w' : '-') + ((b & 1) ? 'x' : '-');
+      for (const path of params.paths as string[]) {
+        const e = remoteFs.get(path);
+        if (e) e.mode = (e.isDir ? 'd' : '-') + rwx(bits >> 6) + rwx(bits >> 3) + rwx(bits);
+      }
+      return null;
+    }
+    case 'sftp.checksum':
+    case 'local.checksum':
+      return { sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' };
+    case 'sftp.openExternal':
+    case 'local.open':
+    case 'local.reveal':
+      return onlyNative('Opening files with local programs');
+    case 'local.createFile':
+      fsAdd(localFs, params.path, false, 0, '\\');
+      return null;
+    case 'local.rename':
+      fsRename(localFs, params.from, params.to, '\\');
+      return null;
+    case 'local.delete':
+      for (const path of params.paths as string[]) fsDelete(localFs, path, '\\');
+      return null;
     case 'local.browse':
       return fsList(localFs, params.path || 'C:\\Users\\demo', '\\');
     case 'local.roots':
@@ -913,6 +957,18 @@ export const api = {
   sftpDownload: (sessionId: string, transferId: string, remotePaths: string[], localDir: string) =>
     call<void>('sftp.download', { sessionId, transferId, remotePaths, localDir }),
   sftpCancel: (transferId: string) => call<void>('sftp.cancel', { transferId }),
+  sftpCreateFile: (sessionId: string, path: string) => call<void>('sftp.createFile', { sessionId, path }),
+  sftpStat: (sessionId: string, path: string) => call<FileStat>('sftp.stat', { sessionId, path }),
+  sftpChmod: (sessionId: string, paths: string[], mode: number, recursive: boolean) => call<void>('sftp.chmod', { sessionId, paths, mode, recursive }),
+  sftpChecksum: (sessionId: string, path: string) => call<{ sha256: string }>('sftp.checksum', { sessionId, path }),
+  sftpOpenExternal: (sessionId: string, path: string) => call<void>('sftp.openExternal', { sessionId, path }),
+  localStat: (path: string) => call<FileStat>('local.stat', { path }),
+  localChecksum: (path: string) => call<{ sha256: string }>('local.checksum', { path }),
+  localCreateFile: (path: string) => call<void>('local.createFile', { path }),
+  localRename: (from: string, to: string) => call<void>('local.rename', { from, to }),
+  localDelete: (paths: string[]) => call<void>('local.delete', { paths }),
+  localOpen: (path: string) => call<void>('local.open', { path }),
+  localReveal: (path: string) => call<void>('local.reveal', { path }),
   sftpClose: (sessionId: string) => call<void>('sftp.close', { sessionId }),
   localBrowse: (path: string) => call<BrowseResult>('local.browse', { path }),
   localRoots: () => call<BrowseResult>('local.roots'),

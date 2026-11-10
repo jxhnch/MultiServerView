@@ -1,7 +1,11 @@
 namespace MultiServerView.Core.Sftp;
 
 /// <summary>An entry in a file list (local or on the server).</summary>
-public sealed record FileEntry(string Name, string Path, bool IsDir, long Size, DateTimeOffset Modified, string Mode);
+public sealed record FileEntry(string Name, string Path, bool IsDir, long Size, DateTimeOffset Modified, string Mode, bool IsLink = false);
+
+/// <summary>Details shown in the properties dialog (local or on the server).</summary>
+public sealed record FileStat(string Name, string Path, bool IsDir, bool IsLink, long Size, int Items, int Permissions, string Mode, uint Owner, uint Group,
+    DateTimeOffset Modified, DateTimeOffset Accessed);
 
 public sealed record BrowseResult(string Path, string Parent, List<FileEntry> Entries);
 
@@ -57,4 +61,47 @@ public static class LocalFs
     }
 
     public static void MakeDir(string path) => Directory.CreateDirectory(path);
+
+    public static void CreateFile(string path)
+    {
+        if (File.Exists(path) || Directory.Exists(path)) throw new IOException("\"" + Path.GetFileName(path) + "\" already exists.");
+        using (File.Create(path)) { }
+    }
+
+    public static void Rename(string from, string to)
+    {
+        if (File.Exists(to) || Directory.Exists(to)) throw new IOException("\"" + Path.GetFileName(to) + "\" already exists.");
+        if (Directory.Exists(from)) Directory.Move(from, to);
+        else File.Move(from, to);
+    }
+
+    /// <summary>Size, item count and dates. For folders the size is summed up over everything inside.</summary>
+    public static Task<FileStat> StatAsync(string path, CancellationToken ct = default) => Task.Run(() =>
+    {
+        var isDir = Directory.Exists(path);
+        FileSystemInfo info = isDir ? new DirectoryInfo(path) : new FileInfo(path);
+        if (!info.Exists) throw new FileNotFoundException("Not found: " + path);
+
+        long size = 0;
+        var items = 0;
+        if (isDir)
+        {
+            foreach (var f in new DirectoryInfo(path).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 }))
+            {
+                ct.ThrowIfCancellationRequested();
+                size += f.Length;
+                items++;
+            }
+        }
+        else size = ((FileInfo)info).Length;
+
+        return new FileStat(info.Name, info.FullName, isDir, info.LinkTarget != null, size, items, -1, info.Attributes.ToString(), 0, 0,
+            new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero), new DateTimeOffset(info.LastAccessTimeUtc, TimeSpan.Zero));
+    }, ct);
+
+    public static async Task<string> ChecksumAsync(string path, CancellationToken ct = default)
+    {
+        await using var stream = File.OpenRead(path);
+        return Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+    }
 }

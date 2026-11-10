@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Sftp;
@@ -61,7 +62,7 @@ public sealed class SftpSession : IDisposable
         var full = Normalize(client.WorkingDirectory, path);
         var entries = client.ListDirectory(full)
             .Where(f => f.Name != "." && f.Name != "..")
-            .Select(f => new FileEntry(f.Name, f.FullName, f.IsDirectory, f.IsDirectory ? 0 : f.Length, new DateTimeOffset(f.LastWriteTimeUtc, TimeSpan.Zero), Mode(f.Attributes)))
+            .Select(f => new FileEntry(f.Name, f.FullName, f.IsDirectory, f.IsDirectory ? 0 : f.Length, new DateTimeOffset(f.LastWriteTimeUtc, TimeSpan.Zero), Mode(f.Attributes), f.IsSymbolicLink))
             .OrderByDescending(e => e.IsDir)
             .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -69,6 +70,69 @@ public sealed class SftpSession : IDisposable
     });
 
     public Task MakeDirAsync(string path) => Task.Run(() => Client.CreateDirectory(path));
+
+    /// <summary>Creates an empty file (fails if the name is taken).</summary>
+    public Task CreateFileAsync(string path) => Task.Run(() =>
+    {
+        var client = Client;
+        if (client.Exists(path)) throw new InvalidOperationException("\"" + path.Split('/').Last() + "\" already exists.");
+        using (client.Create(path)) { }
+    });
+
+    /// <summary>Properties of a file or folder. For folders the size and the number of files are summed up over everything inside.</summary>
+    public Task<FileStat> StatAsync(string path, CancellationToken ct = default) => Task.Run(() =>
+    {
+        var client = Client;
+        var file = client.Get(path);
+        var a = file.Attributes;
+        long size = file.IsDirectory ? 0 : file.Length;
+        var items = 0;
+        if (file.IsDirectory) SumFolder(client, path, ref size, ref items, ct, 0);
+        return new FileStat(file.Name, file.FullName, file.IsDirectory, file.IsSymbolicLink, size, items, PermissionBits(a), Mode(a), file.UserId > 0 ? (uint)file.UserId : 0, file.GroupId > 0 ? (uint)file.GroupId : 0,
+            new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero), new DateTimeOffset(file.LastAccessTimeUtc, TimeSpan.Zero));
+    }, ct);
+
+    private static void SumFolder(SftpClient client, string path, ref long size, ref int items, CancellationToken ct, int depth)
+    {
+        if (depth > 64) return; // protects against link loops
+        foreach (var f in client.ListDirectory(path))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (f.Name is "." or "..") continue;
+            if (f.IsDirectory && !f.IsSymbolicLink) SumFolder(client, f.FullName, ref size, ref items, ct, depth + 1);
+            else if (!f.IsDirectory)
+            {
+                size += f.Length;
+                items++;
+            }
+        }
+    }
+
+    /// <summary>Sets Unix permissions (e.g. 0x1ED = 755). Optionally for everything inside a folder as well.</summary>
+    public Task ChmodAsync(string path, int mode, bool recursive) => Task.Run(() =>
+    {
+        var client = Client;
+        if (mode is < 0 or > 0xFFF) throw new ArgumentException("The permissions must be between 000 and 7777.");
+        void Apply(string p, int depth)
+        {
+            // SSH.NET wants the octal digits as a decimal number: 0o640 is passed as 640
+            client.ChangePermissions(p, short.Parse(Convert.ToString(mode, 8)));
+            if (!recursive || depth > 64) return;
+            var f = client.Get(p);
+            if (!f.IsDirectory || f.IsSymbolicLink) return;
+            foreach (var child in client.ListDirectory(p))
+                if (child.Name is not ("." or "..") && !child.IsSymbolicLink) Apply(child.FullName, depth + 1);
+        }
+        Apply(path, 0);
+    });
+
+    /// <summary>SHA-256 of a remote file (read over SFTP, nothing is stored).</summary>
+    public async Task<string> ChecksumAsync(string path, CancellationToken ct = default)
+    {
+        var client = Client;
+        await using var stream = await Task.Run(() => client.OpenRead(path), ct);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+    }
 
     public Task RenameAsync(string from, string to) => Task.Run(() => Client.RenameFile(from, to));
 
@@ -266,6 +330,12 @@ public sealed class SftpSession : IDisposable
         var i = p.LastIndexOf('/');
         return i <= 0 ? "/" : p[..i];
     }
+
+    /// <summary>The nine permission bits as a number (e.g. 0x1ED for rwxr-xr-x).</summary>
+    public static int PermissionBits(SftpFileAttributes a) =>
+        (a.OwnerCanRead ? 0x100 : 0) | (a.OwnerCanWrite ? 0x80 : 0) | (a.OwnerCanExecute ? 0x40 : 0) |
+        (a.GroupCanRead ? 0x20 : 0) | (a.GroupCanWrite ? 0x10 : 0) | (a.GroupCanExecute ? 0x8 : 0) |
+        (a.OthersCanRead ? 0x4 : 0) | (a.OthersCanWrite ? 0x2 : 0) | (a.OthersCanExecute ? 0x1 : 0);
 
     private static string Mode(SftpFileAttributes a)
     {

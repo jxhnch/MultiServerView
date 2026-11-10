@@ -2565,3 +2565,218 @@ label {
 .mode-switch.wrap {
   flex-wrap: wrap;
 }
+
+/* ---- SFTP like WinSCP: sorting, address bar, filter, compare, dialogs */
+.sftp-pane header .on {
+  color: var(--accent);
+}
+.small-btn {
+  padding: 2px 5px;
+  margin-left: -4px;
+  font-size: 11px;
+}
+.addr-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 10px 6px;
+}
+.addr-row .crumbs {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  min-height: 28px;
+  cursor: text;
+}
+.addr-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  font-size: 12.5px;
+}
+.filter-input {
+  width: 140px;
+  flex: none;
+  height: 28px;
+  font-size: 12.5px;
+}
+.head-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0;
+}
+.head-btn:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+.c-size.head-btn {
+  text-align: right;
+}
+.sort-arrow {
+  margin-left: 4px;
+  font-size: 9px;
+}
+.file-head {
+  padding: 0 8px 6px 14px;
+}
+.file-row.cur {
+  outline: 1px dotted var(--muted);
+  outline-offset: -2px;
+}
+.file-row.sel.cur {
+  outline-color: var(--accent);
+}
+.sftp-pane:focus-within .file-row.sel {
+  background: var(--accent-soft);
+}
+.sftp-pane:not(:focus-within) .file-row.sel {
+  background: var(--hover);
+}
+.file-row.drop-folder {
+  background: var(--accent-soft);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.link-mark {
+  color: var(--muted);
+  font-size: 12px;
+}
+.diff-tag {
+  margin-left: 6px;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.diff-tag.only {
+  background: rgba(34, 160, 90, 0.16);
+  color: #1c8a4e;
+}
+.diff-tag.newer {
+  background: rgba(230, 150, 20, 0.18);
+  color: #b36d00;
+}
+.diff-tag.older {
+  background: rgba(120, 130, 150, 0.2);
+  color: var(--muted);
+}
+.diff-tag.differs {
+  background: rgba(220, 60, 60, 0.15);
+  color: #c23b3b;
+}
+.fkeys {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  padding: 4px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.fkeys b {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 4px;
+}
+.sftp-error.ok {
+  background: var(--accent-soft);
+}
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.choice-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 14px;
+  text-align: left;
+}
+.props .props-name {
+  font-weight: 700;
+  font-size: 16px;
+  margin: 10px 0 6px;
+  word-break: break-all;
+}
+.props-grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 12px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+.props-grid dt {
+  color: var(--muted);
+}
+.props-grid dd {
+  margin: 0;
+  word-break: break-all;
+}
+.perm-box {
+  border-top: 1px solid var(--line);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+.perm-box h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.perm-table {
+  border-collapse: collapse;
+  margin-bottom: 10px;
+}
+.perm-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 3px 18px 3px 0;
+  font-size: 13px;
+}
+.perm-table td {
+  padding: 3px 14px 3px 0;
+  font-size: 13px;
+}
+.perm-table label,
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.octal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.octal input {
+  width: 64px;
+}
+.center-v {
+  align-items: center;
+}
+.sum {
+  font-size: 11.5px;
+  word-break: break-all;
+  user-select: text;
+}
+.perm-table label,
+.inline-check,
+.octal {
+  flex-direction: row;
+  align-items: center;
+}
+.perm-table input[type='checkbox'],
+.inline-check input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+}

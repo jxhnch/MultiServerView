@@ -29,7 +29,7 @@
 
 ### Connect
 - **SSH terminal** – real terminal (xterm.js), password or key login, host key verification (trust on first use), 10 color schemes, fonts, a password prompt on failed logins just like PuTTY.
-- **SFTP** – two panes (this PC / server), drag & drop, whole folders with progress and cancel, rename, delete, **edit remote text files** in place (with a "changed on the server" safety check).
+- **SFTP like WinSCP** – two panes with drag & drop, folders with progress, speed and cancel; **F-keys** (F2 rename, F4 edit, F5 copy, F6 move, F7 new folder, Del delete, Alt+Enter properties), multi-select with masks, sortable columns, filter, hidden-files switch, editable path bar with back/forward history and bookmarks, right-click menus, move by dragging onto a folder, **overwrite choices** (all / only older / skip), **permissions (chmod)** with recursion, folder sizes, SHA-256 checksums, **open remote files in your own editor** and upload again on every save, built-in text editor, and **compare folders** to see what is new or different. The left pane works on your PC too (recycle bin, Show in Explorer).
 - **RDP** – the native Windows RDP control (the same as mstsc / mRemoteNG) right inside a tab.
 - **VNC** – noVNC in a tab, including Ctrl+Alt+Del and clipboard.
 - **TeamViewer** – save a partner ID (and password) as a host and start the installed TeamViewer client with one click.

@@ -95,6 +95,22 @@ export interface FileEntry {
   size: number;
   modified: string;
   mode: string;
+  isLink?: boolean;
+}
+export interface FileStat {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isLink: boolean;
+  size: number;
+  items: number;
+  /** Unix permission bits (e.g. 493 = 0755); -1 for local files. */
+  permissions: number;
+  mode: string;
+  owner: number;
+  group: number;
+  modified: string;
+  accessed: string;
 }
 export interface BrowseResult {
   path: string;

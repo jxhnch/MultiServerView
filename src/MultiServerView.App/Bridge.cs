@@ -503,6 +503,50 @@ internal sealed class Bridge : IDisposable
             case "sftp.close":
                 CloseSftp(Str(p, "sessionId"));
                 return null;
+            case "sftp.createFile":
+                await Sftp(p).CreateFileAsync(Str(p, "path"));
+                return null;
+            case "sftp.stat":
+                return await Sftp(p).StatAsync(Str(p, "path"));
+            case "sftp.chmod":
+            {
+                var session = Sftp(p);
+                foreach (var path in Strings(p, "paths")) await session.ChmodAsync(path, Int(p, "mode", 0), Bool(p, "recursive"));
+                return null;
+            }
+            case "sftp.checksum":
+                return new { sha256 = await Sftp(p).ChecksumAsync(Str(p, "path")) };
+            case "sftp.openExternal":
+                await OpenExternalAsync(Str(p, "sessionId"), Sftp(p), Str(p, "path"));
+                return null;
+            case "local.stat":
+                return await LocalFs.StatAsync(Str(p, "path"));
+            case "local.checksum":
+                return new { sha256 = await LocalFs.ChecksumAsync(Str(p, "path")) };
+            case "local.createFile":
+                LocalFs.CreateFile(Str(p, "path"));
+                return null;
+            case "local.rename":
+                LocalFs.Rename(Str(p, "from"), Str(p, "to"));
+                return null;
+            case "local.delete":
+            {
+                // Recycle bin, so a wrong click can be undone in Explorer.
+                foreach (var path in Strings(p, "paths"))
+                {
+                    if (Directory.Exists(path))
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    else
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                }
+                return null;
+            }
+            case "local.open":
+                OpenWithShell(Str(p, "path"));
+                return null;
+            case "local.reveal":
+                Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { "/select,", Str(p, "path") }, UseShellExecute = false });
+                return null;
             case "local.browse":
                 return LocalFs.Browse(Opt(p, "path").Length == 0 ? LocalFs.Home() : Opt(p, "path"));
             case "local.roots":
@@ -893,8 +937,97 @@ internal sealed class Bridge : IDisposable
     private SftpSession Sftp(JsonElement p) =>
         _sftp.TryGetValue(Str(p, "sessionId"), out var s) ? s : throw new InvalidOperationException("The SFTP connection is not open.");
 
+    // ---------------------------------------------------------------- Edit remote files with a local program (like WinSCP)
+
+    private sealed class ExternalEdit : IDisposable
+    {
+        public required FileSystemWatcher Watcher { get; init; }
+        public required string Dir { get; init; }
+        public CancellationTokenSource? Pending;
+
+        public void Dispose()
+        {
+            Watcher.Dispose();
+            Pending?.Cancel();
+            try { Directory.Delete(Dir, true); } catch (Exception) { /* the editor may still hold the file */ }
+        }
+    }
+
+    private readonly ConcurrentDictionary<string, List<ExternalEdit>> _external = new();
+
+    /// <summary>
+    /// Downloads the file to a temp folder, opens it with the program Windows associates with it and uploads it again
+    /// every time it is saved. The session event "sftp.externalSaved" tells the UI.
+    /// </summary>
+    private async Task OpenExternalAsync(string sessionId, SftpSession session, string remotePath)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "msv-edit", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        await session.DownloadAsync(remotePath, dir, _ => { }, CancellationToken.None);
+        var name = remotePath.TrimEnd('/').Split('/').Last();
+        var local = Path.Combine(dir, name);
+        if (!File.Exists(local)) throw new InvalidOperationException("Only files can be opened with a local program.");
+        var remoteDir = SftpSession.ParentOf(remotePath);
+
+        var edit = new ExternalEdit
+        {
+            Dir = dir,
+            Watcher = new FileSystemWatcher(dir) { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName, EnableRaisingEvents = true }
+        };
+
+        void Changed(string changedName)
+        {
+            if (!changedName.Equals(name, StringComparison.OrdinalIgnoreCase)) return;
+            edit.Pending?.Cancel();
+            var cts = edit.Pending = new CancellationTokenSource();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(800, cts.Token); // editors write in several steps
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        try
+                        {
+                            await session.UploadAsync(local, remoteDir, _ => { }, CancellationToken.None);
+                            break;
+                        }
+                        catch (IOException) when (attempt < 5) { await Task.Delay(500, cts.Token); } // the editor still holds the file
+                    }
+                    _emit(new { @event = "sftp.externalSaved", sessionId, name, error = (string?)null });
+                }
+                catch (OperationCanceledException) { /* a newer save replaces this one */ }
+                catch (Exception ex)
+                {
+                    _emit(new { @event = "sftp.externalSaved", sessionId, name, error = Friendly(ex) });
+                }
+            });
+        }
+
+        edit.Watcher.Changed += (_, e) => Changed(e.Name ?? "");
+        edit.Watcher.Created += (_, e) => Changed(e.Name ?? "");
+        edit.Watcher.Renamed += (_, e) => Changed(e.Name ?? "");
+        _external.AddOrUpdate(sessionId, _ => new List<ExternalEdit> { edit }, (_, list) => { lock (list) list.Add(edit); return list; });
+
+        OpenWithShell(local);
+    }
+
+    /// <summary>Opens a file with the program Windows associates with it (or asks "Open with…" if there is none).</summary>
+    private static void OpenWithShell(string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Process.Start(new ProcessStartInfo("rundll32.exe") { ArgumentList = { "shell32.dll,OpenAs_RunDLL", path }, UseShellExecute = false });
+        }
+    }
+
     private void CloseSftp(string sessionId)
     {
+        if (_external.TryRemove(sessionId, out var edits)) lock (edits) foreach (var e in edits) e.Dispose();
         if (_sftp.TryRemove(sessionId, out var s)) s.Dispose();
         if (_historyIds.TryRemove(sessionId, out var hid)) _history.End(hid, true);
     }
