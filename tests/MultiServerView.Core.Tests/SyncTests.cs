@@ -325,3 +325,58 @@ public class ExistingTargetTests
         Assert.Single(b.Store.List());
     }
 }
+
+public class SecondDeviceTests
+{
+    [Fact]
+    public async Task Replacing_the_local_vault_takes_over_the_main_device_and_keeps_a_backup()
+    {
+        var cloud = new FakeSupabase();
+        using var main = new Device(cloud);
+        using var second = new Device(cloud);
+
+        main.Store.Create("main-password");
+        main.Store.Upsert(new ServerEntry { Name = "from-main", Host = "m" });
+        main.Sync.Save(Device.Config(cloud));
+        await main.Sync.SyncAsync();
+
+        second.Store.Create("second-password"); // its own, different vault
+        second.Store.Upsert(new ServerEntry { Name = "only-second", Host = "s" });
+        var oldBytes = File.ReadAllBytes(second.Store.FilePath);
+
+        var backup = await second.Sync.ReplaceLocalWithSyncedAsync(Device.Config(cloud));
+
+        Assert.False(second.Store.IsUnlocked);
+        Assert.True(File.Exists(backup));
+        Assert.Equal(oldBytes, File.ReadAllBytes(backup));
+
+        Assert.Throws<WrongPasswordException>(() => second.Store.Unlock("second-password"));
+        second.Store.Unlock("main-password");
+        Assert.Equal(new[] { "from-main" }, second.Store.List().Select(s => s.Name).ToArray());
+
+        // and from now on it syncs normally
+        second.Store.Upsert(new ServerEntry { Name = "added-later", Host = "x" });
+        await second.Sync.SyncAsync();
+        await main.Sync.SyncAsync();
+        Assert.Equal(new[] { "added-later", "from-main" }, main.Store.List().Select(s => s.Name).Order().ToArray());
+    }
+
+    [Fact]
+    public async Task Nothing_is_replaced_if_the_target_is_empty_or_not_a_vault()
+    {
+        var cloud = new FakeSupabase();
+        using var second = new Device(cloud);
+        second.Store.Create("second-password");
+        var before = File.ReadAllBytes(second.Store.FilePath);
+
+        await Assert.ThrowsAsync<SyncException>(() => second.Sync.ReplaceLocalWithSyncedAsync(Device.Config(cloud))); // empty target
+
+        cloud.Blob = Convert.ToBase64String(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50 });
+        cloud.Version = 3;
+        var ex = await Assert.ThrowsAsync<SyncException>(() => second.Sync.ReplaceLocalWithSyncedAsync(Device.Config(cloud)));
+        Assert.Contains("not a readable", ex.Message);
+
+        Assert.Equal(before, File.ReadAllBytes(second.Store.FilePath));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(second.Store.FilePath)!, "*.bak-*"));
+    }
+}

@@ -200,6 +200,28 @@ public sealed class VaultStore
         }
     }
 
+    /// <summary>
+    /// Replaces the local vault with another one (a synced vault from the main device). The old file is kept as
+    /// "vault.msv.bak-DATE" next to it. Afterwards the vault is locked: unlock with the master password of the new vault.
+    /// Returns the path of the backup ("" if there was no vault before).
+    /// </summary>
+    public string ReplaceWithBlob(byte[] blob)
+    {
+        lock (_gate)
+        {
+            var backup = "";
+            if (Exists)
+            {
+                backup = _path + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                File.Copy(_path, backup, overwrite: true);
+            }
+            _data = null;
+            _key = null;
+            WriteAtomic(blob);
+            return backup;
+        }
+    }
+
     // ------------------------------------------------------------------ Server
 
     public IReadOnlyList<ServerEntry> List()

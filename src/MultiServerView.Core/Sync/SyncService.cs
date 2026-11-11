@@ -217,6 +217,32 @@ public sealed class SyncService
         }
     }
 
+    /// <summary>
+    /// "Use this device as a second device": throws away the local vault in favour of the one at the sync target
+    /// (the local file is kept as a backup). Used when this device has its own, different vault. Returns the backup path.
+    /// </summary>
+    public async Task<string> ReplaceLocalWithSyncedAsync(SyncSettings cfg, CancellationToken ct = default)
+    {
+        if (!cfg.IsConfigured) throw new SyncException(cfg.IsFolder ? "Please choose a sync folder." : "Please fill in the sync details first.");
+
+        var remote = await CreateRemote(cfg).GetAsync(ct) ?? throw new SyncException("There is no vault at the sync target yet. Sync once on the main device first.");
+        if (!VaultCrypto.LooksLikeVault(remote.Blob))
+            throw new SyncException("The file at the sync location is not a readable MultiServerView vault. Nothing was changed on this device.");
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var backup = _store.ReplaceWithBlob(remote.Blob);
+            cfg.LastSync = DateTimeOffset.UtcNow;
+            _settings.Save(cfg);
+            return backup;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     /// <summary>Only checks whether the credentials are correct and the table exists (folder: whether it is writable).</summary>
     public async Task TestConnectionAsync(SyncSettings cfg, CancellationToken ct = default)
     {
@@ -244,6 +270,7 @@ public sealed class SyncService
                 "The sync location already contains a vault from another installation (created separately, or with a different master password). " +
                 "Nothing was overwritten. Please check that you picked the right folder or account. " +
                 "On a new device use \"Load vault\" instead of creating a new vault. " +
+                "If this device already has its own vault but should take over the data of the main device, use \"Replace this device's vault with the synced one\" on the Sync page. " +
                 "If you changed the master password on another device, use \"Adopt new master password\" (Sync page).")
             : new SyncException(
                 "The file at the sync location is not a readable MultiServerView vault (it is damaged or not a vault at all). " +

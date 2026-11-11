@@ -457,6 +457,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'rdp.close':
     case 'rdp.suspend':
       return null;
+    case 'sync.replaceLocal':
+      return onlyNative('Replacing the vault');
     case 'teamviewer.open':
       return onlyNative('TeamViewer');
     case 'mcp.status':
@@ -986,6 +988,7 @@ export const api = {
   vaultReveal: () => call<void>('vault.reveal'),
   syncAdoptPassword: (password: string) => call<void>('sync.adoptPassword', { password }),
   syncForceUpload: () => call<void>('sync.forceUpload'),
+  syncReplaceLocal: (c: SyncConfigInput) => call<{ backup: string }>('sync.replaceLocal', c),
   importSshConfig: (text: string, workspace?: string) => call<ImportOutcome>('import.sshconfig', { text, workspace }),
   importPutty: (text?: string, workspace?: string) => call<ImportOutcome>('import.putty', { text: text ?? '', workspace }),
   importCsv: (text: string, workspace?: string) => call<ImportOutcome>('import.csv', { text, workspace }),

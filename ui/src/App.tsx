@@ -738,7 +738,7 @@ export function App() {
                 />
               )}
               {section === 'mcp' && <McpPage toast={toast} />}
-              {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} toast={toast} />}
+              {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} onReplaced={() => void lock()} toast={toast} />}
               {section === 'settings' && <SettingsPage onLock={() => void lock()} onCleared={afterVaultCleared} toast={toast} />}
             </div>
 

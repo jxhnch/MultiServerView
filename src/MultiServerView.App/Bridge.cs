@@ -732,6 +732,16 @@ internal sealed class Bridge : IDisposable
                 _sync.Disconnect();
                 _emit(new { @event = "sync.status", state = "off", message = "Sync disconnected" });
                 return null;
+            case "sync.replaceLocal":
+            {
+                var backup = await _sync.ReplaceLocalWithSyncedAsync(ReadSyncConfig(p));
+                // the old vault is gone: close everything that was using it
+                CloseAllSessions();
+                foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
+                foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
+                _forwards.StopAll();
+                return new { backup };
+            }
             case "sync.downloadInitial":
                 await _sync.DownloadInitialAsync(ReadSyncConfig(p, keepStoredPassword: false));
                 return null;

@@ -85,6 +85,20 @@ public static class VaultCrypto
         return Decrypt(blob, key);
     }
 
+    /// <summary>true if the bytes have the header of a MultiServerView vault (does not check the password).</summary>
+    public static bool LooksLikeVault(byte[] blob)
+    {
+        try
+        {
+            ReadHeader(blob);
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
     private static (int iterations, byte[] salt) ReadHeader(byte[] blob)
     {
         if (blob.Length < HeaderSize + NonceSize + TagSize || !blob.AsSpan(0, 4).SequenceEqual(Magic))

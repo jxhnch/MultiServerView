@@ -9,11 +9,14 @@ export function CloudPanel({
   info,
   status,
   onChanged,
+  onReplaced,
   toast,
 }: {
   info: SyncInfo | null;
   status: SyncStatus;
   onChanged: () => Promise<void>;
+  /** The local vault was replaced by the synced one: lock and return to the unlock screen. */
+  onReplaced: () => void;
   toast: (msg: string, kind?: 'ok' | 'error') => void;
 }) {
   const [mode, setMode] = useState<'folder' | 'gist' | 'supabase'>('folder');
@@ -95,6 +98,19 @@ export function CloudPanel({
       await api.syncNow();
       await onChanged();
       toast('Account created, sync connected and synchronized');
+    });
+
+  const useAsSecond = () =>
+    run('second', async () => {
+      const ok = await askConfirm(
+        "Replace the vault of THIS device with the synced vault?\n\nEverything on this device (hosts, keys, snippets …) is replaced by the data of your main device. Your current vault file is kept as a backup next to it (vault.msv.bak-…).\n\nAfterwards you unlock with the master password of the main device.",
+        { title: 'Use this device as a second device', confirmLabel: 'Replace this device\'s vault', danger: true },
+      );
+      if (!ok) return;
+      await api.syncReplaceLocal(cfg());
+      setPassword('');
+      toast('Done. Unlock with the master password of your main device.');
+      onReplaced();
     });
 
   const now = () =>
@@ -238,6 +254,20 @@ export function CloudPanel({
           )}
           <button className="primary" onClick={save} disabled={!!busy || !ready}>
             <IconCloud size={15} /> {busy === 'save' ? 'Connecting…' : info?.configured ? 'Save & sync' : 'Connect'}
+          </button>
+        </div>
+      </div>
+
+      <div className="card-form">
+        <div className="list-title">Use this device as a second device</div>
+        <p className="muted small">
+          This device has its own vault, but you want the data of your main device? Enter the sync details above (the same as on the main device), then click here.
+          The vault of this device is replaced by the synced one (the old file is kept as a backup), and you unlock with the master password of the main device.
+          Sync then works normally.
+        </p>
+        <div className="actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="ghost danger" onClick={useAsSecond} disabled={!!busy || !ready}>
+            Replace this device's vault with the synced one…
           </button>
         </div>
       </div>
