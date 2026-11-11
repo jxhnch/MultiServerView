@@ -38,14 +38,14 @@ public sealed partial class MainForm : Form
         var vault = new VaultStore(Path.Combine(roaming, "vault.msv"));
         var settings = new SyncSettingsStore(Path.Combine(roaming, "sync.json"), new DpapiProtector());
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        var sync = new SyncService(vault, settings, cfg => new SupabaseClient(http, cfg.Url, cfg.AnonKey));
+        var source = new SourceService(vault, settings, cfg => new SupabaseClient(http, cfg.Url, cfg.AnonKey));
 
         var appSettings = new AppSettingsStore(Path.Combine(roaming, "settings.json"));
 
         Controls.Add(_web);
         _rdp = new RdpManager(this, Emit, () => appSettings.Current);
         var history = new HistoryStore(Path.Combine(roaming, "history.json"));
-        _bridge = new Bridge(vault, sync, history, appSettings, _rdp, Emit, PickSavePath, PickFolder, WindowCommand);
+        _bridge = new Bridge(vault, source, history, appSettings, _rdp, Emit, PickSavePath, PickFolder, WindowCommand);
     }
 
     /// <summary>Shows the "Save as" dialog (runs on the UI thread). null = cancelled.</summary>

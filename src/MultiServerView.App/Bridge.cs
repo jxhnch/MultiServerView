@@ -32,7 +32,7 @@ internal interface IRdpController
 internal sealed class Bridge : IDisposable
 {
     private readonly VaultStore _vault;
-    private readonly SyncService _sync;
+    private readonly SourceService _source;
     private readonly AutoSync _auto;
     private readonly IRdpController _rdp;
     private readonly Action<object> _emit;
@@ -50,7 +50,7 @@ internal sealed class Bridge : IDisposable
     private readonly WebSocketTcpProxy _vncProxy = new();
     private readonly McpService _mcp;
 
-    public Bridge(VaultStore vault, SyncService sync, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit,
+    public Bridge(VaultStore vault, SourceService source, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit,
         Func<string, Task<string?>> pickSavePath, Func<string, Task<string?>> pickFolder, Func<string, bool> window)
     {
         _pickFolder = pickFolder;
@@ -61,10 +61,10 @@ internal sealed class Bridge : IDisposable
         _pickSavePath = pickSavePath;
         _forwards.StatusChanged += (id, running, error) =>
             emit(new { @event = "forward.status", ruleId = id, running, error });
-        _sync = sync;
+        _source = source;
         _rdp = rdp;
         _emit = emit;
-        _auto = new AutoSync(vault, sync, emit);
+        _auto = new AutoSync(vault, source, emit, CloseEverythingForReplacedVault);
         _mcp = new McpService(vault, CheckHost, Jumps);
         _mcp.Apply(settings.Current);
     }
@@ -127,9 +127,17 @@ internal sealed class Bridge : IDisposable
                 _vault.Create(Str(p, "password"));
                 return null;
             case "vault.unlock":
+            {
+                // First look at the source: a newer vault from another device is taken over before it is opened.
+                if (_source.Settings.IsConfigured)
+                {
+                    try { await _auto.RefreshNowAsync(); }
+                    catch (Exception) { /* no connection: the copy on this PC is opened and saved later */ }
+                }
                 _vault.Unlock(Str(p, "password"));
-                _auto.RunSoon();
+                _ = _auto.RefreshNowAsync().ContinueWith(_ => { }); // saves waiting changes / reports a conflict
                 return null;
+            }
             case "vault.summary":
                 return _vault.Summary();
             case "vault.clear":
@@ -569,11 +577,14 @@ internal sealed class Bridge : IDisposable
             case "vault.changePassword":
             {
                 _vault.ChangePassword(Str(p, "oldPassword"), Str(p, "newPassword"));
-                if (!_sync.Settings.IsConfigured) return new { cloud = "none" };
+                if (!_source.Settings.IsConfigured) return new { cloud = "none" };
                 try
                 {
-                    await _sync.ForceUploadAsync();
-                    return new { cloud = "updated" };
+                    _source.MarkDirty();
+                    var outcome = await _source.PushAsync();
+                    return outcome == RefreshOutcome.NoChange
+                        ? new { cloud = "updated", message = "" }
+                        : new { cloud = "failed", message = _source.Status.Message };
                 }
                 catch (Exception ex)
                 {
@@ -591,12 +602,6 @@ internal sealed class Bridge : IDisposable
                 return new { path = _vault.FilePath, version = typeof(Bridge).Assembly.GetName().Version?.ToString(3) ?? "" };
             case "vault.reveal":
                 Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{_vault.FilePath}\"") { UseShellExecute = true });
-                return null;
-            case "sync.adoptPassword":
-                await _sync.AdoptCloudPasswordAsync(Str(p, "password"));
-                return null;
-            case "sync.forceUpload":
-                await _sync.ForceUploadAsync();
                 return null;
 
             // ---------------------------------------------------------- Further imports
@@ -703,48 +708,46 @@ internal sealed class Bridge : IDisposable
                 return new { imported, noIp = result.NoIp, skipped = result.Skipped };
             }
 
-            // ---------------------------------------------------------- Cloud
-            case "sync.get":
-                return SyncDto(_sync.Settings);
-            case "sync.save":
+            // ---------------------------------------------------------- Source of the vault
+            case "source.get":
+                return new { info = SourceDto(_source.Settings), status = AutoSync.StatusDto(_source.Status) };
+            case "source.probe":
             {
-                var cfg = ReadSyncConfig(p);
-                _sync.Save(cfg);
-                return SyncDto(cfg);
+                var r = await _source.ProbeAsync(ReadSourceConfig(p));
+                return new { kind = r.Kind.ToString().ToLowerInvariant(), sameVault = r.SameVault };
             }
-            case "window.command":
-                return new { maximized = _window(Str(p, "command")) };
-            case "sync.pickFolder":
-                return new { path = await _pickFolder("Choose sync folder (e.g. a folder in OneDrive or iCloud Drive)") };
-            case "dialog.pickFolder":
-                return new { path = await _pickFolder(Opt(p, "title").Length > 0 ? Opt(p, "title") : "Choose folder") };
-            case "sync.test":
-                await _sync.TestConnectionAsync(ReadSyncConfig(p));
-                return null;
-            case "sync.signUp":
-                return new { signedIn = await _sync.SignUpAsync(ReadSyncConfig(p)) };
-            case "sync.now":
+            case "source.moveHere":
+                await _source.MoveHereAsync(ReadSourceConfig(p), Bool(p, "overwrite"));
+                return new { info = SourceDto(_source.Settings), status = AutoSync.StatusDto(_source.Status) };
+            case "source.useExisting":
             {
-                var r = await _auto.RunAsync();
-                return new { outcome = r.Outcome.ToString(), at = r.At };
-            }
-            case "sync.disconnect":
-                _sync.Disconnect();
-                _emit(new { @event = "sync.status", state = "off", message = "Sync disconnected" });
-                return null;
-            case "sync.replaceLocal":
-            {
-                var backup = await _sync.ReplaceLocalWithSyncedAsync(ReadSyncConfig(p));
-                // the old vault is gone: close everything that was using it
-                CloseAllSessions();
-                foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
-                foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
-                _forwards.StopAll();
+                var backup = await _source.UseExistingAsync(ReadSourceConfig(p, keepStoredPassword: false));
+                CloseEverythingForReplacedVault();
                 return new { backup };
             }
-            case "sync.downloadInitial":
-                await _sync.DownloadInitialAsync(ReadSyncConfig(p, keepStoredPassword: false));
-                return null;
+            case "source.resolve":
+            {
+                var choice = Str(p, "choice");
+                var backup = await _source.ResolveAsync(choice);
+                if (choice == "source") CloseEverythingForReplacedVault();
+                return new { backup };
+            }
+            case "source.retry":
+            {
+                await _auto.RefreshNowAsync();
+                return new { status = AutoSync.StatusDto(_source.Status) };
+            }
+            case "source.disconnect":
+                _source.Disconnect();
+                return new { info = SourceDto(_source.Settings), status = AutoSync.StatusDto(_source.Status) };
+            case "source.signUp":
+                return new { signedIn = await _source.SignUpAsync(ReadSourceConfig(p)) };
+            case "source.pickFolder":
+                return new { path = await _pickFolder("Choose the folder for your vault (e.g. a folder in OneDrive or iCloud Drive)") };
+            case "dialog.pickFolder":
+                return new { path = await _pickFolder(Opt(p, "title").Length > 0 ? Opt(p, "title") : "Choose folder") };
+            case "window.command":
+                return new { maximized = _window(Str(p, "command")) };
 
             default:
                 throw new InvalidOperationException($"Unknown method: {method}");
@@ -1165,33 +1168,42 @@ internal sealed class Bridge : IDisposable
         updatedAt = k.UpdatedAt
     };
 
-    private static object SyncDto(SyncSettings s) => new
+    private static object SourceDto(SyncSettings s) => new
     {
         configured = s.IsConfigured,
-        mode = s.Mode,
+        mode = s.IsConfigured ? s.Mode : "local",
         folder = s.Folder,
         url = s.Url,
         anonKey = s.AnonKey,
         email = s.Email,
         hasPassword = s.Password.Length > 0,
-        lastSync = s.LastSync
+        lastSaved = s.LastSync
     };
 
-    private SyncSettings ReadSyncConfig(JsonElement p, bool keepStoredPassword = true)
+    private SyncSettings ReadSourceConfig(JsonElement p, bool keepStoredPassword = true)
     {
-        var stored = _sync.Settings;
+        var stored = _source.Settings;
         var password = Opt(p, "password");
+        var mode = Opt(p, "mode");
         return new SyncSettings
         {
-            Mode = Opt(p, "mode") is SyncSettings.ModeFolder or SyncSettings.ModeGist ? Opt(p, "mode") : SyncSettings.ModeSupabase,
+            Mode = mode is SyncSettings.ModeFolder or SyncSettings.ModeGist ? mode : SyncSettings.ModeSupabase,
             Folder = Opt(p, "folder").Trim(),
             Url = Opt(p, "url").Trim(),
             AnonKey = Opt(p, "anonKey").Trim(),
             Email = Opt(p, "email").Trim(),
             // Empty password field = "unchanged" (the saved one is never sent to the UI).
-            Password = password.Length > 0 ? password : keepStoredPassword ? stored.Password : "",
-            LastSync = stored.LastSync
+            Password = password.Length > 0 ? password : keepStoredPassword && stored.Mode == mode ? stored.Password : ""
         };
+    }
+
+    /// <summary>The vault file was replaced (and is locked): close everything that used the old content.</summary>
+    private void CloseEverythingForReplacedVault()
+    {
+        CloseAllSessions();
+        foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
+        foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
+        _forwards.StopAll();
     }
 
     private static Rectangle Bounds(JsonElement p) =>

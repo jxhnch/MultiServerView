@@ -26,7 +26,7 @@ export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | '
           <h1>Known Hosts</h1>
           <p className="muted">
             On the first connection the app remembers the fingerprint of every SSH server. If it changes later, the connection is
-            refused – this protects against man-in-the-middle attacks. The list is synced together with the rest of the vault.
+            refused – this protects against man-in-the-middle attacks. The list is stored together with the rest of the vault.
           </p>
         </div>
       </div>

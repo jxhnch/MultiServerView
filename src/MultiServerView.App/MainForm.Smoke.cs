@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using MultiServerView.Core;
 using MultiServerView.Core.Ssh;
+using MultiServerView.Core.Sync;
 
 namespace MultiServerView.App;
 
@@ -344,10 +345,37 @@ public sealed partial class MainForm
         await Shot("03-settings.png");
 
         // 5. Protect cloud credentials with Windows DPAPI
-        await Call("sync.save", new { url = "https://example.supabase.co", anonKey = "anon", email = "a@b.ch", password = "super-secret-123" });
-        var syncFile = Path.Combine(_smokeDir!, "data", "sync.json");
-        Check("DPAPI: cloud password not in plain text", File.Exists(syncFile) && !File.ReadAllText(syncFile).Contains("super-secret-123"));
-        Check("DPAPI: password readable again", (await Call("sync.get")).GetProperty("hasPassword").GetBoolean());
+        var dpapiFile = Path.Combine(_smokeDir!, "dpapi-check.json");
+        var dpapiStore = new SyncSettingsStore(dpapiFile, new DpapiProtector());
+        dpapiStore.Save(new SyncSettings { Url = "https://example.supabase.co", AnonKey = "anon", Email = "a@b.ch", Password = "super-secret-123" });
+        Check("DPAPI: cloud password not in plain text", File.Exists(dpapiFile) && !File.ReadAllText(dpapiFile).Contains("super-secret-123"));
+        Check("DPAPI: password readable again", dpapiStore.Load().Password == "super-secret-123");
+        File.Delete(dpapiFile);
+
+        // 5b. Vault source: a folder as the place of the vault, changes are saved there by themselves
+        var sourceDir = Path.Combine(_smokeDir!, "source-folder");
+        Directory.CreateDirectory(sourceDir);
+        var sourceFile = Path.Combine(sourceDir, FolderRemote.FileName);
+        var probe0 = await Call("source.probe", new { mode = "folder", folder = sourceDir });
+        Check("Source: empty folder is recognized", probe0.GetProperty("kind").GetString() == "empty");
+        await Call("source.moveHere", new { mode = "folder", folder = sourceDir, overwrite = false });
+        Check("Source: vault moved to the folder", File.Exists(sourceFile));
+        var probe1 = await Call("source.probe", new { mode = "folder", folder = sourceDir });
+        Check("Source: the vault there is recognized as the own one", probe1.GetProperty("kind").GetString() == "vault" && probe1.GetProperty("sameVault").GetBoolean());
+        var fileBefore = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sourceFile)));
+        var temp = await Call("servers.save", new { name = "saved-by-itself", host = "10.9.9.9", protocol = "ssh", username = "x", group = "Server" });
+        var changed = false;
+        for (var i = 0; i < 20 && !changed; i++)
+        {
+            await Task.Delay(500);
+            changed = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sourceFile))) != fileBefore;
+        }
+        Check("Source: a change is saved to the folder automatically", changed);
+        var srcState = (await Call("source.get")).GetProperty("status").GetProperty("state").GetString();
+        Check("Source: status is ready", srcState == "ready", srcState ?? "");
+        await Call("source.disconnect");
+        await Call("servers.delete", new { id = temp.GetProperty("id").GetString() }); // back to the 5 hosts the next steps expect
+        Check("Source: back to this PC", !(await Call("source.get")).GetProperty("info").GetProperty("configured").GetBoolean());
 
         // 6. Change the master password, lock, unlock with the new password
         await Call("vault.changePassword", new { oldPassword = "smoke-test-pw-1", newPassword = "smoke-test-pw-2" });

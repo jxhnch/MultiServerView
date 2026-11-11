@@ -132,22 +132,26 @@ export interface HostSettings {
   mcpToken: string;
 }
 
-export interface SyncInfo {
+export type SourceMode = 'local' | 'folder' | 'gist' | 'supabase';
+
+/** Where the vault is stored. */
+export interface SourceInfo {
   configured: boolean;
-  mode: 'folder' | 'gist' | 'supabase';
+  mode: SourceMode;
   folder: string;
   url: string;
   anonKey: string;
   email: string;
   hasPassword: boolean;
-  lastSync: string | null;
+  lastSaved: string | null;
 }
 
-export type SyncState = 'off' | 'syncing' | 'ok' | 'error';
-export interface SyncStatus {
-  state: SyncState;
+export type SourceState = 'local' | 'ready' | 'pending' | 'conflict' | 'error';
+export interface SourceStatus {
+  kind: string;
+  state: SourceState;
   message: string;
-  at?: string;
+  lastSaved?: string | null;
 }
 
 /** Lifecycle of a session (for the dot on the tab). */

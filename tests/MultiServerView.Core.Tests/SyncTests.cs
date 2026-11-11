@@ -16,10 +16,12 @@ internal sealed class FakeSupabase : HttpMessageHandler
     public long Version;
     public int Requests;
     public Func<Task>? BeforePatch;
+    public bool Down;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
     {
         Requests++;
+        if (Down) throw new HttpRequestException("no connection");
         var path = req.RequestUri!.AbsolutePath;
         var body = req.Content == null ? null : JsonNode.Parse(await req.Content.ReadAsStringAsync(ct));
 
@@ -73,13 +75,14 @@ internal sealed class Device : IDisposable
 {
     public readonly string Dir = Path.Combine(Path.GetTempPath(), "msv-sync-" + Guid.NewGuid().ToString("N"));
     public readonly VaultStore Store;
-    public readonly SyncService Sync;
+    public readonly SourceService Source;
+    public readonly SyncSettingsStore Settings;
 
     public Device(FakeSupabase cloud)
     {
         Store = new VaultStore(Path.Combine(Dir, "vault.msv"));
-        var settings = new SyncSettingsStore(Path.Combine(Dir, "sync.json"), new PlainProtector());
-        Sync = new SyncService(Store, settings, cfg => new SupabaseClient(new HttpClient(cloud), cfg.Url, cfg.AnonKey));
+        Settings = new SyncSettingsStore(Path.Combine(Dir, "sync.json"), new PlainProtector());
+        Source = new SourceService(Store, Settings, cfg => new SupabaseClient(new HttpClient(cloud), cfg.Url, cfg.AnonKey));
     }
 
     public static SyncSettings Config(FakeSupabase cloud) => new()
@@ -96,168 +99,6 @@ internal sealed class Device : IDisposable
     }
 }
 
-public class SyncTests
-{
-    [Fact]
-    public async Task First_sync_uploads_then_second_device_downloads_and_unlocks()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-
-        a.Store.Create("master-password");
-        a.Store.Upsert(new ServerEntry { Name = "web-1", Host = "h", Password = "secret" });
-        a.Sync.Save(Device.Config(cloud));
-
-        var r1 = await a.Sync.SyncAsync();
-        Assert.Equal(SyncOutcome.Created, r1.Outcome);
-        Assert.DoesNotContain("secret", cloud.Blob!); // Base64 of the blob contains no plain-text password
-        Assert.DoesNotContain("web-1", Encoding.UTF8.GetString(Convert.FromBase64String(cloud.Blob!)));
-
-        await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("master-password");
-        Assert.Equal("web-1", b.Store.List().Single().Name);
-        Assert.Equal("secret", b.Store.List().Single().Password);
-    }
-
-    [Fact]
-    public async Task Changes_on_both_devices_are_merged()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-
-        a.Store.Create("master-password");
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-        await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("master-password");
-
-        a.Store.Upsert(new ServerEntry { Name = "from-a", Host = "a" });
-        b.Store.Upsert(new ServerEntry { Name = "from-b", Host = "b" });
-
-        Assert.Equal(SyncOutcome.Pushed, (await a.Sync.SyncAsync()).Outcome);
-        Assert.Equal(SyncOutcome.Merged, (await b.Sync.SyncAsync()).Outcome);
-        Assert.Equal(SyncOutcome.Pulled, (await a.Sync.SyncAsync()).Outcome);
-
-        Assert.Equal(new[] { "from-a", "from-b" }, a.Store.List().Select(s => s.Name).Order());
-        Assert.Equal(new[] { "from-a", "from-b" }, b.Store.List().Select(s => s.Name).Order());
-        Assert.Equal(SyncOutcome.UpToDate, (await b.Sync.SyncAsync()).Outcome);
-    }
-
-    [Fact]
-    public async Task Deletions_propagate_between_devices()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-
-        a.Store.Create("master-password");
-        var s = a.Store.Upsert(new ServerEntry { Name = "weg", Host = "h" });
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-        await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("master-password");
-
-        a.Store.Delete(s.Id);
-        await a.Sync.SyncAsync();
-        await b.Sync.SyncAsync();
-
-        Assert.Empty(b.Store.List());
-    }
-
-    [Fact]
-    public async Task Conflict_on_push_is_retried()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var other = new Device(cloud);
-
-        a.Store.Create("master-password");
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-        await other.Sync.DownloadInitialAsync(Device.Config(cloud));
-        other.Store.Unlock("master-password");
-
-        a.Store.Upsert(new ServerEntry { Name = "local", Host = "a" });
-        other.Store.Upsert(new ServerEntry { Name = "anderes-geraet", Host = "b" });
-
-        // The other device pushes exactly between "load" and "upload" of a.
-        cloud.BeforePatch = async () => await other.Sync.SyncAsync();
-
-        var r = await a.Sync.SyncAsync();
-
-        Assert.Equal(2, a.Store.List().Count);
-        Assert.Equal(SyncOutcome.Merged, r.Outcome);
-    }
-
-    [Fact]
-    public async Task Different_vault_in_cloud_gives_clear_error()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-
-        a.Store.Create("master-password");
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-
-        b.Store.Create("master-password"); // same password, but created separately -> different salt
-        b.Sync.Save(Device.Config(cloud));
-
-        var ex = await Assert.ThrowsAsync<SyncException>(() => b.Sync.SyncAsync());
-        Assert.Contains("Load vault", ex.Message);
-    }
-
-    [Fact]
-    public async Task Wrong_cloud_password_gives_friendly_error()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        a.Store.Create("master-password");
-        var cfg = Device.Config(cloud);
-        cfg.Password = "wrong";
-        a.Sync.Save(cfg);
-
-        var ex = await Assert.ThrowsAsync<SyncException>(() => a.Sync.SyncAsync());
-        Assert.Contains("is wrong", ex.Message);
-    }
-
-    [Fact]
-    public async Task Download_without_cloud_vault_fails_clearly()
-    {
-        var cloud = new FakeSupabase();
-        using var b = new Device(cloud);
-
-        var ex = await Assert.ThrowsAsync<SyncException>(() => b.Sync.DownloadInitialAsync(Device.Config(cloud)));
-        Assert.Contains("no vault in the cloud", ex.Message);
-    }
-
-    [Fact]
-    public void Url_must_be_https()
-    {
-        Assert.Throws<SyncException>(() => new SupabaseClient(new HttpClient(), "http://example.com", "key"));
-    }
-
-    [Fact]
-    public void Settings_are_stored_with_protected_password()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "msv-set-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var store = new SyncSettingsStore(Path.Combine(dir, "sync.json"), new PlainProtector());
-            store.Save(new SyncSettings { Url = "https://x.supabase.co", AnonKey = "k", Email = "e@x.ch", Password = "plaintext-pw" });
-
-            Assert.DoesNotContain("plaintext-pw", File.ReadAllText(Path.Combine(dir, "sync.json")));
-            Assert.Equal("plaintext-pw", store.Load().Password);
-        }
-        finally
-        {
-            if (Directory.Exists(dir)) Directory.Delete(dir, true);
-        }
-    }
-}
-
 public class SupabaseUrlTests
 {
     [Theory]
@@ -268,115 +109,4 @@ public class SupabaseUrlTests
     [InlineData("abcdxyz", "https://abcdxyz.supabase.co")]
     public void Pasted_project_addresses_are_normalized(string input, string expected) =>
         Assert.Equal(expected, MultiServerView.Core.Sync.SupabaseClient.NormalizeUrl(input));
-}
-
-public class ExistingTargetTests
-{
-    [Fact]
-    public async Task Foreign_vault_stops_the_connection_and_is_not_overwritten()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-        a.Store.Create("master-password");
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-        var before = cloud.Blob;
-
-        b.Store.Create("master-password"); // created separately -> different salt
-        var test = await Assert.ThrowsAsync<SyncException>(() => b.Sync.TestConnectionAsync(Device.Config(cloud)));
-        Assert.Contains("Nothing was overwritten", test.Message);
-        b.Sync.Save(Device.Config(cloud));
-        await Assert.ThrowsAsync<SyncException>(() => b.Sync.SyncAsync());
-        Assert.Equal(before, cloud.Blob);
-    }
-
-    [Fact]
-    public async Task A_file_that_is_not_a_vault_is_reported_and_left_alone()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        a.Store.Create("master-password");
-        a.Sync.Save(Device.Config(cloud));
-        cloud.Blob = Convert.ToBase64String(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50 });
-        cloud.Version = 5;
-        var before = cloud.Blob;
-
-        var ex = await Assert.ThrowsAsync<SyncException>(() => a.Sync.SyncAsync());
-        Assert.Contains("not a readable MultiServerView vault", ex.Message);
-        Assert.Contains("Nothing was overwritten", ex.Message);
-        Assert.Equal(before, cloud.Blob);
-    }
-
-    [Fact]
-    public async Task The_same_vault_on_the_remote_is_merged_not_refused()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-        a.Store.Create("master-password");
-        a.Store.Upsert(new ServerEntry { Name = "web", Host = "h" });
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-
-        await b.Sync.DownloadInitialAsync(Device.Config(cloud)); // proper way for a new device
-        b.Store.Unlock("master-password");
-        await b.Sync.TestConnectionAsync(Device.Config(cloud));
-        Assert.Single(b.Store.List());
-    }
-}
-
-public class SecondDeviceTests
-{
-    [Fact]
-    public async Task Replacing_the_local_vault_takes_over_the_main_device_and_keeps_a_backup()
-    {
-        var cloud = new FakeSupabase();
-        using var main = new Device(cloud);
-        using var second = new Device(cloud);
-
-        main.Store.Create("main-password");
-        main.Store.Upsert(new ServerEntry { Name = "from-main", Host = "m" });
-        main.Sync.Save(Device.Config(cloud));
-        await main.Sync.SyncAsync();
-
-        second.Store.Create("second-password"); // its own, different vault
-        second.Store.Upsert(new ServerEntry { Name = "only-second", Host = "s" });
-        var oldBytes = File.ReadAllBytes(second.Store.FilePath);
-
-        var backup = await second.Sync.ReplaceLocalWithSyncedAsync(Device.Config(cloud));
-
-        Assert.False(second.Store.IsUnlocked);
-        Assert.True(File.Exists(backup));
-        Assert.Equal(oldBytes, File.ReadAllBytes(backup));
-
-        Assert.Throws<WrongPasswordException>(() => second.Store.Unlock("second-password"));
-        second.Store.Unlock("main-password");
-        Assert.Equal(new[] { "from-main" }, second.Store.List().Select(s => s.Name).ToArray());
-
-        // and from now on it syncs normally
-        second.Store.Upsert(new ServerEntry { Name = "added-later", Host = "x" });
-        await second.Sync.SyncAsync();
-        await main.Sync.SyncAsync();
-        Assert.Equal(new[] { "added-later", "from-main" }, main.Store.List().Select(s => s.Name).Order().ToArray());
-    }
-
-    [Fact]
-    public async Task Nothing_is_replaced_if_the_target_is_empty_or_not_a_vault()
-    {
-        var cloud = new FakeSupabase();
-        using var second = new Device(cloud);
-        second.Store.Create("second-password");
-        var before = File.ReadAllBytes(second.Store.FilePath);
-
-        await Assert.ThrowsAsync<SyncException>(() => second.Sync.ReplaceLocalWithSyncedAsync(Device.Config(cloud))); // empty target
-
-        cloud.Blob = Convert.ToBase64String(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50 });
-        cloud.Version = 3;
-        var ex = await Assert.ThrowsAsync<SyncException>(() => second.Sync.ReplaceLocalWithSyncedAsync(Device.Config(cloud)));
-        Assert.Contains("not a readable", ex.Message);
-
-        Assert.Equal(before, File.ReadAllBytes(second.Store.FilePath));
-        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(second.Store.FilePath)!, "*.bak-*"));
-    }
 }

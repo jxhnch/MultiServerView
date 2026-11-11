@@ -35,6 +35,13 @@ public sealed class SyncSettings
     public string Password { get; set; } = "";
     public DateTimeOffset? LastSync { get; set; }
 
+    /// <summary>Version of the vault at the source when this device last read or saved it (0 = unknown, e.g. settings of the old sync).</summary>
+    public long LastVersion { get; set; }
+
+    /// <summary>This device has changes that are not saved at the source yet.</summary>
+    public bool Dirty { get; set; }
+
+    public bool IsSupabase => !IsFolder && !IsGist;
     public bool IsFolder => Mode == ModeFolder;
     public bool IsGist => Mode == ModeGist;
 
@@ -65,6 +72,8 @@ public sealed class SyncSettingsStore
         public string Email { get; set; } = "";
         public string PasswordProtected { get; set; } = "";
         public DateTimeOffset? LastSync { get; set; }
+        public long LastVersion { get; set; }
+        public bool Dirty { get; set; }
     }
 
     public SyncSettings Load()
@@ -81,7 +90,9 @@ public sealed class SyncSettingsStore
                 AnonKey = d.AnonKey,
                 Email = d.Email,
                 Password = d.PasswordProtected.Length > 0 ? _protector.Unprotect(d.PasswordProtected) : "",
-                LastSync = d.LastSync
+                LastSync = d.LastSync,
+                LastVersion = d.LastVersion,
+                Dirty = d.Dirty
             };
         }
         catch (Exception ex) when (ex is IOException or JsonException or FormatException or System.Security.Cryptography.CryptographicException)
@@ -100,7 +111,9 @@ public sealed class SyncSettingsStore
             AnonKey = s.AnonKey.Trim(),
             Email = s.Email.Trim(),
             PasswordProtected = s.Password.Length > 0 ? _protector.Protect(s.Password) : "",
-            LastSync = s.LastSync
+            LastSync = s.LastSync,
+            LastVersion = s.LastVersion,
+            Dirty = s.Dirty
         };
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);

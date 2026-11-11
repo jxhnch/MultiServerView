@@ -1,6 +1,6 @@
 # MultiServerView
 
-**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that syncs between your PCs. For Windows, open source (MIT).
+**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that you can keep on your PC, in a folder, on GitHub or in Supabase. For Windows, open source (MIT).
 
 <table>
   <tr>
@@ -52,9 +52,9 @@ Bring your servers with you. Duplicates are skipped, existing hosts stay untouch
 ### Let AI work on your servers
 An optional **MCP server** (off by default) lets AI tools list your hosts, run commands and read, write and list files over SSH/SFTP. Open **AI tools** in the left menu, switch it on and pick your tool (**Claude Code, Codex, Cursor, VS Code Copilot, Gemini CLI, Claude Desktop** or any MCP client): the page shows the exact command or config text to paste. It listens on `127.0.0.1` only and needs the token shown there; anything that has the token can act on your hosts while the vault is unlocked, so only enable it when you want that.
 
-### Protect and sync
+### Protect your data
 - **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
-- **Sync between PCs** – through a **shared folder** (OneDrive, iCloud Drive, Dropbox, Syncthing …), a private **GitHub gist** (you only need a token) or your own free **Supabase** project. The server only ever sees the encrypted blob. Changes made on two PCs are merged per entry, conflict copies of folder services are picked up automatically.
+- **One vault, one place** – store it on **this PC**, in a **folder** (OneDrive, iCloud, Dropbox, Nextcloud …), in a private **GitHub gist** (you only need a token) or in your own free **Supabase** project. Every change is saved there right away, other devices pick it up within a minute. No merging: if two devices change it at the same time, you are asked which version to keep and the other one is saved as a backup file. The data is encrypted before it leaves your PC.
 - **Clear vault** – wipe everything with three confirmation steps. Change the master password, set an auto-lock, back up the vault.
 
 ## Download and install
@@ -78,9 +78,9 @@ Uninstalling the app does **not** delete your data (so updates and reinstalls ne
 
 | What | Location |
 |---|---|
-| Vault, sync settings, connection history, settings | `%APPDATA%\MultiServerView` (`vault.msv`, `sync.json`, `history.json`, ...) |
+| Vault (local copy), source settings, connection history, settings | `%APPDATA%\MultiServerView` (`vault.msv`, `sync.json`, `history.json`, ...) |
 | Interface settings (theme, terminal look) | `%LOCALAPPDATA%\MultiServerView\webview` |
-| Your sync file in the shared folder | wherever you chose it (e.g. OneDrive), never touched by the app's uninstaller |
+| Your vault at a folder, GitHub or Supabase | wherever you chose it, never touched by the app's uninstaller |
 
 To start completely from scratch (**this permanently deletes your vault, there is no recovery**):
 
@@ -93,7 +93,7 @@ rmdir /s /q "%APPDATA%\MultiServerView"
 rmdir /s /q "%LOCALAPPDATA%\MultiServerView"
 ```
 
-4. Delete the vault file in your sync folder as well (look for `MultiServerView-Vault.msv`), otherwise a new install can load it again. Then reinstall and create a new master password.
+4. Delete the vault at its source as well (the file `MultiServerView-Vault.msv` in your folder, the gist at GitHub or the row in Supabase), otherwise you can load it again. Then reinstall and create a new master password.
 
 Portable ZIP: the same applies. If you only want to wipe the vault, use *Settings → Clear vault* inside the app (it empties the vault but keeps your master password).
 
@@ -115,19 +115,20 @@ In a terminal, plain Ctrl combinations belong to the shell, so app commands use 
 
 When the focus is inside an **RDP session**, all keys go to the remote PC (as in every RDP client). Click another tab with the mouse to leave it.
 
-## Set up sync
+## Choose where your vault lives
 
-**Shared folder (easiest):** open **Sync**, choose a folder that your folder service already syncs (for example in OneDrive) and connect. On the second PC choose *"New device? Load vault from a sync folder or cloud"* on the unlock screen, pick the same folder and unlock with the **same master password**.
+Open **Vault source** in the left menu and pick one of four places:
 
-**GitHub (only a token):** open **Sync**, choose GitHub, create a token at [github.com/settings/tokens/new](https://github.com/settings/tokens/new?scopes=gist&description=MultiServerView) (the link preselects the `gist` permission) and paste it. The app stores one secret gist with the encrypted vault and finds it again by itself. On the second PC choose GitHub under *"New device? Load vault …"* and enter the same token.
+| Source | What you need |
+|---|---|
+| **This PC** | Nothing. This is the default. |
+| **A folder** | A folder that OneDrive, iCloud, Dropbox or Nextcloud already keeps in step. Choose it, done. |
+| **GitHub** | A token with the `gist` permission ([create one here](https://github.com/settings/tokens/new?scopes=gist&description=MultiServerView), the link preselects it). Paste it, done. |
+| **Supabase** | A free project, one SQL snippet ([`docs/supabase.sql`](docs/supabase.sql)) and an account. The page guides you through it. |
 
-**Supabase (about 3 minutes):**
-1. Create a free project on [supabase.com](https://supabase.com).
-2. **SQL Editor** → paste [`docs/supabase.sql`](docs/supabase.sql) → *Run*.
-3. **Project Settings → API**: copy the *Project URL* and the *anon public* key.
-4. In the app open **Sync**, choose Supabase, enter URL, key, e-mail and a cloud password → *Create account* → *Connect*. (If Supabase asks for a confirmation e-mail, confirm it first, or switch off "Confirm email" under *Authentication → Providers → Email*.)
+When you choose a place that is still empty, your vault moves there. When it already contains a vault (for example from your other PC), the app asks you: **use the vault that is there** (your current one is kept as a backup file) or **replace it with mine**. So a second device simply picks the same place and takes the vault that is already there.
 
-After that, sync runs automatically about 3 seconds after every change and after unlocking. The cloud password is protected locally with Windows DPAPI. The master password never leaves your PC.
+Without a connection you can keep working: changes wait on this PC and are saved as soon as the place is reachable again. The master password never leaves your PC. Change it on one device and the others ask for the new one the next time they open the vault.
 
 ## Security in short
 
@@ -179,10 +180,10 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 
 | Folder | Contents |
 |---|---|
-| `src/MultiServerView.Core` | Vault + crypto, merge and sync, SSH/SFTP/tunnels (SSH.NET), VNC bridge, importers (net8.0, platform independent) |
-| `src/MultiServerView.App` | WinForms window with WebView2, bridge to the UI, RDP hosting, DPAPI, auto-sync, self-test |
+| `src/MultiServerView.Core` | Vault + crypto, vault sources (folder, GitHub, Supabase), SSH/SFTP/tunnels (SSH.NET), VNC bridge, importers (net8.0, platform independent) |
+| `src/MultiServerView.App` | WinForms window with WebView2, bridge to the UI, RDP hosting, DPAPI, auto-save to the source, self-test |
 | `ui/` | React + TypeScript (Vite): interface, xterm.js, noVNC |
-| `tests/` | xUnit tests (crypto, vault, merge, sync against a simulated Supabase API and folders, VNC bridge, importers, SSH against a real sshd) |
+| `tests/` | xUnit tests (crypto, vault, sources against a simulated Supabase API, GitHub and folders, VNC bridge, importers, SSH against a real sshd) |
 | `installer/` | Inno Setup script for the installer wizard |
 | `docs/` | Supabase SQL, comparison with Termius, first-run checklist, screenshots |
 
@@ -200,6 +201,6 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 
 ## Inspiration and vibe coding
 
-MultiServerView is inspired by [Termius](https://termius.com), whose workflow (one place for hosts, terminal, SFTP and synced vault) I wanted on Windows with RDP and VNC included and under my own control. It is an independent project and not affiliated with Termius.
+MultiServerView is inspired by [Termius](https://termius.com), whose workflow (one place for hosts, terminal, SFTP and a vault that is available everywhere) I wanted on Windows with RDP and VNC included and under my own control. It is an independent project and not affiliated with Termius.
 
 This project is **vibe-coded**: it was built together with an AI coding assistant (Claude Code). I steer the design and test the result, the assistant writes most of the code. The code is tested and the self-test runs on every build, but please review it yourself before trusting it with production credentials, and report anything that looks wrong.

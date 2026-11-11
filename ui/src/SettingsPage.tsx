@@ -293,7 +293,7 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
             ))}
           </select>
         </Row>
-        <Row title="Master password" hint="Changes the key of the vault. With sync enabled, the synced vault is updated as well.">
+        <Row title="Master password" hint="Changes the key of the vault. If your vault is stored at a folder, GitHub or Supabase, it is updated there too.">
           <button onClick={() => setPwModal(true)}>
             <IconLock size={15} /> Change…
           </button>
@@ -377,8 +377,8 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
           onClose={() => setPwModal(false)}
           onDone={(cloud, message) => {
             setPwModal(false);
-            if (cloud === 'updated') toast('Password changed and synced vault updated. On your other devices: Sync → "Adopt new master password".');
-            else if (cloud === 'failed') toast('Password changed, but the synced vault could not be updated: ' + message, 'error');
+            if (cloud === 'updated') toast('Password changed and saved at your vault source. Other devices ask for the new password the next time they open the vault.');
+            else if (cloud === 'failed') toast('Password changed on this PC, but it could not be saved at the vault source yet: ' + message, 'error');
             else toast('Master password changed');
           }}
         />

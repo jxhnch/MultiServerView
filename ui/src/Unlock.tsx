@@ -57,7 +57,7 @@ export function Unlock({ exists, onDone, onVaultInstalled }: { exists: boolean; 
           <div className="unlock-alt">
             {!cloud ? (
               <button className="link" onClick={() => setCloud(true)}>
-                <IconCloud size={15} /> New device? Load vault from a sync folder or cloud
+                <IconCloud size={15} /> Already have a vault in a folder, GitHub or Supabase? Use it here
               </button>
             ) : (
               <CloudDownload onInstalled={onVaultInstalled} onCancel={() => setCloud(false)} />
@@ -84,7 +84,7 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
     setBusy(true);
     setError('');
     try {
-      await api.syncDownloadInitial({ mode, folder: folder.trim(), url, anonKey, email, password });
+      await api.sourceUseExisting({ mode, folder: folder.trim(), url, anonKey, email, password });
       onInstalled(); // the vault is now local -> normal unlock dialog
     } catch (err) {
       setError((err as Error).message);
@@ -94,7 +94,7 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
 
   return (
     <form className="unlock-card small" onSubmit={submit}>
-      <h3>Load vault</h3>
+      <h3>Use an existing vault</h3>
       <div className="mode-switch">
         <button type="button" className={mode === 'folder' ? 'on' : ''} onClick={() => setMode('folder')}>
           Folder
@@ -108,9 +108,9 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
       </div>
       <p className="muted small">
         {mode === 'folder'
-          ? 'The sync folder that contains the file MultiServerView-Vault.msv (e.g. in OneDrive). '
+          ? 'The folder that contains your vault file MultiServerView-Vault.msv (e.g. in OneDrive). '
           : mode === 'gist'
-            ? 'The GitHub token you used on the other device. The app finds the vault in your gists. '
+            ? 'The GitHub token you used for your vault. The app finds the vault in your gists. '
             : 'Credentials of your Supabase account. '}
         Then you unlock with the <b>same master password</b> as on the other device.
       </p>
@@ -121,7 +121,7 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
             type="button"
             onClick={() =>
               api
-                .syncPickFolder()
+                .sourcePickFolder()
                 .then((r) => r.path && setFolder(r.path))
                 .catch((err: Error) => setError(err.message))
             }
@@ -146,7 +146,7 @@ function CloudDownload({ onInstalled, onCancel }: { onInstalled: () => void; onC
         </button>
         <span className="grow" />
         <button className="primary" disabled={busy || (mode === 'folder' ? !folder.trim() : mode === 'gist' ? !password : !url || !anonKey || !email || !password)}>
-          {busy ? 'Loading…' : 'Load'}
+          {busy ? 'Loading…' : 'Use this vault'}
         </button>
       </div>
     </form>

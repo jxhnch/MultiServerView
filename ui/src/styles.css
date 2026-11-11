@@ -2780,3 +2780,85 @@ label {
   width: auto;
   margin: 0;
 }
+
+/* ---- Vault source */
+.source-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  margin-bottom: 14px;
+}
+.source-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.source-status.ready .source-dot {
+  background: #22a05a;
+}
+.source-status.pending .source-dot {
+  background: #e6961a;
+}
+.source-status.conflict .source-dot,
+.source-status.error .source-dot {
+  background: #d94545;
+}
+.source-line {
+  font-weight: 600;
+}
+.source-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.source-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+  text-align: left;
+  border: 2px solid transparent;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  border-radius: var(--radius);
+  height: auto;
+}
+.source-card.on {
+  border-color: var(--accent);
+}
+.source-ico {
+  color: var(--accent);
+  display: grid;
+}
+.source-title {
+  font-weight: 700;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.source-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.choice-list .primary-choice {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.source-card,
+.choice-list button {
+  white-space: normal;
+}

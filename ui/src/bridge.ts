@@ -13,7 +13,8 @@ import {
   type KnownHost,
   type Server,
   type Snippet,
-  type SyncInfo,
+  type SourceInfo,
+  type SourceStatus,
   type ProxmoxCert,
   type ProxmoxInfo,
   type ProxmoxVmInfo,
@@ -33,7 +34,8 @@ export type HostEvent =
   | { event: 'ssh.closed'; sessionId: string; reason: string | null }
   | { event: 'ssh.info'; sessionId: string; message: string }
   | { event: 'rdp.status'; sessionId: string; state: 'connecting' | 'connected' | 'disconnected'; message: string }
-  | { event: 'sync.status'; state: 'off' | 'syncing' | 'ok' | 'error'; message: string; at?: string }
+  | { event: 'source.status'; kind: string; state: 'local' | 'ready' | 'pending' | 'conflict' | 'error'; message: string; lastSaved?: string | null }
+  | { event: 'vault.replaced' }
   | { event: 'forward.status'; ruleId: string; running: boolean; error: string | null }
   | { event: 'sftp.progress'; sessionId: string; transferId: string; name: string; done: number; total: number; finished: boolean }
   | { event: 'sftp.externalSaved'; sessionId: string; name: string; error: string | null }
@@ -121,7 +123,7 @@ interface MockState {
   forwards: ForwardRule[];
   history: HistoryEntry[];
   settings: HostSettings;
-  sync: SyncInfo;
+  source: SourceInfo;
 }
 const MOCK_KEY = 'msv-mock-v3';
 
@@ -146,7 +148,7 @@ function loadMock(): MockState {
     forwards: [],
     history: [],
     settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false, mcpEnabled: false, mcpPort: 7676, mcpToken: '' },
-    sync: { configured: false, mode: 'folder', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSync: null },
+    source: { configured: false, mode: 'local', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSaved: null },
   };
 }
 const mock = loadMock();
@@ -310,6 +312,13 @@ let mockKnownHosts: KnownHost[] = [
   { id: '10.0.10.21:22', fingerprint: 'SHA256:aB3dEfGh1JkLmNoPqRsTuVwXyZ0123456789AbCdEfG' },
 ];
 
+const mockSourceStatus = () => ({
+  kind: mock.source.configured ? mock.source.mode : 'local',
+  state: mock.source.configured ? 'ready' : 'local',
+  message: mock.source.configured ? 'Saved to ' + mock.source.mode : 'Saved on this PC',
+  lastSaved: mock.source.lastSaved,
+});
+
 async function callMock(method: string, params: any): Promise<unknown> {
   await new Promise((r) => setTimeout(r, 30));
   const need = () => {
@@ -457,8 +466,6 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'rdp.close':
     case 'rdp.suspend':
       return null;
-    case 'sync.replaceLocal':
-      return onlyNative('Replacing the vault');
     case 'teamviewer.open':
       return onlyNative('TeamViewer');
     case 'mcp.status':
@@ -545,39 +552,26 @@ async function callMock(method: string, params: any): Promise<unknown> {
       persistMock();
       return { imported: wanted.length, noIp: wanted.length, skipped: 0 };
     }
-    case 'sync.get':
-      return mock.sync;
-    case 'sync.save': {
-      mock.sync = {
-        configured:
-          params.mode === 'folder'
-            ? !!params.folder
-            : params.mode === 'gist'
-              ? !!(params.password || mock.sync.hasPassword)
-              : !!(params.url && params.anonKey && params.email && (params.password || mock.sync.hasPassword)),
-        mode: params.mode,
-        folder: params.folder ?? '',
-        url: params.url,
-        anonKey: params.anonKey,
-        email: params.email,
-        hasPassword: !!params.password || mock.sync.hasPassword,
-        lastSync: mock.sync.lastSync,
-      };
-      persistMock();
-      return mock.sync;
-    }
+    case 'source.get':
+      return { info: mock.source, status: mockSourceStatus() };
     case 'window.command':
       return { maximized: false };
-    case 'sync.pickFolder':
-    case 'sync.test':
-    case 'sync.signUp':
-    case 'sync.now':
-    case 'sync.downloadInitial':
-      return onlyNative('Sync');
-    case 'sync.disconnect':
-      mock.sync = { configured: false, mode: 'folder', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSync: null };
+    case 'source.pickFolder':
+    case 'source.signUp':
+    case 'source.useExisting':
+    case 'source.resolve':
+    case 'source.retry':
+      return onlyNative('Choosing a source');
+    case 'source.probe':
+      return { kind: 'empty', sameVault: false };
+    case 'source.moveHere':
+      mock.source = { configured: true, mode: params.mode, folder: params.folder ?? '', url: params.url, anonKey: params.anonKey, email: params.email, hasPassword: !!params.password, lastSaved: new Date().toISOString() };
       persistMock();
-      return null;
+      return { info: mock.source, status: mockSourceStatus() };
+    case 'source.disconnect':
+      mock.source = { configured: false, mode: 'local', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSaved: null };
+      persistMock();
+      return { info: mock.source, status: mockSourceStatus() };
 
 
 
@@ -616,8 +610,6 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return { path: 'C:\\Users\\demo\\AppData\\Roaming\\MultiServerView\\vault.msv', version: '0.1.0' };
     case 'vault.reveal':
       return null;
-    case 'sync.adoptPassword':
-    case 'sync.forceUpload':
     case 'import.sshconfig':
     case 'import.putty':
     case 'import.csv':
@@ -856,7 +848,7 @@ export interface ProxmoxInput {
   certFingerprint?: string;
 }
 
-export interface SyncConfigInput {
+export interface SourceConfigInput {
   mode: 'folder' | 'gist' | 'supabase';
   folder: string;
   url: string;
@@ -986,9 +978,6 @@ export const api = {
   vaultClear: (password: string) => call<unknown>('vault.clear', { password }),
   vaultInfo: () => call<{ path: string; version: string }>('vault.info'),
   vaultReveal: () => call<void>('vault.reveal'),
-  syncAdoptPassword: (password: string) => call<void>('sync.adoptPassword', { password }),
-  syncForceUpload: () => call<void>('sync.forceUpload'),
-  syncReplaceLocal: (c: SyncConfigInput) => call<{ backup: string }>('sync.replaceLocal', c),
   importSshConfig: (text: string, workspace?: string) => call<ImportOutcome>('import.sshconfig', { text, workspace }),
   importPutty: (text?: string, workspace?: string) => call<ImportOutcome>('import.putty', { text: text ?? '', workspace }),
   importCsv: (text: string, workspace?: string) => call<ImportOutcome>('import.csv', { text, workspace }),
@@ -1006,13 +995,14 @@ export const api = {
   proxmoxVms: (id: string) => call<ProxmoxVmInfo[]>('proxmox.vms', { id }),
   proxmoxImport: (a: { id: string; vms: { node: string; vmid: number }[]; workspace: string; workspaceFromPool: boolean; identityId: string; groupBy: 'none' | 'pool' | 'node' }) =>
     call<{ imported: number; noIp: number; skipped: number }>('proxmox.import', a),
-  syncGet: () => call<SyncInfo>('sync.get'),
-  syncSave: (c: SyncConfigInput) => call<SyncInfo>('sync.save', c),
-  syncTest: (c: SyncConfigInput) => call<void>('sync.test', c),
-  syncSignUp: (c: SyncConfigInput) => call<{ signedIn: boolean }>('sync.signUp', c),
-  syncNow: () => call<{ outcome: string; at: string }>('sync.now'),
-  syncDisconnect: () => call<void>('sync.disconnect'),
+  sourceGet: () => call<{ info: SourceInfo; status: SourceStatus }>('source.get'),
+  sourceProbe: (c: SourceConfigInput) => call<{ kind: 'empty' | 'vault' | 'notavault'; sameVault: boolean }>('source.probe', c),
+  sourceMoveHere: (c: SourceConfigInput, overwrite: boolean) => call<{ info: SourceInfo; status: SourceStatus }>('source.moveHere', { ...c, overwrite }),
+  sourceUseExisting: (c: SourceConfigInput) => call<{ backup: string }>('source.useExisting', c),
+  sourceResolve: (choice: 'source' | 'mine') => call<{ backup: string }>('source.resolve', { choice }),
+  sourceRetry: () => call<{ status: SourceStatus }>('source.retry'),
+  sourceDisconnect: () => call<{ info: SourceInfo; status: SourceStatus }>('source.disconnect'),
+  sourceSignUp: (c: SourceConfigInput) => call<{ signedIn: boolean }>('source.signUp', c),
+  sourcePickFolder: () => call<{ path: string | null }>('source.pickFolder'),
   windowCommand: (command: 'state' | 'minimize' | 'maximize' | 'close') => call<{ maximized: boolean }>('window.command', { command }),
-  syncPickFolder: () => call<{ path: string | null }>('sync.pickFolder'),
-  syncDownloadInitial: (c: SyncConfigInput) => call<void>('sync.downloadInitial', c),
 };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, isNative, onEvent } from './bridge';
-import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SyncInfo, type SyncStatus } from './types';
+import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
@@ -8,7 +8,8 @@ import { PromptDialog } from './Prompt';
 import { offerUpdate } from './updates';
 import { SessionCloseContext } from './SessionFrame';
 import { Keychain } from './Keychain';
-import { CloudPanel } from './CloudPanel';
+import { SourcePage } from './SourcePage';
+import { SourceConflictDialog } from './SourceConflictDialog';
 import { McpPage } from './McpPage';
 import { ImportPage, type ImportKind } from './ImportPage';
 import { VmwareImportDialog } from './VmwareImport';
@@ -73,8 +74,9 @@ export function App() {
   const [servers, setServers] = useState<Server[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
   const [identities, setIdentities] = useState<Identity[]>([]);
-  const [syncInfo, setSyncInfo] = useState<SyncInfo | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off', message: '' });
+  const [sourceInfo, setSourceInfo] = useState<SourceInfo | null>(null);
+  const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ kind: 'local', state: 'local', message: '' });
+  const [conflictHidden, setConflictHidden] = useState(false);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
   const [active, setActive] = useState<string>(HOME);
@@ -119,12 +121,12 @@ export function App() {
 
   // ---------------------------------------------------------------- Loading
   const refresh = useCallback(async () => {
-    const [s, k, ids, sync] = await Promise.all([api.serversList(), api.keysList(), api.identitiesList(), api.syncGet()]);
+    const [s, k, ids, src] = await Promise.all([api.serversList(), api.keysList(), api.identitiesList(), api.sourceGet()]);
     setServers(s);
     setKeys(k);
     setIdentities(ids);
-    setSyncInfo(sync);
-    setSyncStatus((prev) => (sync.configured ? (prev.state === 'off' ? { state: 'ok', message: 'Connected' } : prev) : { state: 'off', message: '' }));
+    setSourceInfo(src.info);
+    setSourceStatus(src.status);
   }, []);
 
   useEffect(() => {
@@ -140,15 +142,32 @@ export function App() {
   useEffect(
     () =>
       onEvent((e) => {
-        if (e.event === 'sync.status') setSyncStatus({ state: e.state, message: e.message, at: e.at });
-        else if (e.event === 'vault.changed') void refresh();
+        if (e.event === 'source.status') {
+          setSourceStatus({ kind: e.kind, state: e.state, message: e.message, lastSaved: e.lastSaved });
+          if (e.state !== 'conflict') setConflictHidden(false);
+        } else if (e.event === 'vault.changed') void refresh();
+        else if (e.event === 'vault.replaced') void lockAfterReplace();
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [refresh],
   );
 
   async function onUnlocked() {
     await refresh();
     setPhase('ready');
+  }
+
+  async function lockAfterReplace() {
+    setServers([]);
+    setKeys([]);
+    setIdentities([]);
+    setTabs([]);
+    setStatuses({});
+    setPanel(null);
+    setActive(HOME);
+    setVaultExists(true);
+    setPhase('locked');
+    toast('The vault was changed on another device (new master password). Unlock with the new password.');
   }
 
   async function lock() {
@@ -636,11 +655,11 @@ export function App() {
         <span className="grow" />
         <button
           className="bar-btn"
-          title={syncInfo?.configured ? `Sync: ${syncStatus.message || 'connected'}` : 'Set up sync'}
+          title={sourceInfo?.configured ? sourceStatus.message || 'Saved' : 'Your vault is stored on this PC only (click to choose where)'}
           onClick={() => goTo('cloud')}
         >
           <IconCloud size={17} />
-          <span className={`badge ${!syncInfo?.configured ? 'off' : syncStatus.state === 'syncing' ? 'syncing' : syncStatus.state === 'error' ? 'error' : 'ok'}`} />
+          <span className={`badge ${!sourceInfo?.configured ? 'off' : sourceStatus.state === 'ready' ? 'ok' : sourceStatus.state === 'pending' ? 'syncing' : 'error'}`} />
         </button>
         <button className="bar-btn" title="Lock vault" onClick={lock}>
           <IconLock size={17} />
@@ -674,7 +693,7 @@ export function App() {
                 <IconUpload size={17} /> Import
               </button>
               <button className={'nav-item' + (section === 'cloud' ? ' on' : '')} onClick={() => goTo('cloud')}>
-                <IconCloud size={17} /> Sync
+                <IconCloud size={17} /> Vault source
               </button>
               <button className={'nav-item' + (section === 'mcp' ? ' on' : '')} onClick={() => goTo('mcp')}>
                 <IconSparkle size={17} /> AI tools
@@ -738,7 +757,7 @@ export function App() {
                 />
               )}
               {section === 'mcp' && <McpPage toast={toast} />}
-              {section === 'cloud' && <CloudPanel info={syncInfo} status={syncStatus} onChanged={refresh} onReplaced={() => void lock()} toast={toast} />}
+              {section === 'cloud' && <SourcePage info={sourceInfo} status={sourceStatus} onChanged={refresh} onReplaced={() => void lock()} toast={toast} />}
               {section === 'settings' && <SettingsPage onLock={() => void lock()} onCleared={afterVaultCleared} toast={toast} />}
             </div>
 
@@ -806,6 +825,16 @@ export function App() {
             setMpwPrompt(null);
             void importFile('mremoteng', undefined, text, pw);
           }}
+        />
+      )}
+
+      {sourceStatus.state === 'conflict' && !conflictHidden && sourceInfo?.configured && (
+        <SourceConflictDialog
+          mode={sourceInfo.mode}
+          message={sourceStatus.message}
+          onLater={() => setConflictHidden(true)}
+          onDone={refresh}
+          onReplaced={() => void lock()}
         />
       )}
 

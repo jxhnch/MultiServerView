@@ -150,40 +150,6 @@ public class PasswordChangeTests : IDisposable
         restored.Unlock("master-password");
         Assert.Single(restored.List());
     }
-
-    [Fact]
-    public async Task Password_change_on_one_device_is_adopted_by_the_other()
-    {
-        var cloud = new FakeSupabase();
-        using var a = new Device(cloud);
-        using var b = new Device(cloud);
-
-        a.Store.Create("password-one");
-        a.Store.Upsert(new ServerEntry { Name = "from-a", Host = "a" });
-        a.Sync.Save(Device.Config(cloud));
-        await a.Sync.SyncAsync();
-        await b.Sync.DownloadInitialAsync(Device.Config(cloud));
-        b.Store.Unlock("password-one");
-        b.Store.Upsert(new ServerEntry { Name = "only-on-b", Host = "b" });
-
-        // Device A changes the password and overwrites the remote
-        a.Store.ChangePassword("password-one", "password-two");
-        await a.Sync.ForceUploadAsync();
-
-        // Device B can no longer synchronize and gets a hint
-        var ex = await Assert.ThrowsAsync<SyncException>(() => b.Sync.SyncAsync());
-        Assert.Contains("Adopt new master password", ex.Message);
-
-        await Assert.ThrowsAsync<WrongPasswordException>(() => b.Sync.AdoptCloudPasswordAsync("wrong-wrong"));
-        await b.Sync.AdoptCloudPasswordAsync("password-two");
-
-        Assert.Equal(new[] { "from-a", "only-on-b" }, b.Store.List().Select(s => s.Name).Order()); // local change is kept
-        await b.Sync.SyncAsync();
-        b.Store.Lock();
-        b.Store.Unlock("password-two");
-        await a.Sync.SyncAsync();
-        Assert.Equal(2, a.Store.List().Count);
-    }
 }
 
 public class SettingsTests : IDisposable

@@ -90,7 +90,7 @@ export function ClearVaultDialog({ onClose, onCleared, toast }: { onClose: () =>
               ))}
             </ul>
             <p className="muted small">
-              The master password stays. If sync is set up, the empty state is passed on to your other devices and deleted there as well.
+              The master password stays. If your vault is stored at a folder, GitHub or Supabase, the empty vault is saved there too.
             </p>
             <div>
               <button type="button" onClick={() => void backup()}>

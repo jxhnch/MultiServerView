@@ -209,16 +209,43 @@ public sealed class VaultStore
     {
         lock (_gate)
         {
-            var backup = "";
-            if (Exists)
-            {
-                backup = _path + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                File.Copy(_path, backup, overwrite: true);
-            }
+            var backup = BackupLocal();
             _data = null;
             _key = null;
             WriteAtomic(blob);
             return backup;
+        }
+    }
+
+    /// <summary>
+    /// Copies the vault file to "vault.msv.bak-DATE" (the newest 10 backups are kept). Returns the path, or "" if there is no file.
+    /// </summary>
+    public string BackupLocal()
+    {
+        lock (_gate)
+        {
+            if (!Exists) return "";
+            var backup = _path + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+            for (var n = 1; File.Exists(backup); n++) backup = _path + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + n; // never overwrite an older backup
+            File.Copy(_path, backup, overwrite: false);
+            var dir = Path.GetDirectoryName(_path)!;
+            var old = Directory.GetFiles(dir, Path.GetFileName(_path) + ".bak-*").OrderByDescending(f => f, StringComparer.Ordinal).Skip(10);
+            foreach (var f in old)
+            {
+                try { File.Delete(f); } catch (IOException) { /* not important */ }
+            }
+            return backup;
+        }
+    }
+
+    /// <summary>true if the blob is a vault of the same origin as the local one (same salt), i.e. it was created from it.</summary>
+    public bool SameVaultAs(byte[] blob)
+    {
+        lock (_gate)
+        {
+            if (!Exists || !VaultCrypto.LooksLikeVault(blob)) return false;
+            var mine = File.ReadAllBytes(_path);
+            return VaultCrypto.LooksLikeVault(mine) && mine.AsSpan(8, 16).SequenceEqual(blob.AsSpan(8, 16));
         }
     }
 
