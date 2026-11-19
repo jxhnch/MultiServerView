@@ -43,11 +43,11 @@ const CLIENTS: Client[] = [
     snippet: (url, token) => j({ servers: { multiserverview: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } } } }),
   },
   {
-    id: 'gemini',
-    label: 'Gemini CLI',
-    intro: 'Add this to the Gemini CLI settings:',
-    where: '%USERPROFILE%\\.gemini\\settings.json',
-    snippet: (url, token) => j({ mcpServers: { multiserverview: { httpUrl: url, headers: { Authorization: `Bearer ${token}` } } } }),
+    id: 'antigravity',
+    label: 'Antigravity',
+    intro: 'Add this to the Antigravity MCP config (or open Additional Options (…) → MCP Servers → Manage MCP Servers → View raw config) and click Refresh:',
+    where: '%USERPROFILE%\\.gemini\\config\\mcp_config.json (Linux: ~/.gemini/config/mcp_config.json)',
+    snippet: (url, token) => j({ mcpServers: { multiserverview: { url, headers: { Authorization: `Bearer ${token}` } } } }),
   },
   {
     id: 'desktop',
@@ -55,7 +55,7 @@ const CLIENTS: Client[] = [
     intro: 'Clients that only start local programs can use the small mcp-remote bridge (needs Node.js). Add this to their MCP configuration:',
     where: 'Claude Desktop: %APPDATA%\\Claude\\claude_desktop_config.json',
     snippet: (url, token) =>
-      j({ mcpServers: { multiserverview: { command: 'npx', args: ['-y', 'mcp-remote', url, '--header', `Authorization:Bearer ${token}`] } } }),
+      j({ mcpServers: { multiserverview: { command: 'npx', args: ['-y', 'mcp-remote', url, '--allow-http', '--header', `Authorization:Bearer ${token}`] } } }),
   },
   {
     id: 'other',
@@ -79,20 +79,25 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
     loadStatus();
   }, [toast, loadStatus]);
 
-  const update = (patch: Partial<HostSettings>) =>
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const saveSettings = (next: HostSettings) => {
+    api
+      .settingsSave(next)
+      .then((r) => {
+        setHost(r);
+        loadStatus();
+      })
+      .catch((e: Error) => toast(e.message, 'error'));
+  };
+
+  const update = (patch: Partial<HostSettings>, immediate = false) =>
     setHost((h) => {
       if (!h) return h;
       const next = { ...h, ...patch };
       window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => {
-        api
-          .settingsSave(next)
-          .then((r) => {
-            setHost(r);
-            loadStatus();
-          })
-          .catch((e: Error) => toast(e.message, 'error'));
-      }, 400);
+      if (immediate) saveSettings(next);
+      else timer.current = window.setTimeout(() => saveSettings(next), 400);
       return next;
     });
 
@@ -116,13 +121,13 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
         <div>
           <h1>AI tools</h1>
           <p className="muted">
-            An MCP server lets AI assistants (Claude Code, Codex, Cursor, Gemini and others) work on your servers through MultiServerView: list hosts, run
+            An MCP server lets AI assistants (Claude Code, Codex, Cursor, Antigravity and others) work on your servers through MultiServerView: list hosts, run
             commands, read and write files.
           </p>
         </div>
       </div>
 
-      {!isNative && <div className="notice">The MCP server only exists in the Windows app.</div>}
+      {!isNative && <div className="notice">The MCP server only exists in the desktop app.</div>}
 
       {host && (
         <>
@@ -145,7 +150,7 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                   aria-checked={host.mcpEnabled}
                   aria-label="Enable MCP server"
                   className={'switch' + (host.mcpEnabled ? ' on' : '')}
-                  onClick={() => update({ mcpEnabled: !host.mcpEnabled })}
+                  onClick={() => update({ mcpEnabled: !host.mcpEnabled, ...(host.mcpEnabled ? { mcpToken: '' } : {}) }, true)}
                 >
                   <i />
                 </button>
@@ -179,7 +184,7 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                     <div className="muted small">Like a password for the AI tool. To get a new one, switch the server off and on again.</div>
                   </div>
                   <div className="set-control">
-                    <button onClick={() => void copy(host.mcpToken, 'token')}>
+                    <button disabled={!host.mcpToken} onClick={() => void copy(host.mcpToken, 'token')}>
                       {copied === 'token' ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied === 'token' ? 'Copied' : 'Copy token'}
                     </button>
                   </div>
@@ -188,7 +193,7 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
             )}
           </section>
 
-          {host.mcpEnabled && (
+          {host.mcpEnabled && host.mcpToken.length > 0 && (
             <section className="set-card">
               <header>
                 <h2>Connect your AI tool</h2>

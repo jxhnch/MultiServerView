@@ -27,13 +27,25 @@ public static class SshExec
         using var cmd = client.CreateCommand(command);
         cmd.CommandTimeout = timeout;
         var run = cmd.BeginExecute();
-        var finished = await Task.Run(() => run.AsyncWaitHandle.WaitOne(timeout), ct);
-        if (!finished)
+        var wait = await Task.Run(() => WaitHandle.WaitAny(new[] { run.AsyncWaitHandle, ct.WaitHandle }, timeout), ct);
+        if (wait == 1)
+        {
+            try { cmd.CancelAsync(); } catch (Exception) { /* connection closes below anyway */ }
+            ct.ThrowIfCancellationRequested();
+        }
+        if (wait == WaitHandle.WaitTimeout)
         {
             try { cmd.CancelAsync(); } catch (Exception) { /* connection closes below anyway */ }
             return new ExecResult(Trim(cmd.Result), Trim(cmd.Error), -1, true);
         }
-        cmd.EndExecute(run);
+        try
+        {
+            cmd.EndExecute(run);
+        }
+        catch (Renci.SshNet.Common.SshOperationTimeoutException)
+        {
+            return new ExecResult(Trim(cmd.Result), Trim(cmd.Error), -1, true);
+        }
         return new ExecResult(Trim(cmd.Result), Trim(cmd.Error), cmd.ExitStatus ?? 0, false);
     }
 

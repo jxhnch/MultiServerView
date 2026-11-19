@@ -18,6 +18,7 @@ public sealed class McpService : IMcpBackend, IDisposable
     private readonly Func<string, int, string, HostKeyTrust> _check;
     private readonly JumpResolver _jumps;
     private readonly McpHandler _handler;
+    private readonly object _gate = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private string _token = "";
@@ -34,32 +35,45 @@ public sealed class McpService : IMcpBackend, IDisposable
     /// <summary>Last start error (e.g. port already in use), shown in the settings.</summary>
     public string? Error { get; private set; }
 
-    public bool Running => _listener != null;
+    public bool Running { get { lock (_gate) return _listener != null; } }
 
     public void Apply(AppSettings settings)
     {
-        if (settings.McpEnabled && _listener != null && _port == settings.McpPort && _token == settings.McpToken) return;
-        Stop();
-        if (!settings.McpEnabled || settings.McpToken.Length == 0) return;
-        try
+        lock (_gate)
         {
-            var listener = new HttpListener();
-            listener.Prefixes.Add($"http://127.0.0.1:{settings.McpPort}/");
-            listener.Start();
-            _listener = listener;
-            _port = settings.McpPort;
-            _token = settings.McpToken;
-            _cts = new CancellationTokenSource();
+            if (settings.McpEnabled && _listener != null && _port == settings.McpPort && _token == settings.McpToken) return;
+            StopLocked();
             Error = null;
-            _ = Task.Run(() => LoopAsync(listener, _cts.Token));
-        }
-        catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
-        {
-            Error = $"The MCP server could not start on port {settings.McpPort}: {ex.Message}";
+            if (!settings.McpEnabled || settings.McpToken.Length == 0) return;
+            try
+            {
+                var listener = new HttpListener();
+                listener.Prefixes.Add($"http://127.0.0.1:{settings.McpPort}/");
+                try { listener.Prefixes.Add($"http://localhost:{settings.McpPort}/"); }
+                catch (HttpListenerException) { /* 127.0.0.1 is already listening */ }
+                listener.Start();
+                var port = settings.McpPort;
+                var token = settings.McpToken;
+                var cts = new CancellationTokenSource();
+                _listener = listener;
+                _port = port;
+                _token = token;
+                _cts = cts;
+                _ = Task.Run(() => LoopAsync(listener, port, token, cts.Token));
+            }
+            catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
+            {
+                Error = $"The MCP server could not start on port {settings.McpPort}: {ex.Message}";
+            }
         }
     }
 
     public void Stop()
+    {
+        lock (_gate) StopLocked();
+    }
+
+    private void StopLocked()
     {
         _cts?.Cancel();
         try { _listener?.Close(); } catch (Exception) { /* already closed */ }
@@ -69,38 +83,41 @@ public sealed class McpService : IMcpBackend, IDisposable
 
     public void Dispose() => Stop();
 
-    private async Task LoopAsync(HttpListener listener, CancellationToken ct)
+    private async Task LoopAsync(HttpListener listener, int port, string token, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && listener.IsListening)
         {
             HttpListenerContext context;
             try { context = await listener.GetContextAsync(); }
             catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or InvalidOperationException) { return; }
-            _ = Task.Run(() => HandleAsync(context, ct), ct);
+            _ = Task.Run(() => HandleAsync(context, port, token, ct), ct);
         }
     }
 
-    private async Task HandleAsync(HttpListenerContext context, CancellationToken ct)
+    private async Task HandleAsync(HttpListenerContext context, int port, string token, CancellationToken ct)
     {
         var request = context.Request;
         var response = context.Response;
         try
         {
             // Not for browsers: no Origin header (blocks web pages talking to localhost), only our own host name.
-            var hostOk = request.Headers["Host"] is { } h && (h == $"127.0.0.1:{_port}" || h == $"localhost:{_port}");
+            var hostOk = request.Headers["Host"] is { } h && (
+                h.Equals($"127.0.0.1:{port}", StringComparison.OrdinalIgnoreCase) ||
+                h.Equals($"localhost:{port}", StringComparison.OrdinalIgnoreCase) ||
+                h.Equals($"[::1]:{port}", StringComparison.OrdinalIgnoreCase));
             if (!hostOk || request.Headers["Origin"] != null) { response.StatusCode = 403; return; }
-            if (!TokenOk(request.Headers["Authorization"])) { response.StatusCode = 401; response.AddHeader("WWW-Authenticate", "Bearer"); return; }
             if (request.Url?.AbsolutePath.TrimEnd('/') != "/mcp") { response.StatusCode = 404; return; }
-            if (request.HttpMethod != "POST") { response.StatusCode = 405; return; }
+            if (!TokenOk(request.Headers["Authorization"], token)) { response.StatusCode = 401; response.AddHeader("WWW-Authenticate", "Bearer"); return; }
+            if (request.HttpMethod != "POST") { response.AddHeader("Allow", "POST"); response.StatusCode = 405; return; }
 
             using var reader = new StreamReader(request.InputStream, Encoding.UTF8);
             var body = await reader.ReadToEndAsync(ct);
             if (body.Length > 5_000_000) { response.StatusCode = 413; return; }
 
             var answer = await _handler.HandleAsync(body, ct);
-            if (answer == null) { response.StatusCode = 202; return; }
+            if (answer == null) { response.StatusCode = 202; response.ContentLength64 = 0; return; }
             var bytes = Encoding.UTF8.GetBytes(answer);
-            response.ContentType = "application/json";
+            response.ContentType = "application/json; charset=utf-8";
             response.ContentLength64 = bytes.Length;
             await response.OutputStream.WriteAsync(bytes, ct);
         }
@@ -114,12 +131,12 @@ public sealed class McpService : IMcpBackend, IDisposable
         }
     }
 
-    private bool TokenOk(string? header)
+    private static bool TokenOk(string? header, string token)
     {
         const string prefix = "Bearer ";
         if (header == null || !header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
         var given = Encoding.UTF8.GetBytes(header[prefix.Length..].Trim());
-        return CryptographicOperations.FixedTimeEquals(given, Encoding.UTF8.GetBytes(_token));
+        return CryptographicOperations.FixedTimeEquals(given, Encoding.UTF8.GetBytes(token));
     }
 
     // ------------------------------------------------------------------------------------------------ Tools
@@ -127,7 +144,7 @@ public sealed class McpService : IMcpBackend, IDisposable
     public Task<IReadOnlyList<McpHost>> ListHostsAsync(string query)
     {
         var hosts = Unlocked().List()
-            .Where(s => query.Length == 0 || $"{s.Name} {s.Host} {s.Workspace} {s.Group} {s.Tags}".Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Where(s => query.Length == 0 || $"{s.Name} {s.Host} {s.Workspace} {s.Group} {string.Join(" ", s.Tags)}".Contains(query, StringComparison.OrdinalIgnoreCase))
             .Select(s => new McpHost(s.Id, s.Name, s.Host, s.Port, s.Protocol.ToString().ToLowerInvariant(), s.Workspace, s.Group, string.Join(",", s.Tags)))
             .ToList();
         return Task.FromResult<IReadOnlyList<McpHost>>(hosts);
@@ -142,31 +159,34 @@ public sealed class McpService : IMcpBackend, IDisposable
 
     public async Task<string> ReadFileAsync(string host, string path, CancellationToken ct)
     {
-        using var sftp = await OpenSftpAsync(host);
-        return (await sftp.ReadTextAsync(path)).Content;
+        var (sftp, home) = await OpenSftpAsync(host, ct);
+        using (sftp) return (await sftp.ReadTextAsync(SftpSession.Normalize(home, path))).Content;
     }
 
     public async Task WriteFileAsync(string host, string path, string content, CancellationToken ct)
     {
-        using var sftp = await OpenSftpAsync(host);
-        await sftp.WriteTextAsync(path, content, "\n", false, 0, 0, force: true);
+        var (sftp, home) = await OpenSftpAsync(host, ct);
+        using (sftp) await sftp.WriteTextAsync(SftpSession.Normalize(home, path), content, "\n", false, 0, 0, force: true);
     }
 
     public async Task<IReadOnlyList<McpFileEntry>> ListDirectoryAsync(string host, string path, CancellationToken ct)
     {
-        using var sftp = await OpenSftpAsync(host);
-        var listing = await sftp.ListAsync(path);
-        return listing.Entries.Select(e => new McpFileEntry(e.Name, e.IsDir, e.Size)).ToList();
+        var (sftp, _) = await OpenSftpAsync(host, ct);
+        using (sftp)
+        {
+            var listing = await sftp.ListAsync(path);
+            return listing.Entries.Select(e => new McpFileEntry(e.Name, e.IsDir, e.Size)).ToList();
+        }
     }
 
-    private async Task<SftpSession> OpenSftpAsync(string host)
+    private async Task<(SftpSession Sftp, string Home)> OpenSftpAsync(string host, CancellationToken ct)
     {
         var (server, key) = Resolve(host);
         var sftp = new SftpSession(server, key, _check, _jumps);
         try
         {
-            await sftp.ConnectAsync();
-            return sftp;
+            var home = await sftp.ConnectAsync(ct);
+            return (sftp, home);
         }
         catch
         {

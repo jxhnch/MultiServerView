@@ -36,14 +36,14 @@ public sealed class SftpSession : IDisposable
 
     private SftpClient Client => _client ?? throw new InvalidOperationException("The SFTP connection is not open.");
 
-    public async Task<string> ConnectAsync()
+    public async Task<string> ConnectAsync(CancellationToken ct = default)
     {
-        var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check);
+        var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check, ct);
         var client = new SftpClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
         var hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
         try
         {
-            await Task.Run(() => client.Connect());
+            await Task.Run(() => client.Connect(), ct);
         }
         catch (Exception ex)
         {
@@ -305,10 +305,13 @@ public sealed class SftpSession : IDisposable
 
     private static long UnixSeconds(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
 
-    /// <summary>Turns relative paths into absolute ones and resolves "." and "..".</summary>
+    /// <summary>Turns relative paths into absolute ones and resolves ".", ".." and "~".</summary>
     public static string Normalize(string workingDirectory, string path)
     {
-        var raw = string.IsNullOrWhiteSpace(path) || path == "." ? workingDirectory : path.StartsWith('/') ? path : Combine(workingDirectory, path);
+        var p = path.Trim();
+        if (p == "~") p = ".";
+        else if (p.StartsWith("~/", StringComparison.Ordinal)) p = p[2..];
+        var raw = string.IsNullOrWhiteSpace(p) || p == "." ? workingDirectory : p.StartsWith('/') ? p : Combine(workingDirectory, p);
         var parts = new List<string>();
         foreach (var seg in raw.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {

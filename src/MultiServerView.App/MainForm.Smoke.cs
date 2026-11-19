@@ -82,6 +82,18 @@ public sealed partial class MainForm
 
             Check("MCP: request without token is refused", (await Post("{}", null)).Status == 401);
             Check("MCP: wrong token is refused", (await Post("{}", "nope")).Status == 401);
+            using (var wellKnown = await http.GetAsync($"http://127.0.0.1:{port}/.well-known/oauth-protected-resource"))
+                Check("MCP: OAuth discovery path returns 404 without auth", (int)wellKnown.StatusCode == 404);
+            using (var getReq = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/mcp"))
+            {
+                getReq.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+                using var getRes = await http.SendAsync(getReq);
+                Check("MCP: GET /mcp returns 405 with Allow: POST", (int)getRes.StatusCode == 405 && getRes.Content.Headers.Allow.Contains("POST"));
+            }
+            var notify = await Post("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", token);
+            Check("MCP: notification returns 202", notify.Status == 202);
+            var init = await Post("{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"smoke\",\"version\":\"1\"}}}", token);
+            Check("MCP: initialize negotiates protocolVersion", init.Status == 200 && init.Body.Contains("\"protocolVersion\":\"2025-06-18\""), Snip(init.Body, 120));
             var list = await Post("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", token);
             Check("MCP: tools are listed", list.Status == 200 && list.Body.Contains("run_command") && list.Body.Contains("list_directory"), Snip(list.Body, 80));
             var hosts = await Post("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_hosts\",\"arguments\":{}}}", token);

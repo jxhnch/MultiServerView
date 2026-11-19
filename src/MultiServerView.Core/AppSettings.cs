@@ -39,7 +39,8 @@ public sealed class AppSettings
     public void Normalize()
     {
         McpPort = Math.Clamp(McpPort, 1024, 65535);
-        if (McpEnabled && McpToken.Length < 16) McpToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+        if (!McpEnabled) McpToken = "";
+        else if (McpToken.Length < 16) McpToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
         SshKeepAliveSeconds = Math.Clamp(SshKeepAliveSeconds, 0, 600);
         SshConnectTimeoutSeconds = Math.Clamp(SshConnectTimeoutSeconds, 3, 120);
         if (RdpColorDepth is not (16 or 24 or 32)) RdpColorDepth = 32;
