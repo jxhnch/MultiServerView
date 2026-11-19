@@ -21,14 +21,20 @@ public sealed record McpFileEntry(string Name, bool IsDirectory, long Size);
 /// <summary>A tool that is described by data (name, description, JSON schema) instead of being built into the handler.</summary>
 public sealed record McpToolDef(string Name, string Description, JsonObject Schema);
 
+/// <summary>An image returned to the AI (screenshot).</summary>
+public sealed record McpImage(string Base64, string MimeType);
+
+/// <summary>What a tool returns: text and optionally images.</summary>
+public sealed record McpToolOutput(string Text, IReadOnlyList<McpImage>? Images = null);
+
 /// <summary>More tools on top of the five built-in ones. Implemented by the app (the same actions the user has in the UI).</summary>
 public interface IMcpExtraTools
 {
     IReadOnlyList<McpToolDef> Tools { get; }
     bool Has(string name);
 
-    /// <summary>Runs the tool and returns the text for the AI (usually JSON). Exceptions become tool errors.</summary>
-    Task<string> CallAsync(string name, JsonObject args, CancellationToken ct);
+    /// <summary>Runs the tool and returns the result for the AI (usually JSON text). Exceptions become tool errors.</summary>
+    Task<McpToolOutput> CallAsync(string name, JsonObject args, CancellationToken ct);
 }
 
 /// <summary>
@@ -170,8 +176,8 @@ public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null
                 default:
                     if (extra != null && extra.Has(name))
                     {
-                        text = await extra.CallAsync(name, a, ct);
-                        break;
+                        var output = await extra.CallAsync(name, a, ct);
+                        return Result(output.Text, false, output.Images);
                     }
                     throw new McpException(-32602, "Unknown tool: " + name);
             }
@@ -211,11 +217,13 @@ public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null
 
     private static string Required(string value, string name) => value.Length > 0 ? value : throw new McpException(-32602, name + " is required.");
 
-    private static JsonObject Result(string text, bool isError) => new()
+    private static JsonObject Result(string text, bool isError, IReadOnlyList<McpImage>? images = null)
     {
-        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text }),
-        ["isError"] = isError
-    };
+        var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text });
+        foreach (var image in images ?? [])
+            content.Add(new JsonObject { ["type"] = "image", ["data"] = image.Base64, ["mimeType"] = image.MimeType });
+        return new JsonObject { ["content"] = content, ["isError"] = isError };
+    }
 
     private JsonArray AllTools()
     {

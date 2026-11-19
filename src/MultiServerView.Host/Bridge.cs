@@ -40,6 +40,7 @@ public sealed class Bridge : IDisposable
     private readonly WebSocketTcpProxy _vncProxy = new();
     private readonly McpService _mcp;
     private readonly List<Action<object>> _eventTaps = new();
+    private readonly ScreenHub _screens;
 
     public Bridge(VaultStore vault, SourceService source, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit, IHostPlatform platform)
     {
@@ -60,7 +61,16 @@ public sealed class Bridge : IDisposable
             emit(e);
         };
         _auto = new AutoSync(vault, source, emit, CloseEverythingForReplacedVault);
-        var tools = new McpAppTools(vault, DispatchAsync, tap => { lock (_eventTaps) _eventTaps.Add(tap); });
+        _screens = new ScreenHub(emit);
+        // Changes made by AI tools must show up in the window right away.
+        async Task<object?> ForMcp(string method, JsonElement p)
+        {
+            var result = await DispatchAsync(method, p);
+            if (!method.EndsWith(".list", StringComparison.Ordinal) && method.Split('.')[0] is "servers" or "keys" or "snippets" or "identities" or "forwards" or "knownhosts" or "history")
+                _emit(new { @event = "vault.changed" });
+            return result;
+        }
+        var tools = new McpAppTools(vault, ForMcp, tap => { lock (_eventTaps) _eventTaps.Add(tap); }, _screens);
         _mcp = new McpService(vault, CheckHost, Jumps, tools);
         _mcp.Apply(settings.Current);
     }
@@ -569,6 +579,9 @@ public sealed class Bridge : IDisposable
             }
             case "app.info":
                 return new { platform = _platform.Name, customTitleBar = _platform.CustomTitleBar, canSelfUpdate = _platform.CanSelfUpdate };
+            case "mcp.screenReply":
+                _screens.Reply(p);
+                return null;
             case "mcp.status":
                 return new { running = _mcp.Running, error = _mcp.Error };
             case "mcp.configure":

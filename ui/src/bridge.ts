@@ -40,7 +40,8 @@ export type HostEvent =
   | { event: 'sftp.progress'; sessionId: string; transferId: string; name: string; done: number; total: number; finished: boolean }
   | { event: 'sftp.externalSaved'; sessionId: string; name: string; error: string | null }
   | { event: 'window.state'; maximized: boolean }
-  | { event: 'vault.changed' };
+  | { event: 'vault.changed' }
+  | { event: 'mcp.screen'; requestId: string; op: string; args: Record<string, unknown> };
 
 const listeners = new Set<(e: HostEvent) => void>();
 
@@ -503,6 +504,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return onlyNative('TeamViewer');
     case 'mcp.status':
       return { running: false, error: null };
+    case 'mcp.screenReply':
+      return null;
     case 'mcp.configure':
       if (params.action === 'status') return { supported: false, path: '', exists: false, configured: false, upToDate: false };
       return onlyNative('Configuring AI tools');
@@ -967,6 +970,7 @@ export const api = {
   rdpExternal: (serverId: string) => call<void>('rdp.external', { serverId }),
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
   mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),
+  mcpScreenReply: (requestId: string, ok: boolean, result?: unknown, error?: string) => call<void>('mcp.screenReply', { requestId, ok, result, error }),
   mcpConfigure: (client: string, action: 'status' | 'add' | 'remove') =>
     call<McpConfigStatus>('mcp.configure', { client, action }),
   updateCheck: () => call<UpdateStatus>('update.check'),

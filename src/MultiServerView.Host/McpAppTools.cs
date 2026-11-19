@@ -20,11 +20,13 @@ internal sealed class McpAppTools : IMcpExtraTools
     private readonly VaultStore _vault;
     private readonly Func<string, JsonElement, Task<object?>> _bridge;
     private readonly TerminalHub _terminals;
+    private readonly ScreenHub _screens;
     private readonly Dictionary<string, (McpToolDef Def, Run Run)> _tools = new(StringComparer.Ordinal);
 
-    public McpAppTools(VaultStore vault, Func<string, JsonElement, Task<object?>> bridge, Action<Action<object>> subscribeEvents)
+    public McpAppTools(VaultStore vault, Func<string, JsonElement, Task<object?>> bridge, Action<Action<object>> subscribeEvents, ScreenHub screens)
     {
         _vault = vault;
+        _screens = screens;
         _bridge = bridge;
         _terminals = new TerminalHub(bridge, subscribeEvents);
         Register();
@@ -33,16 +35,17 @@ internal sealed class McpAppTools : IMcpExtraTools
     public IReadOnlyList<McpToolDef> Tools => _tools.Values.Select(t => t.Def).ToList();
     public bool Has(string name) => _tools.ContainsKey(name);
 
-    public async Task<string> CallAsync(string name, JsonObject args, CancellationToken ct)
+    public async Task<McpToolOutput> CallAsync(string name, JsonObject args, CancellationToken ct)
     {
         if (!_vault.IsUnlocked) throw new InvalidOperationException("The vault is locked. Unlock MultiServerView first.");
         var result = await _tools[name].Run(args, ct);
         return result switch
         {
-            null => "Done.",
-            string s => s,
-            JsonNode n => n.ToJsonString(Json.Options),
-            _ => JsonSerializer.Serialize(result, Json.Options)
+            null => new McpToolOutput("Done."),
+            McpToolOutput o => o,
+            string s => new McpToolOutput(s),
+            JsonNode n => new McpToolOutput(n.ToJsonString(Json.Options)),
+            _ => new McpToolOutput(JsonSerializer.Serialize(result, Json.Options))
         };
     }
 
@@ -257,9 +260,61 @@ internal sealed class McpAppTools : IMcpExtraTools
             async (a, ct) => await _terminals.ReadAsync(Req(a, "terminal"), Math.Clamp(IntOr(a, "wait_ms", 800), 0, 30_000), Math.Clamp(IntOr(a, "max_chars", 20_000), 100, 200_000), ct));
         Add("terminal_close", "Close an open terminal.", new() { ["terminal"] = P("string", "Terminal id.") }, ["terminal"], async (a, _) => await _terminals.CloseAsync(Req(a, "terminal")));
         Add("list_terminals", "List the terminals opened through MCP.", null, null, (_, _) => Task.FromResult<object?>(_terminals.List()));
+        // ------------------------------------------------------------ Remote screens (RDP, VNC): see and operate like the user
+        const string ScreenDoc = "Screen id from screen_open or screen_list.";
+        JsonObject Screen() => P("string", ScreenDoc);
+        JsonObject Xy(string what) => new() { ["x"] = P("integer", $"{what}: x in remote screen pixels (0 = left edge)."), ["y"] = P("integer", $"{what}: y in remote screen pixels (0 = top edge).") };
+        JsonObject Follow() => P("boolean", "Return a screenshot after the action (default false).");
+
+        Add("screen_open", "Open a remote desktop (RDP or VNC host) in a tab of the MultiServerView window and wait until it is connected. The window must be open and unlocked. Returns a screen id.",
+            new() { ["host"] = Host() }, ["host"], async (a, ct) =>
+            {
+                var server = FindServer(Req(a, "host"));
+                if (server.Protocol is not (Protocol.Rdp or Protocol.Vnc)) throw new InvalidOperationException($"\"{server.Name}\" is a {server.Protocol} host. Screens work for RDP and VNC hosts.");
+                return await _screens.RequestAsync("open", new { serverId = server.Id }, TimeSpan.FromSeconds(60), ct);
+            });
+        Add("screen_list", "List the remote screens that are open in the window (id, host, kind, size, state).", null, null,
+            async (_, ct) => await _screens.RequestAsync("list", new { }, TimeSpan.FromSeconds(15), ct));
+        Add("screen_screenshot", "Take a screenshot of a remote screen. Coordinates for the other screen tools refer to this picture (its size is given in the text).",
+            new() { ["screen"] = Screen() }, ["screen"], async (a, ct) => await Shot(a, 0, ct));
+        Add("screen_click", "Click on a remote screen.", Merge(new JsonObject { ["screen"] = Screen(), ["button"] = P("string", "left (default), right or middle."), ["double"] = P("boolean", "Double click."), ["screenshot"] = Follow() }, Xy("Where")), ["screen", "x", "y"],
+            async (a, ct) => await Act(a, "click", new { x = IntOr(a, "x", 0), y = IntOr(a, "y", 0), button = Opt(a, "button").Length > 0 ? Opt(a, "button") : "left", @double = Flag(a, "double") }, ct));
+        Add("screen_move", "Move the mouse pointer on a remote screen (for hover menus and tooltips).", Merge(new JsonObject { ["screen"] = Screen(), ["screenshot"] = Follow() }, Xy("Where")), ["screen", "x", "y"],
+            async (a, ct) => await Act(a, "move", new { x = IntOr(a, "x", 0), y = IntOr(a, "y", 0) }, ct));
+        Add("screen_drag", "Press the left button at one point, move to another and release (drag and drop, selecting, resizing).",
+            new() { ["screen"] = Screen(), ["from_x"] = P("integer", "Start x."), ["from_y"] = P("integer", "Start y."), ["to_x"] = P("integer", "End x."), ["to_y"] = P("integer", "End y."), ["screenshot"] = Follow() },
+            ["screen", "from_x", "from_y", "to_x", "to_y"],
+            async (a, ct) => await Act(a, "drag", new { fromX = IntOr(a, "from_x", 0), fromY = IntOr(a, "from_y", 0), toX = IntOr(a, "to_x", 0), toY = IntOr(a, "to_y", 0) }, ct));
+        Add("screen_scroll", "Scroll the mouse wheel on a remote screen.", Merge(new JsonObject { ["screen"] = Screen(), ["amount"] = P("integer", "Scroll steps: positive = down, negative = up (default 3)."), ["screenshot"] = Follow() }, Xy("Where")), ["screen", "x", "y"],
+            async (a, ct) => await Act(a, "scroll", new { x = IntOr(a, "x", 0), y = IntOr(a, "y", 0), amount = IntOr(a, "amount", 3) }, ct));
+        Add("screen_type", "Type text on a remote screen (into the focused field). Click the field first. If the text does not arrive (some servers ignore unicode input), try method=keys.",
+            new() { ["screen"] = Screen(), ["text"] = P("string", "Text to type."), ["method"] = P("string", "unicode (default, independent of the keyboard layout) or keys (key presses for a US keyboard layout; works with every server)."), ["screenshot"] = Follow() }, ["screen", "text"],
+            async (a, ct) => await Act(a, "type", new { text = Opt(a, "text"), method = Opt(a, "method").Length > 0 ? Opt(a, "method") : "unicode" }, ct));
+        Add("screen_key", "Press a key or a shortcut on a remote screen, e.g. enter, tab, esc, f5, ctrl+c, alt+tab, win+r, ctrl+alt+delete (several keys separated by spaces are pressed one after the other).",
+            new() { ["screen"] = Screen(), ["keys"] = P("string", "Key or shortcut."), ["screenshot"] = Follow() }, ["screen", "keys"],
+            async (a, ct) => await Act(a, "key", new { keys = Req(a, "keys") }, ct));
+        Add("screen_close", "Close a remote screen tab.", new() { ["screen"] = Screen() }, ["screen"],
+            async (a, ct) => await _screens.RequestAsync("close", new { screen = Req(a, "screen") }, TimeSpan.FromSeconds(15), ct));
     }
 
     // ------------------------------------------------------------------------------------------------ Helpers
+    private async Task<object?> Shot(JsonObject a, int waitMs, CancellationToken ct)
+    {
+        if (waitMs > 0) await Task.Delay(waitMs, ct);
+        var r = await _screens.RequestAsync("screenshot", new { screen = Req(a, "screen") }, TimeSpan.FromSeconds(30), ct);
+        var png = r.GetProperty("png").GetString() ?? "";
+        return new McpToolOutput($"Screenshot {r.GetProperty("width").GetInt32()}x{r.GetProperty("height").GetInt32()} pixels. Coordinates for clicks refer to this picture.", [new McpImage(png, "image/png")]);
+    }
+
+    /// <summary>Runs a screen action; optionally returns a screenshot afterwards.</summary>
+    private async Task<object?> Act(JsonObject a, string op, object args, CancellationToken ct)
+    {
+        var payload = JsonSerializer.SerializeToNode(args, Json.Options)!.AsObject();
+        payload["screen"] = Req(a, "screen");
+        await _screens.RequestAsync(op, payload, TimeSpan.FromSeconds(60), ct);
+        return Flag(a, "screenshot") ? await Shot(a, 400, ct) : "Done. Take a screenshot to see the result.";
+    }
+
 
     private static string NewId() => Guid.NewGuid().ToString("N");
 

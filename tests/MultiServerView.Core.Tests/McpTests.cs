@@ -166,8 +166,8 @@ public class McpTests
     {
         public IReadOnlyList<McpToolDef> Tools { get; } = [new McpToolDef("demo_tool", "Demo.", new System.Text.Json.Nodes.JsonObject { ["type"] = "object" })];
         public bool Has(string name) => name == "demo_tool";
-        public Task<string> CallAsync(string name, JsonObject args, CancellationToken ct) =>
-            args["fail"]?.GetValue<bool>() == true ? throw new InvalidOperationException("boom") : Task.FromResult("demo:" + (args["x"]?.GetValue<string>() ?? ""));
+        public Task<McpToolOutput> CallAsync(string name, JsonObject args, CancellationToken ct) =>
+            args["fail"]?.GetValue<bool>() == true ? throw new InvalidOperationException("boom") : Task.FromResult(new McpToolOutput("demo:" + (args["x"]?.GetValue<string>() ?? ""), args["x"]?.GetValue<string>() == "img" ? [new McpImage("QUJD", "image/png")] : null));
     }
 
     [Fact]
@@ -180,6 +180,10 @@ public class McpTests
 
         var ok = await Call(h, """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"demo_tool","arguments":{"x":"hi"}}}""");
         Assert.Equal("demo:hi", ok["result"]!["content"]![0]!["text"]!.GetValue<string>());
+
+        var img = await Call(h, """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo_tool","arguments":{"x":"img"}}}""");
+        Assert.Equal("image", img["result"]!["content"]![1]!["type"]!.GetValue<string>());
+        Assert.Equal("QUJD", img["result"]!["content"]![1]!["data"]!.GetValue<string>());
 
         var bad = await Call(h, """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"demo_tool","arguments":{"fail":true}}}""");
         Assert.True(bad["result"]!["isError"]!.GetValue<bool>());

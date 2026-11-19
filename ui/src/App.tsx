@@ -1,3 +1,4 @@
+import { allScreens, getScreen, sleep, type ScreenHandle } from './mcpScreens';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, isNative, onEvent } from './bridge';
 import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
@@ -245,6 +246,80 @@ export function App() {
     },
     [tabs, active],
   );
+
+  // ---------------------------------------------------------------- AI tools (MCP) operating remote screens
+  const mcpDeps = useRef({ open, serversById: byId, setActive, closeTab, active, tabs });
+  mcpDeps.current = { open, serversById: byId, setActive, closeTab, active, tabs };
+  useEffect(() => {
+    const describe = (h: ScreenHandle) => ({ screen: h.id, host: h.name, kind: h.kind, state: h.state(), ...(h.size() ?? {}) });
+    const run = async (op: string, args: Record<string, unknown>): Promise<unknown> => {
+      const d = mcpDeps.current;
+      const num = (k: string) => Number(args[k] ?? 0);
+      if (op === 'list') return allScreens().map(describe);
+      if (op === 'open') {
+        // a host that was just added by an AI tool may not be in the list yet
+        let server = d.serversById.get(String(args.serverId));
+        for (let i = 0; !server && i < 20; i++) {
+          await sleep(150);
+          server = mcpDeps.current.serversById.get(String(args.serverId));
+        }
+        if (!server) throw new Error('Host not found.');
+        const found = () => allScreens().find((h) => h.serverId === server.id && h.state() === 'connected');
+        if (!found()) {
+          await d.open(server, false, 'session');
+          const deadline = Date.now() + 55000;
+          while (!found() && Date.now() < deadline) {
+            const failed = allScreens().find((h) => h.serverId === server.id && h.state() === 'error');
+            if (failed) throw new Error('The connection to ' + server.name + ' failed. Look at the tab in the window for the reason.');
+            await sleep(300);
+          }
+        }
+        const h = found();
+        if (!h) throw new Error('Timed out while connecting to ' + server.name + '.');
+        d.setActive(h.id);
+        await sleep(400);
+        return describe(h);
+      }
+      const h = getScreen(String(args.screen));
+      if (!h) throw new Error('No such screen. Use screen_list or screen_open.');
+      if (op === 'close') {
+        d.closeTab(h.id);
+        return 'Closed.';
+      }
+      if (h.state() !== 'connected') throw new Error('The screen is not connected (state: ' + h.state() + ').');
+      if (d.active !== h.id) {
+        d.setActive(h.id); // a hidden tab has no size on the page
+        await sleep(350);
+      }
+      switch (op) {
+        case 'screenshot': {
+          const png = await h.screenshot();
+          const size = h.size();
+          return { png, width: size?.width ?? 0, height: size?.height ?? 0 };
+        }
+        case 'move':
+          return h.move(num('x'), num('y'));
+        case 'click':
+          return h.click(num('x'), num('y'), (args.button as 'left' | 'right' | 'middle') ?? 'left', Boolean(args.double));
+        case 'drag':
+          return h.drag(num('fromX'), num('fromY'), num('toX'), num('toY'));
+        case 'scroll':
+          return h.scroll(num('x'), num('y'), num('amount'));
+        case 'type':
+          return h.type(String(args.text ?? ''), args.method === 'keys' ? 'keys' : 'unicode');
+        case 'key':
+          return h.key(String(args.keys ?? ''));
+        default:
+          throw new Error('Unknown screen action: ' + op);
+      }
+    };
+    return onEvent((e) => {
+      if (e.event !== 'mcp.screen') return;
+      run(e.op, e.args)
+        .then((result) => api.mcpScreenReply(e.requestId, true, result ?? null))
+        .catch((err: Error) => api.mcpScreenReply(e.requestId, false, undefined, err.message));
+    });
+  }, []);
 
   const reconnect = useCallback(
     (id: string) => setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, reconnectKey: t.reconnectKey + 1 } : t))),

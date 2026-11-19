@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import RFB from '@novnc/novnc';
 import { api } from './bridge';
+import { canvasToPng, parseKeys, pointerEvent, registerScreen, sleep, wheelEvent, type MouseButton } from './mcpScreens';
 import { SessionFrame } from './SessionFrame';
 import { getUiSettings } from './uiSettings';
 import type { Server, SessionStatus } from './types';
@@ -33,8 +34,10 @@ export function VncView({
   const [pw, setPw] = useState('');
   const activeRef = useRef(active);
   activeRef.current = active;
+  const statusRef = useRef<SessionStatus>('connecting');
 
   const setStatus = (s: SessionStatus, msg = '') => {
+    statusRef.current = s;
     setStatusState(s);
     setMessage(msg);
     onStatus(tabId, s);
@@ -43,6 +46,7 @@ export function VncView({
   useEffect(() => {
     let cancelled = false;
     let rfb: RFB | null = null;
+    let unregister: (() => void) | undefined;
     setStatus('connecting');
     setNeedsPassword(false);
     setPw('');
@@ -62,6 +66,8 @@ export function VncView({
 
         rfb.addEventListener('connect', () => {
           setStatus('connected');
+          unregister?.();
+          unregister = registerVncScreen(tabId, server.id, server.name, () => statusRef.current, () => boxRef.current, () => rfbRef.current);
           if (activeRef.current) rfb?.focus();
         });
         rfb.addEventListener('disconnect', (e) => {
@@ -80,6 +86,7 @@ export function VncView({
 
     return () => {
       cancelled = true;
+      unregister?.();
       try {
         rfb?.disconnect();
       } catch {
@@ -150,4 +157,86 @@ export function VncView({
       </div>
     </SessionFrame>
   );
+}
+
+/** Lets an AI tool (MCP) see and operate this VNC screen. */
+function registerVncScreen(tabId: string, serverId: string, name: string, state: () => SessionStatus, getBox: () => HTMLElement | null, getRfb: () => RFB | null): () => void {
+  const canvas = () => {
+    const c = getBox()?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!c) throw new Error('The remote screen is not ready.');
+    return c;
+  };
+  const rfb = () => getRfb() ?? (() => { throw new Error('The remote screen is not connected.'); })();
+  const press = (keysym: number, code: string, down: boolean) => rfb().sendKey(keysym, code, down);
+
+  return registerScreen({
+    id: tabId,
+    kind: 'vnc',
+    serverId,
+    name,
+    state,
+    size: () => {
+      try {
+        const c = canvas();
+        return { width: c.width, height: c.height };
+      } catch {
+        return null;
+      }
+    },
+    screenshot: () => canvasToPng(canvas()),
+    async move(x, y) {
+      pointerEvent(canvas(), canvas(), 'mousemove', x, y);
+    },
+    async click(x, y, button: MouseButton, double) {
+      const c = canvas();
+      pointerEvent(c, c, 'mousemove', x, y);
+      await sleep(40);
+      for (let i = 0; i < (double ? 2 : 1); i++) {
+        pointerEvent(c, c, 'mousedown', x, y, button);
+        await sleep(40);
+        pointerEvent(c, c, 'mouseup', x, y, button);
+        await sleep(60);
+      }
+    },
+    async drag(fromX, fromY, toX, toY) {
+      const c = canvas();
+      pointerEvent(c, c, 'mousemove', fromX, fromY);
+      await sleep(60);
+      pointerEvent(c, c, 'mousedown', fromX, fromY);
+      const steps = 8;
+      for (let i = 1; i <= steps; i++) {
+        await sleep(30);
+        pointerEvent(c, c, 'mousemove', fromX + ((toX - fromX) * i) / steps, fromY + ((toY - fromY) * i) / steps);
+      }
+      await sleep(60);
+      pointerEvent(c, c, 'mouseup', toX, toY);
+    },
+    async scroll(x, y, amount) {
+      const c = canvas();
+      pointerEvent(c, c, 'mousemove', x, y);
+      wheelEvent(c, c, x, y, amount * 100);
+    },
+    async type(text) {
+      // VNC sends key symbols, which are independent of the layout: both methods are the same here.
+      for (const ch of text) {
+        const keysym = ch === '\n' || ch === '\r' ? 0xff0d : ch === '\t' ? 0xff09 : ch.codePointAt(0)! < 0x100 ? ch.codePointAt(0)! : 0x01000000 + ch.codePointAt(0)!;
+        press(keysym, '', true);
+        press(keysym, '', false);
+        await sleep(8);
+      }
+    },
+    async key(keys) {
+      for (const combo of parseKeys(keys)) {
+        for (const k of combo) {
+          press(k.keysym, k.code, true);
+          await sleep(25);
+        }
+        for (const k of [...combo].reverse()) {
+          press(k.keysym, k.code, false);
+          await sleep(25);
+        }
+        await sleep(40);
+      }
+    },
+  });
 }
