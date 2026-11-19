@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Text.Json;
 using MultiServerView.Core;
+using MultiServerView.Core.Mcp;
 using MultiServerView.Core.Update;
 using MultiServerView.Core.Import;
 using MultiServerView.Core.Proxmox;
@@ -561,6 +562,22 @@ public sealed class Bridge : IDisposable
                 return new { platform = _platform.Name, customTitleBar = _platform.CustomTitleBar, canSelfUpdate = _platform.CanSelfUpdate };
             case "mcp.status":
                 return new { running = _mcp.Running, error = _mcp.Error };
+            case "mcp.configure":
+            {
+                var client = Str(p, "client");
+                var action = Str(p, "action");
+                var s = _settings.Current;
+                var url = $"http://127.0.0.1:{s.McpPort}/mcp";
+                return action switch
+                {
+                    "status" => McpClientConfig.Status(client, url, s.McpToken),
+                    "add" => s.McpEnabled && s.McpToken.Length > 0
+                        ? McpClientConfig.Add(client, url, s.McpToken)
+                        : throw new InvalidOperationException("Enable the MCP server first."),
+                    "remove" => McpClientConfig.Remove(client),
+                    _ => throw new ArgumentException("Unknown action: " + action)
+                };
+            }
             case "vault.changePassword":
             {
                 _vault.ChangePassword(Str(p, "oldPassword"), Str(p, "newPassword"));

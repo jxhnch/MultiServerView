@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, isNative } from './bridge';
+import { api, isNative, type McpConfigStatus } from './bridge';
 import { IconCheck, IconCopy } from './Icons';
 import type { HostSettings } from './types';
 
@@ -70,6 +70,9 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
   const [status, setStatus] = useState<{ running: boolean; error: string | null } | null>(null);
   const [client, setClient] = useState('claude-code');
   const [copied, setCopied] = useState('');
+  const [cfg, setCfg] = useState<McpConfigStatus | null>(null);
+  const [cfgBusy, setCfgBusy] = useState(false);
+  const [cfgNote, setCfgNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const timer = useRef<number | undefined>(undefined);
 
   const loadStatus = useCallback(() => void api.mcpStatus().then(setStatus).catch(() => undefined), []);
@@ -80,6 +83,27 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
   }, [toast, loadStatus]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  useEffect(() => setCfgNote(null), [client]);
+
+  useEffect(() => {
+    if (!isNative || !host?.mcpEnabled || !host.mcpToken) {
+      setCfg(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .mcpConfigure(client, 'status')
+      .then((r) => {
+        if (!cancelled) setCfg(r);
+      })
+      .catch(() => {
+        if (!cancelled) setCfg(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, host?.mcpEnabled, host?.mcpPort, host?.mcpToken]);
 
   const saveSettings = (next: HostSettings) => {
     api
@@ -114,6 +138,29 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
   const url = `http://127.0.0.1:${host?.mcpPort ?? 7676}/mcp`;
   const current = CLIENTS.find((c) => c.id === client) ?? CLIENTS[0];
   const snippet = host ? current.snippet(url, host.mcpToken) : '';
+  const where = cfg?.supported && cfg.path ? cfg.path : current.where;
+
+  const configure = async (action: 'add' | 'remove') => {
+    setCfgBusy(true);
+    setCfgNote(null);
+    try {
+      const r = await api.mcpConfigure(client, action);
+      setCfg(r);
+      const bak = r.backupPath ? ' (backup saved as .bak)' : '';
+      const hint =
+        client === 'antigravity'
+          ? "Click Refresh in Antigravity's MCP Servers panel to load the tools."
+          : `Restart or reload ${current.label} to apply the change.`;
+      setCfgNote({
+        kind: 'ok',
+        text: action === 'add' ? `Saved to ${r.path}${bak}. ${hint}` : `Removed from ${r.path}${bak}. ${hint}`,
+      });
+    } catch (e) {
+      setCfgNote({ kind: 'error', text: (e as Error).message });
+    } finally {
+      setCfgBusy(false);
+    }
+  };
 
   return (
     <div className="page settings">
@@ -207,9 +254,9 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                 ))}
               </div>
               <p className="small">{current.intro}</p>
-              {current.where && (
+              {where && (
                 <p className="muted small">
-                  File: <code>{current.where}</code>
+                  File: <code>{where}</code>
                 </p>
               )}
               <pre className="code-block">{snippet}</pre>
@@ -217,7 +264,43 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                 <button className="primary" onClick={() => void copy(snippet, 'snippet')}>
                   {copied === 'snippet' ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied === 'snippet' ? 'Copied' : 'Copy'}
                 </button>
+                {isNative && cfg?.supported && (
+                  <>
+                    {!cfg.configured && (
+                      <button type="button" disabled={cfgBusy} onClick={() => void configure('add')}>
+                        Add to config
+                      </button>
+                    )}
+                    {cfg.configured && !cfg.upToDate && (
+                      <button type="button" disabled={cfgBusy} onClick={() => void configure('add')}>
+                        Update config
+                      </button>
+                    )}
+                    {cfg.configured && (
+                      <button type="button" className="danger" disabled={cfgBusy} onClick={() => void configure('remove')}>
+                        Remove
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
+              {cfgNote ? (
+                <div className={cfgNote.kind === 'ok' ? 'notice ok small' : 'error small'} style={{ marginTop: 10 }}>
+                  {cfgNote.text}
+                </div>
+              ) : cfg?.error ? (
+                <div className="error small" style={{ marginTop: 10 }}>
+                  {cfg.error}
+                </div>
+              ) : cfg?.configured && !cfg.upToDate ? (
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  The saved config uses a different port or token. Click <strong>Update config</strong> to refresh it.
+                </p>
+              ) : cfg?.configured && cfg.upToDate ? (
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  Configured in <code>{cfg.path}</code>.
+                </p>
+              ) : null}
               <p className="muted small" style={{ marginTop: 12 }}>
                 Tools the AI gets: <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>. SSH
                 hosts only; MultiServerView itself never sends your saved passwords or keys to the AI.

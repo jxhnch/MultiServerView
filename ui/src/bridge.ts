@@ -503,6 +503,9 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return onlyNative('TeamViewer');
     case 'mcp.status':
       return { running: false, error: null };
+    case 'mcp.configure':
+      if (params.action === 'status') return { supported: false, path: '', exists: false, configured: false, upToDate: false };
+      return onlyNative('Configuring AI tools');
     case 'app.info':
       return { platform: 'browser', customTitleBar: true, canSelfUpdate: false };
     case 'update.check':
@@ -905,6 +908,16 @@ export interface SourceConfigInput {
   password: string;
 }
 
+export interface McpConfigStatus {
+  supported: boolean;
+  path: string;
+  exists: boolean;
+  configured: boolean;
+  upToDate: boolean;
+  backupPath?: string | null;
+  error?: string | null;
+}
+
 /** Demo data for browser mode (development only). */
 let mockProxmox: ProxmoxInfo[] = [{ id: 'demo-pve', name: 'Demo-Proxmox', url: 'https://pve.example.com:8006', tokenId: 'root@pam!msv', hasSecret: true, certFingerprint: 'AB:CD', updatedAt: new Date().toISOString() }];
 const MOCK_PVE_VMS: ProxmoxVmInfo[] = [
@@ -954,6 +967,8 @@ export const api = {
   rdpExternal: (serverId: string) => call<void>('rdp.external', { serverId }),
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
   mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),
+  mcpConfigure: (client: string, action: 'status' | 'add' | 'remove') =>
+    call<McpConfigStatus>('mcp.configure', { client, action }),
   updateCheck: () => call<UpdateStatus>('update.check'),
   updateInstall: () => call<void>('update.install'),
 
