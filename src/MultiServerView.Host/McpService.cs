@@ -24,12 +24,12 @@ public sealed class McpService : IMcpBackend, IDisposable
     private string _token = "";
     private int _port;
 
-    public McpService(VaultStore vault, Func<string, int, string, HostKeyTrust> check, JumpResolver jumps)
+    public McpService(VaultStore vault, Func<string, int, string, HostKeyTrust> check, JumpResolver jumps, IMcpExtraTools? extra = null)
     {
         _vault = vault;
         _check = check;
         _jumps = jumps;
-        _handler = new McpHandler(this);
+        _handler = new McpHandler(this, extra);
     }
 
     /// <summary>Last start error (e.g. port already in use), shown in the settings.</summary>

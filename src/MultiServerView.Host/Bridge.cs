@@ -39,6 +39,7 @@ public sealed class Bridge : IDisposable
     private readonly PortForwardManager _forwards = new();
     private readonly WebSocketTcpProxy _vncProxy = new();
     private readonly McpService _mcp;
+    private readonly List<Action<object>> _eventTaps = new();
 
     public Bridge(VaultStore vault, SourceService source, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit, IHostPlatform platform)
     {
@@ -50,9 +51,17 @@ public sealed class Bridge : IDisposable
             emit(new { @event = "forward.status", ruleId = id, running, error });
         _source = source;
         _rdp = rdp;
-        _emit = emit;
+        // Events go to the UI and to the MCP tools (terminal output).
+        _emit = e =>
+        {
+            Action<object>[] taps;
+            lock (_eventTaps) taps = _eventTaps.ToArray();
+            foreach (var tap in taps) { try { tap(e); } catch (Exception) { /* a tap must never break the UI */ } }
+            emit(e);
+        };
         _auto = new AutoSync(vault, source, emit, CloseEverythingForReplacedVault);
-        _mcp = new McpService(vault, CheckHost, Jumps);
+        var tools = new McpAppTools(vault, DispatchAsync, tap => { lock (_eventTaps) _eventTaps.Add(tap); });
+        _mcp = new McpService(vault, CheckHost, Jumps, tools);
         _mcp.Apply(settings.Current);
     }
 

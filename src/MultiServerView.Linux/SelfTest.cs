@@ -106,7 +106,46 @@ internal static class SelfTest
             req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
             using var ok = await http.SendAsync(req);
             Check("MCP server: needs the token, lists its tools", (int)noToken.StatusCode == 401 && ok.IsSuccessStatusCode && (await ok.Content.ReadAsStringAsync()).Contains("run_command"));
-            await Call("settings.save", new { sshKeepAliveSeconds = 30, sshConnectTimeoutSeconds = 15, rdpColorDepth = 32, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false, mcpEnabled = false, mcpPort = 47689, mcpToken = "" });
+            async Task<(string Text, bool IsError)> Tool(string name, object args)
+            {
+                var body = JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 1, method = "tools/call", @params = new { name, arguments = args } }, Json.Options);
+                using var r = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:47689/mcp") { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+                r.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+                using var res = await http.SendAsync(r);
+                using var d = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+                var result = d.RootElement.GetProperty("result");
+                return (result.GetProperty("content")[0].GetProperty("text").GetString() ?? "", result.TryGetProperty("isError", out var e) && e.GetBoolean());
+            }
+
+            string toolList;
+            using (var lr = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:47689/mcp") { Content = new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", Encoding.UTF8, "application/json") })
+            {
+                lr.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+                using var lres = await http.SendAsync(lr);
+                toolList = await lres.Content.ReadAsStringAsync();
+            }
+            Check("MCP tools: the app actions are listed", toolList.Contains("terminal_open") && toolList.Contains("generate_key") && toolList.Contains("add_host"));
+
+            var gen = await Tool("generate_key", new { name = "mcp-key" });
+            Check("MCP tools: generate_key returns a public key, never the private key", !gen.IsError && gen.Text.Contains("ssh-ed25519") && !gen.Text.Contains("PRIVATE KEY"), gen.Text.Length > 100 ? gen.Text[..100] : gen.Text);
+            var keys = await Tool("list_keys", new { });
+            Check("MCP tools: list_keys shows the key", keys.Text.Contains("mcp-key") && !keys.Text.Contains("PRIVATE KEY"));
+            var added = await Tool("add_host", new { name = "mcp-host", host = "10.1.1.1", protocol = "rdp", username = "Administrator", password = "secret-pw-123", tags = new[] { "a", "b" } });
+            Check("MCP tools: add_host works and does not echo the password", !added.IsError && added.Text.Contains("mcp-host") && added.Text.Contains("\"port\":3389") && !added.Text.Contains("secret-pw-123") && added.Text.Contains("hasPassword"), added.Text);
+            var stored = (await Call("servers.list")).EnumerateArray().First(x => x.GetProperty("name").GetString() == "mcp-host");
+            Check("MCP tools: the password is saved in the vault", stored.GetProperty("password").GetString() == "secret-pw-123");
+            var got = await Tool("get_host", new { host = "mcp-host" });
+            Check("MCP tools: get_host hides the password", got.Text.Contains("\"hasPassword\":true") && !got.Text.Contains("secret-pw-123"));
+            var upd = await Tool("update_host", new { target = "mcp-host", notes = "changed", workspace = "ws1" });
+            Check("MCP tools: update_host keeps the other fields", upd.Text.Contains("changed") && upd.Text.Contains("ws1") && upd.Text.Contains("Administrator"));
+            Check("MCP tools: the password survives update_host", (await Call("servers.list")).EnumerateArray().First(x => x.GetProperty("name").GetString() == "mcp-host").GetProperty("password").GetString() == "secret-pw-123");
+            Check("MCP tools: delete_host", !(await Tool("delete_host", new { host = "mcp-host" })).IsError && !(await Call("servers.list")).EnumerateArray().Any(x => x.GetProperty("name").GetString() == "mcp-host"));
+            var lf = Path.Combine(local, "mcp-note.txt");
+            await Tool("local_write_file", new { path = lf, content = "hello from the AI" });
+            Check("MCP tools: local_write_file and local_read_file", (await Tool("local_read_file", new { path = lf })).Text == "hello from the AI");
+            await Tool("save_snippet", new { name = "mcp-snippet", command = "uptime" });
+            Check("MCP tools: snippets", (await Tool("list_snippets", new { })).Text.Contains("mcp-snippet") && !(await Tool("delete_snippet", new { snippet = "mcp-snippet" })).IsError);
+            Check("MCP tools: a tool error is reported inside the result", (await Tool("get_host", new { host = "does-not-exist" })).IsError);
 
             // SSH + SFTP against a real server
             var ssh = Environment.GetEnvironmentVariable("MSV_SMOKE_SSH");
@@ -137,8 +176,26 @@ internal static class SelfTest
                 Check("SFTP: chmod 640", stat.GetProperty("permissions").GetInt32() == 0x1A0);
                 await Call("sftp.delete", new { sessionId = "st-sftp", path = remoteDir });
                 await Call("sftp.close", new { sessionId = "st-sftp" });
+                var term = await Tool("terminal_open", new { host = "selftest-ssh" });
+                var termId = System.Text.RegularExpressions.Regex.Match(term.Text, "mcp-term-[0-9a-f]+").Value;
+                Check("MCP tools: terminal_open gives a terminal", !term.IsError && termId.Length > 0, term.Text.Length > 120 ? term.Text[..120] : term.Text);
+                await Tool("terminal_send", new { terminal = termId, text = "echo MSV-$((20+22))" });
+                var termOut = await Tool("terminal_read", new { terminal = termId, wait_ms = 3000 });
+                Check("MCP tools: terminal_send and terminal_read", termOut.Text.Contains("MSV-42"), termOut.Text.Length > 160 ? termOut.Text[..160] : termOut.Text);
+                Check("MCP tools: terminal_close", !(await Tool("terminal_close", new { terminal = termId })).IsError);
+
+                var mcpRemote = home.TrimEnd('/') + "/msv-mcp-" + Guid.NewGuid().ToString("N")[..6];
+                Check("MCP tools: make_directory", !(await Tool("make_directory", new { host = "selftest-ssh", path = mcpRemote })).IsError);
+                var upFile = Path.Combine(local, "mcp-up.txt");
+                File.WriteAllText(upFile, "uploaded by the AI");
+                Check("MCP tools: upload_file", !(await Tool("upload_file", new { host = "selftest-ssh", local_paths = new[] { upFile }, remote_dir = mcpRemote })).IsError);
+                var downDir = Path.Combine(dir, "mcp-down");
+                Directory.CreateDirectory(downDir);
+                Check("MCP tools: download_file", !(await Tool("download_file", new { host = "selftest-ssh", remote_paths = new[] { mcpRemote + "/mcp-up.txt" }, local_dir = downDir })).IsError && File.ReadAllText(Path.Combine(downDir, "mcp-up.txt")) == "uploaded by the AI");
+                Check("MCP tools: file_checksum and delete_file", (await Tool("file_checksum", new { host = "selftest-ssh", path = mcpRemote + "/mcp-up.txt" })).Text.Length > 20 && !(await Tool("delete_file", new { host = "selftest-ssh", path = mcpRemote })).IsError);
                 Check("SFTP: cleaned up", true);
             }
+            await Call("settings.save", new { sshKeepAliveSeconds = 30, sshConnectTimeoutSeconds = 15, rdpColorDepth = 32, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false, mcpEnabled = false, mcpPort = 47689, mcpToken = "" });
         }
         catch (Exception ex)
         {

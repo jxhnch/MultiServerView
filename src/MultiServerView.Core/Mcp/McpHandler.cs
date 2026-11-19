@@ -18,11 +18,24 @@ public sealed record McpHost(string Id, string Name, string Address, int Port, s
 public sealed record McpExecResult(string StdOut, string StdErr, int ExitCode, bool TimedOut);
 public sealed record McpFileEntry(string Name, bool IsDirectory, long Size);
 
+/// <summary>A tool that is described by data (name, description, JSON schema) instead of being built into the handler.</summary>
+public sealed record McpToolDef(string Name, string Description, JsonObject Schema);
+
+/// <summary>More tools on top of the five built-in ones. Implemented by the app (the same actions the user has in the UI).</summary>
+public interface IMcpExtraTools
+{
+    IReadOnlyList<McpToolDef> Tools { get; }
+    bool Has(string name);
+
+    /// <summary>Runs the tool and returns the text for the AI (usually JSON). Exceptions become tool errors.</summary>
+    Task<string> CallAsync(string name, JsonObject args, CancellationToken ct);
+}
+
 /// <summary>
 /// A minimal Model Context Protocol server (JSON-RPC 2.0 over HTTP, one request = one response).
 /// Tools: list_hosts, run_command, read_file, write_file, list_directory.
 /// </summary>
-public sealed class McpHandler(IMcpBackend backend)
+public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null)
 {
     public const string ProtocolVersion = "2025-03-26";
     private static readonly string[] SupportedVersions = ["2025-11-25", "2025-06-18", "2025-03-26"];
@@ -81,7 +94,7 @@ public sealed class McpHandler(IMcpBackend backend)
             {
                 "initialize" => InitializeResult(args),
                 "ping" => new JsonObject(),
-                "tools/list" => new JsonObject { ["tools"] = Tools() },
+                "tools/list" => new JsonObject { ["tools"] = AllTools() },
                 "tools/call" => await CallToolAsync(args, ct),
                 "resources/list" => new JsonObject { ["resources"] = new JsonArray() },
                 "resources/templates/list" => new JsonObject { ["resourceTemplates"] = new JsonArray() },
@@ -155,6 +168,11 @@ public sealed class McpHandler(IMcpBackend backend)
                     break;
                 }
                 default:
+                    if (extra != null && extra.Has(name))
+                    {
+                        text = await extra.CallAsync(name, a, ct);
+                        break;
+                    }
                     throw new McpException(-32602, "Unknown tool: " + name);
             }
             return Result(text, false);
@@ -198,6 +216,15 @@ public sealed class McpHandler(IMcpBackend backend)
         ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text }),
         ["isError"] = isError
     };
+
+    private JsonArray AllTools()
+    {
+        var all = Tools();
+        if (extra == null) return all;
+        foreach (var t in extra.Tools)
+            all.Add(new JsonObject { ["name"] = t.Name, ["description"] = t.Description, ["inputSchema"] = t.Schema.DeepClone() });
+        return all;
+    }
 
     private static JsonArray Tools()
     {

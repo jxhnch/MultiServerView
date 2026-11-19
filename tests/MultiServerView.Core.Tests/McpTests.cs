@@ -161,4 +161,31 @@ public class McpTests
         Assert.Equal("/home/alice", SftpSession.Normalize("/home/alice", "~"));
         Assert.Equal("/home/alice/.ssh/config", SftpSession.Normalize("/home/alice", "~/.ssh/config"));
     }
+
+    private sealed class FakeExtra : IMcpExtraTools
+    {
+        public IReadOnlyList<McpToolDef> Tools { get; } = [new McpToolDef("demo_tool", "Demo.", new System.Text.Json.Nodes.JsonObject { ["type"] = "object" })];
+        public bool Has(string name) => name == "demo_tool";
+        public Task<string> CallAsync(string name, JsonObject args, CancellationToken ct) =>
+            args["fail"]?.GetValue<bool>() == true ? throw new InvalidOperationException("boom") : Task.FromResult("demo:" + (args["x"]?.GetValue<string>() ?? ""));
+    }
+
+    [Fact]
+    public async Task Extra_tools_are_listed_and_called_and_their_errors_stay_inside_the_result()
+    {
+        var h = new McpHandler(new FakeBackend(), new FakeExtra());
+        var list = await Call(h, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        Assert.Contains(list["result"]!["tools"]!.AsArray(), t => t!["name"]!.GetValue<string>() == "demo_tool");
+        Assert.Contains(list["result"]!["tools"]!.AsArray(), t => t!["name"]!.GetValue<string>() == "run_command");
+
+        var ok = await Call(h, """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"demo_tool","arguments":{"x":"hi"}}}""");
+        Assert.Equal("demo:hi", ok["result"]!["content"]![0]!["text"]!.GetValue<string>());
+
+        var bad = await Call(h, """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"demo_tool","arguments":{"fail":true}}}""");
+        Assert.True(bad["result"]!["isError"]!.GetValue<bool>());
+        Assert.Equal("boom", bad["result"]!["content"]![0]!["text"]!.GetValue<string>());
+
+        var unknown = await Call(h, """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"nope","arguments":{}}}""");
+        Assert.Equal(-32602, unknown["error"]!["code"]!.GetValue<int>());
+    }
 }
