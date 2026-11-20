@@ -79,6 +79,7 @@ public sealed class VaultStore
     {
         lock (_gate)
         {
+            if (_key != null) CryptographicOperations.ZeroMemory(_key.Key);
             _data = null;
             _key = null;
         }
@@ -286,9 +287,12 @@ public sealed class VaultStore
             foreach (var entry in entries)
             {
                 if (string.IsNullOrWhiteSpace(entry.Id)) entry.Id = Guid.NewGuid().ToString("N");
-                if (entry.Port <= 0) entry.Port = ServerEntry.DefaultPort(entry.Protocol);
+                if (entry.Port is <= 0 or > 65535) entry.Port = ServerEntry.DefaultPort(entry.Protocol);
                 entry.UpdatedAt = DateTimeOffset.UtcNow;
-                data.Servers.Add(entry);
+                var idx = data.Servers.FindIndex(s => s.Id == entry.Id);
+                if (idx >= 0) data.Servers[idx] = entry;
+                else data.Servers.Add(entry);
+                data.Tombstones.Remove(entry.Id);
                 count++;
             }
             Save();
@@ -648,7 +652,8 @@ public sealed class VaultStore
     {
         if (_data == null || _key == null) throw new InvalidOperationException("The vault is locked.");
         var plain = JsonSerializer.SerializeToUtf8Bytes(_data, Json.Options);
-        WriteAtomic(VaultCrypto.Seal(plain, _key));
+        try { WriteAtomic(VaultCrypto.Seal(plain, _key)); }
+        finally { CryptographicOperations.ZeroMemory(plain); }
     }
 
     private void WriteAtomic(byte[] blob)
@@ -658,7 +663,9 @@ public sealed class VaultStore
 
         // Write atomically: temp file first, then replace - so nothing is lost on a crash.
         var tmp = _path + ".tmp";
-        File.WriteAllBytes(tmp, blob);
+        var opts = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) opts.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using (var fs = new FileStream(tmp, opts)) fs.Write(blob);
         File.Move(tmp, _path, overwrite: true);
     }
 }

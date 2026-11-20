@@ -76,52 +76,68 @@ public sealed class SyncSettingsStore
         public bool Dirty { get; set; }
     }
 
+    private readonly object _ioLock = new();
+
     public SyncSettings Load()
     {
-        try
+        lock (_ioLock)
         {
-            if (!File.Exists(_path)) return new SyncSettings();
-            var d = JsonSerializer.Deserialize<Disk>(File.ReadAllText(_path), Json.Options) ?? new Disk();
-            return new SyncSettings
+            try
             {
-                Mode = d.Mode is SyncSettings.ModeFolder or SyncSettings.ModeGist ? d.Mode : SyncSettings.ModeSupabase,
-                Folder = d.Folder,
-                Url = d.Url,
-                AnonKey = d.AnonKey,
-                Email = d.Email,
-                Password = d.PasswordProtected.Length > 0 ? _protector.Unprotect(d.PasswordProtected) : "",
-                LastSync = d.LastSync,
-                LastVersion = d.LastVersion,
-                Dirty = d.Dirty
-            };
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or FormatException or System.Security.Cryptography.CryptographicException)
-        {
-            return new SyncSettings();
+                if (!File.Exists(_path)) return new SyncSettings();
+                var d = JsonSerializer.Deserialize<Disk>(File.ReadAllText(_path), Json.Options) ?? new Disk();
+                return new SyncSettings
+                {
+                    Mode = d.Mode is SyncSettings.ModeFolder or SyncSettings.ModeGist ? d.Mode : SyncSettings.ModeSupabase,
+                    Folder = d.Folder,
+                    Url = d.Url,
+                    AnonKey = d.AnonKey,
+                    Email = d.Email,
+                    Password = d.PasswordProtected.Length > 0 ? _protector.Unprotect(d.PasswordProtected) : "",
+                    LastSync = d.LastSync,
+                    LastVersion = d.LastVersion,
+                    Dirty = d.Dirty
+                };
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or FormatException or System.Security.Cryptography.CryptographicException)
+            {
+                return new SyncSettings();
+            }
         }
     }
 
     public void Save(SyncSettings s)
     {
-        var d = new Disk
+        lock (_ioLock)
         {
-            Mode = s.Mode,
-            Folder = s.Folder.Trim(),
-            Url = s.Url.Trim(),
-            AnonKey = s.AnonKey.Trim(),
-            Email = s.Email.Trim(),
-            PasswordProtected = s.Password.Length > 0 ? _protector.Protect(s.Password) : "",
-            LastSync = s.LastSync,
-            LastVersion = s.LastVersion,
-            Dirty = s.Dirty
-        };
-        var dir = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(_path, JsonSerializer.Serialize(d, Json.Options));
+            var d = new Disk
+            {
+                Mode = s.Mode,
+                Folder = s.Folder.Trim(),
+                Url = s.Url.Trim(),
+                AnonKey = s.AnonKey.Trim(),
+                Email = s.Email.Trim(),
+                PasswordProtected = s.Password.Length > 0 ? _protector.Protect(s.Password) : "",
+                LastSync = s.LastSync,
+                LastVersion = s.LastVersion,
+                Dirty = s.Dirty
+            };
+            var dir = Path.GetDirectoryName(_path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var tmp = _path + ".tmp";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(d, Json.Options));
+            var opts = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows()) opts.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            using (var fs = new FileStream(tmp, opts)) fs.Write(bytes);
+            File.Move(tmp, _path, overwrite: true);
+        }
     }
 
     public void Clear()
     {
-        if (File.Exists(_path)) File.Delete(_path);
+        lock (_ioLock)
+        {
+            if (File.Exists(_path)) File.Delete(_path);
+        }
     }
 }

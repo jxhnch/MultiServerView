@@ -53,7 +53,7 @@ export function RdpWebView({
         const r = box.getBoundingClientRect();
         if (ui && r.width > 100 && r.height > 100) {
           try {
-            ui.resize(Math.round(r.width), Math.round(r.height));
+            ui.resize(Math.round(r.width) & ~3, Math.round(r.height));
           } catch {
             /* the server does not support resizing */
           }
@@ -100,7 +100,11 @@ export function RdpWebView({
         ui.setEnableClipboard(true);
         const session = await ui.connect(config);
         if (cancelled) {
-          ui.shutdown();
+          try {
+            ui.shutdown();
+          } catch {
+            /* already shut down */
+          }
           return;
         }
         ui.setVisibility(true);

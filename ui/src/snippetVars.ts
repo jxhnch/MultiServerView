@@ -13,12 +13,15 @@ export function builtinVars(server: Pick<Server, 'host' | 'username' | 'port'>):
   return { host: server.host, user: server.username, port: String(server.port) };
 }
 
+const hasOwn = (obj: Record<string, string>, key: string) => Object.prototype.hasOwnProperty.call(obj, key);
+const SECRET_NAME = /(?:^|[_-])(pass(word|phrase)?|pwd|secret|token|api[_-]?key|key|auth)(?:$|[_-])/i;
+
 /** Variables the user has to fill in (without the automatic ones), in order of first appearance. */
 export function parseVars(command: string, builtins: Record<string, string> = {}): SnippetVar[] {
   const found = new Map<string, SnippetVar>();
   for (const m of command.matchAll(PATTERN)) {
     const name = m[1];
-    if (name in builtins) continue;
+    if (hasOwn(builtins, name)) continue;
     const existing = found.get(name);
     const def = (m[2] ?? '').trim();
     // If one occurrence has a default value, it applies to all occurrences of this variable.
@@ -31,8 +34,8 @@ export function parseVars(command: string, builtins: Record<string, string> = {}
 /** Fills in values. If a value is missing, the default of that occurrence applies (or empty). */
 export function fillVars(command: string, values: Record<string, string>, builtins: Record<string, string> = {}): string {
   return command.replace(PATTERN, (_all, name: string, def?: string) => {
-    if (name in builtins) return builtins[name];
-    return values[name] ?? (def ?? '').trim();
+    if (hasOwn(builtins, name)) return builtins[name];
+    return hasOwn(values, name) ? values[name] : (def ?? '').trim();
   });
 }
 
@@ -51,10 +54,22 @@ export function loadLastValues(snippetId: string): Record<string, string> {
 
 export function saveLastValues(snippetId: string, values: Record<string, string>) {
   try {
+    const safe: Record<string, string> = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (!SECRET_NAME.test(k)) safe[k] = v;
+    }
     const all = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Record<string, Record<string, string>>;
-    all[snippetId] = values;
+    all[snippetId] = safe;
     localStorage.setItem(KEY, JSON.stringify(all));
   } catch {
     /* storage not available - then simply without remembering */
+  }
+}
+
+export function clearLastValues() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* ignore */
   }
 }

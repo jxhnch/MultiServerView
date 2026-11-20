@@ -4,7 +4,7 @@ import { IconClock } from './Icons';
 import type { HistoryEntry } from './types';
 import { askConfirm } from './Confirm';
 
-const KIND: Record<HistoryEntry['kind'], string> = { ssh: 'SSH', sftp: 'SFTP', rdp: 'RDP', vnc: 'VNC', forward: 'Tunnel' };
+const KIND: Record<HistoryEntry['kind'], string> = { ssh: 'SSH', sftp: 'SFTP', rdp: 'RDP', vnc: 'VNC', forward: 'Tunnel', mcp: 'MCP' };
 
 function duration(e: HistoryEntry): string {
   if (!e.endedAt) return '';

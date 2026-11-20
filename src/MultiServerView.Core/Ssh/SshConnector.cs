@@ -55,10 +55,11 @@ public static class SshConnector
         Func<string, int, string, HostKeyTrust> check, Action<string>? info)
     {
         string? error = null;
+        var effectivePort = server.Port > 0 ? server.Port : 22;
         client.HostKeyReceived += (_, e) =>
         {
             var fp = "SHA256:" + e.FingerPrintSHA256;
-            switch (check(server.Host, server.Port, fp))
+            switch (check(server.Host, effectivePort, fp))
             {
                 case HostKeyTrust.Trusted:
                     e.CanTrust = true;

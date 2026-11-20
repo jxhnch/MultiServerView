@@ -39,19 +39,26 @@ public sealed class SshTerminalSession : IDisposable
     public async Task ConnectAsync(uint columns, uint rows, CancellationToken ct = default)
     {
         var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _checkHostKey, ct);
-        var info = SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port);
-        var client = new SshClient(info) { KeepAliveInterval = SshConnector.KeepAlive };
-        var hostKeyError = SshConnector.HookHostKey(client, _server, _checkHostKey, m => Info?.Invoke(m));
-
+        SshClient? client = null;
+        Func<string?>? hostKeyError = null;
         try
         {
+            var info = SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port);
+            client = new SshClient(info) { KeepAliveInterval = SshConnector.KeepAlive };
+            hostKeyError = SshConnector.HookHostKey(client, _server, _checkHostKey, m => Info?.Invoke(m));
             await Task.Run(() => client.Connect(), ct);
+        }
+        catch (SshConnectException)
+        {
+            client?.Dispose();
+            tunnel?.Dispose();
+            throw;
         }
         catch (Exception ex)
         {
-            client.Dispose();
+            client?.Dispose();
             tunnel?.Dispose();
-            throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
+            throw new SshConnectException(hostKeyError?.Invoke() ?? SshConnector.Describe(ex), ex);
         }
         _tunnel = tunnel;
 

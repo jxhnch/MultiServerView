@@ -63,6 +63,7 @@ public sealed class SourceService
     private readonly SyncSettingsStore _settings;
     private readonly Func<SyncSettings, SupabaseClient> _clientFactory;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private long _dirtyGen;
     private SourceStatus _status;
 
     private static readonly HttpClient GistHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
@@ -191,8 +192,16 @@ public sealed class SourceService
     /// <summary>Back to "only on this PC". The local copy stays as it is, the data at the old source is not touched.</summary>
     public void Disconnect()
     {
-        _settings.Clear();
-        SetStatus(SourceState.Local);
+        _lock.Wait();
+        try
+        {
+            _settings.Clear();
+            SetStatus(SourceState.Local);
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     private void Remember(SyncSettings cfg, long version, bool dirty)
@@ -211,6 +220,7 @@ public sealed class SourceService
     /// <summary>Remembers that this device has changes that are not saved at the source yet (survives a crash).</summary>
     public void MarkDirty()
     {
+        Interlocked.Increment(ref _dirtyGen);
         var cfg = _settings.Load();
         if (!cfg.IsConfigured || cfg.Dirty) return;
         cfg.Dirty = true;
@@ -226,6 +236,7 @@ public sealed class SourceService
         await _lock.WaitAsync(ct);
         try
         {
+            var genBefore = Volatile.Read(ref _dirtyGen);
             var cfg = _settings.Load();
             if (!cfg.IsConfigured)
             {
@@ -233,14 +244,16 @@ public sealed class SourceService
                 return RefreshOutcome.NoChange;
             }
 
+            var target = CreateRemote(cfg);
             RemoteVault? remote;
             try
             {
-                remote = await CreateRemote(cfg).GetAsync(ct);
+                remote = await target.GetAsync(ct);
             }
             catch (SyncException ex)
             {
-                SetStatus(cfg.Dirty ? SourceState.Pending : SourceState.Ready, "Not reachable: " + ex.Message + (cfg.Dirty ? " Your changes are saved on this PC and will be saved there when it works again." : ""));
+                var dirty = cfg.Dirty || Volatile.Read(ref _dirtyGen) != genBefore;
+                SetStatus(dirty ? SourceState.Pending : SourceState.Ready, "Not reachable: " + ex.Message + (dirty ? " Your changes are saved on this PC and will be saved there when it works again." : ""));
                 return RefreshOutcome.Offline;
             }
 
@@ -257,18 +270,27 @@ public sealed class SourceService
                 return RefreshOutcome.Conflict;
             }
 
+            var isDirty = cfg.Dirty || Volatile.Read(ref _dirtyGen) != genBefore;
             if (remote.Version == cfg.LastVersion)
             {
-                if (cfg.Dirty && _store.IsUnlocked) return await PushCoreAsync(cfg, remote, ct);
-                SetStatus(cfg.Dirty ? SourceState.Pending : SourceState.Ready);
+                if (isDirty && _store.IsUnlocked) return await PushCoreAsync(cfg, remote, target, ct);
+                SetStatus(isDirty ? SourceState.Pending : SourceState.Ready);
                 return RefreshOutcome.NoChange;
             }
 
             // the source changed since we last looked
-            if (cfg.Dirty)
+            if (isDirty)
             {
+                cfg.Dirty = true;
+                _settings.Save(cfg);
                 SetStatus(SourceState.Conflict, "The vault at " + Label(cfg.Mode) + " was changed on another device, and this device has changes that are not saved yet. Choose which version to keep.");
                 return RefreshOutcome.Conflict;
+            }
+
+            if (!VaultCrypto.LooksLikeVault(remote.Blob))
+            {
+                SetStatus(SourceState.Error, "The file at " + Label(cfg.Mode) + " is not a valid vault. Your local copy was not changed.");
+                return RefreshOutcome.Empty;
             }
 
             if (_store.IsUnlocked)
@@ -317,10 +339,11 @@ public sealed class SourceService
                 return RefreshOutcome.Conflict;
             }
 
+            var target = CreateRemote(cfg);
             RemoteVault? remote;
             try
             {
-                remote = await CreateRemote(cfg).GetAsync(ct);
+                remote = await target.GetAsync(ct);
             }
             catch (SyncException ex)
             {
@@ -329,7 +352,7 @@ public sealed class SourceService
                 SetStatus(SourceState.Pending, "Not reachable: " + ex.Message + " Your changes are saved on this PC and will be saved there when it works again.");
                 return RefreshOutcome.Offline;
             }
-            return await PushCoreAsync(cfg, remote, ct);
+            return await PushCoreAsync(cfg, remote, target, ct);
         }
         finally
         {
@@ -337,9 +360,8 @@ public sealed class SourceService
         }
     }
 
-    private async Task<RefreshOutcome> PushCoreAsync(SyncSettings cfg, RemoteVault? remote, CancellationToken ct)
+    private async Task<RefreshOutcome> PushCoreAsync(SyncSettings cfg, RemoteVault? remote, ISyncRemote target, CancellationToken ct)
     {
-        var target = CreateRemote(cfg);
         try
         {
             if (remote != null && remote.Version != cfg.LastVersion)
@@ -350,6 +372,7 @@ public sealed class SourceService
                 return RefreshOutcome.Conflict;
             }
 
+            var genBefore = Volatile.Read(ref _dirtyGen);
             var blob = _store.ExportBlob();
             long? version = remote == null ? await target.InsertAsync(blob, ct) : await target.UpdateAsync(remote.Version, blob, ct);
             if (version == null)
@@ -360,8 +383,9 @@ public sealed class SourceService
                 return RefreshOutcome.Conflict;
             }
 
-            Remember(cfg, version.Value, dirty: false);
-            SetStatus(SourceState.Ready);
+            var changedDuringPush = Volatile.Read(ref _dirtyGen) != genBefore;
+            Remember(cfg, version.Value, dirty: changedDuringPush);
+            SetStatus(changedDuringPush ? SourceState.Pending : SourceState.Ready);
             return RefreshOutcome.NoChange;
         }
         catch (SyncException ex)
@@ -390,6 +414,7 @@ public sealed class SourceService
             if (choice == "source")
             {
                 if (remote == null) throw new SyncException("There is nothing at the source to take over.");
+                if (!VaultCrypto.LooksLikeVault(remote.Blob)) throw new SyncException("The file at the source is not a valid vault.");
                 var backup = _store.ReplaceWithBlob(remote.Blob);
                 Remember(cfg, remote.Version, dirty: false);
                 SetStatus(SourceState.Ready);

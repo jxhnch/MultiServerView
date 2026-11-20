@@ -152,6 +152,8 @@ public class PasswordChangeTests : IDisposable
     }
 }
 
+// These tests change the global SSH defaults (static): they must not run at the same time.
+[Collection("GlobalSshDefaults")]
 public class SettingsTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), "msv-set-" + Guid.NewGuid().ToString("N") + ".json");

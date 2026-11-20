@@ -14,7 +14,7 @@ public static partial class KeyTools
         if (text.Contains("PuTTY-User-Key-File", StringComparison.Ordinal))
             throw new SshConnectException("PuTTY keys (.ppk) are not supported. In PuTTYgen: Conversions → Export OpenSSH key.");
 
-        var file = SshConnector.LoadKey(new KeyEntry { PrivateKey = text, Passphrase = passphrase });
+        using var file = SshConnector.LoadKey(new KeyEntry { PrivateKey = text, Passphrase = passphrase });
         var algorithm = file.HostKeyAlgorithms.FirstOrDefault()?.Name ?? "";
         return algorithm switch
         {

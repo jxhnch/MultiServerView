@@ -21,10 +21,10 @@ public static class UpdateChecker
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         using var response = await http.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode) return null; // no release yet, rate limit, offline proxy ...
-        return Parse(await response.Content.ReadAsStringAsync(ct), currentVersion);
+        return Parse(await response.Content.ReadAsStringAsync(ct), currentVersion, repository);
     }
 
-    public static UpdateInfo? Parse(string json, string currentVersion)
+    public static UpdateInfo? Parse(string json, string currentVersion, string repository = Repository)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -41,14 +41,17 @@ public static class UpdateChecker
             {
                 var name = asset.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
                 var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
-                if (url != null && name.Contains("Setup", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && IsGitHubUrl(url))
+                if (url != null && name.Contains("Setup", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && IsGitHubUrl(url, repository))
                     setup = url;
             }
+
+        var pageUrl = root.TryGetProperty("html_url", out var h) ? h.GetString() ?? "" : "";
+        if (!IsGitHubUrl(pageUrl, repository)) pageUrl = $"https://github.com/{repository}/releases";
 
         return new UpdateInfo(
             latest,
             root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "",
-            root.TryGetProperty("html_url", out var h) ? h.GetString() ?? "" : "",
+            pageUrl,
             setup);
     }
 
@@ -68,8 +71,23 @@ public static class UpdateChecker
         return false;
     }
 
-    /// <summary>Only downloads from GitHub are ever run.</summary>
-    public static bool IsGitHubUrl(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps &&
-        (uri.Host == "github.com" || uri.Host.EndsWith(".githubusercontent.com", StringComparison.Ordinal));
+    /// <summary>Validates a version string before embedding it in a local filename.</summary>
+    public static string SanitizeVersionForFileName(string version)
+    {
+        if (string.IsNullOrWhiteSpace(version) || version.Length > 64 || version.Contains("..", StringComparison.Ordinal))
+            throw new InvalidOperationException("Invalid update version string.");
+        foreach (var ch in version)
+            if (!char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '-' or '_'))
+                throw new InvalidOperationException("Invalid update version string.");
+        return version;
+    }
+
+    /// <summary>Only downloads from GitHub (and optionally a specific repository's releases) are accepted.</summary>
+    public static bool IsGitHubUrl(string url, string? repository = null)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
+        if (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+            return string.IsNullOrEmpty(repository) || uri.AbsolutePath.StartsWith($"/{repository}/releases/", StringComparison.OrdinalIgnoreCase);
+        return uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
+    }
 }

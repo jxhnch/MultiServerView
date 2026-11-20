@@ -84,8 +84,19 @@ export function TerminalView({
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
-    term.open(hostRef.current!);
+    term.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        try {
+          const parsed = new URL(uri);
+          if (parsed.protocol === 'https:' || parsed.protocol === 'http:') window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+        } catch {
+          /* ignore invalid link */
+        }
+      }),
+    );
+    const hostEl = hostRef.current!;
+    term.open(hostEl);
     termRef.current = term;
     fitRef.current = fit;
 
@@ -122,7 +133,7 @@ export function TerminalView({
         term.clearSelection();
       } else void paste();
     };
-    hostRef.current!.addEventListener('contextmenu', onContext);
+    hostEl.addEventListener('contextmenu', onContext);
 
     term.onData((d) => {
       if (statusRef.current === 'connected') {
@@ -187,7 +198,7 @@ export function TerminalView({
       offSettings();
       ro.disconnect();
       cancelAnimationFrame(raf);
-      hostRef.current?.removeEventListener('contextmenu', onContext);
+      hostEl.removeEventListener('contextmenu', onContext);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -269,12 +280,26 @@ export function TerminalView({
     return () => cancelAnimationFrame(id);
   }, [active]);
 
+  const passwordModal = prompt !== 'none' && (
+    <PasswordPrompt
+      server={server}
+      failed={prompt === 'failed'}
+      onCancel={() => setPrompt('none')}
+      onSubmit={(cred) => {
+        credRef.current = cred;
+        setPrompt('none');
+        setRetry((n) => n + 1);
+      }}
+    />
+  );
+
   if (bare)
     return (
       <div className="bare-body" style={{ background: bg }}>
         <div className="term-wrap" style={{ background: bg }}>
           <div className="term-host" ref={hostRef} />
         </div>
+        {passwordModal}
       </div>
     );
 
@@ -303,18 +328,7 @@ export function TerminalView({
       <div className="term-wrap" style={{ background: bg }}>
         <div className="term-host" ref={hostRef} />
       </div>
-      {prompt !== 'none' && (
-        <PasswordPrompt
-          server={server}
-          failed={prompt === 'failed'}
-          onCancel={() => setPrompt('none')}
-          onSubmit={(cred) => {
-            credRef.current = cred;
-            setPrompt('none');
-            setRetry((n) => n + 1);
-          }}
-        />
-      )}
+      {passwordModal}
     </SessionFrame>
   );
 }

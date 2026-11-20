@@ -81,7 +81,7 @@ export interface HistoryEntry {
   serverId: string;
   serverName: string;
   host: string;
-  kind: 'ssh' | 'sftp' | 'rdp' | 'vnc' | 'forward';
+  kind: 'ssh' | 'sftp' | 'rdp' | 'vnc' | 'forward' | 'mcp';
   startedAt: string;
   endedAt: string | null;
   result: 'running' | 'ok' | 'error';
@@ -130,6 +130,8 @@ export interface HostSettings {
   mcpEnabled: boolean;
   mcpPort: number;
   mcpToken: string;
+  mcpReadOnly: boolean;
+  mcpAllowedWorkspaces: string[];
 }
 
 export type SourceMode = 'local' | 'folder' | 'gist' | 'supabase';

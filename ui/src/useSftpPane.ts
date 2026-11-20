@@ -68,9 +68,9 @@ export function useSftpPane(side: Side, load: (path: string) => Promise<BrowseRe
   const go = async (delta: number) => {
     const next = index.current + delta;
     if (next < 0 || next >= history.current.length) return;
+    await open(history.current[next], false);
     index.current = next;
     bump((n) => n + 1);
-    await open(history.current[next], false);
   };
 
   return {

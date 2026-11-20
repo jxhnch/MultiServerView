@@ -9,7 +9,7 @@ public sealed class HistoryEntry
     public string ServerName { get; set; } = "";
     public string Host { get; set; } = "";
 
-    /// <summary>"ssh", "sftp", "rdp", "vnc" or "forward".</summary>
+    /// <summary>"ssh", "sftp", "rdp", "vnc", "forward" or "mcp".</summary>
     public string Kind { get; set; } = "";
 
     public DateTimeOffset StartedAt { get; set; }

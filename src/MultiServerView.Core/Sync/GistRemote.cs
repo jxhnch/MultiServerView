@@ -40,7 +40,9 @@ public sealed class GistRemote : ISyncRemote
         var content = file["content"]?.GetValue<string>() ?? "";
         if (file["truncated"]?.GetValue<bool>() == true && file["raw_url"]?.GetValue<string>() is { } raw)
             content = await RawAsync(raw, ct);
-        var blob = Convert.FromBase64String(content.Trim());
+        byte[] blob;
+        try { blob = Convert.FromBase64String(content.Trim()); }
+        catch (FormatException) { throw new SyncException("The vault in the GitHub gist is damaged."); }
         return new RemoteVault(VersionOf(blob), blob);
     }
 
@@ -82,7 +84,7 @@ public sealed class GistRemote : ISyncRemote
 
     private async Task<string> RawAsync(string url, CancellationToken ct)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !uri.Host.EndsWith("githubusercontent.com", StringComparison.Ordinal))
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase))
             throw new SyncException("Unexpected download address from GitHub.");
         using var response = await _http.GetAsync(uri, ct);
         Check(response);

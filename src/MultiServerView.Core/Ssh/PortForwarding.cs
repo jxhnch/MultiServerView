@@ -34,17 +34,25 @@ public sealed class ForwardRunner : IDisposable
             throw new ArgumentException("Destination address and port are missing.");
 
         var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check);
-        var client = new SshClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
-        var hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
+        SshClient? client = null;
+        Func<string?>? hostKeyError = null;
         try
         {
+            client = new SshClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
+            hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
             await Task.Run(() => client.Connect());
+        }
+        catch (SshConnectException)
+        {
+            client?.Dispose();
+            tunnel?.Dispose();
+            throw;
         }
         catch (Exception ex)
         {
-            client.Dispose();
+            client?.Dispose();
             tunnel?.Dispose();
-            throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
+            throw new SshConnectException(hostKeyError?.Invoke() ?? SshConnector.Describe(ex), ex);
         }
         _tunnel = tunnel;
 
@@ -96,16 +104,23 @@ public sealed class PortForwardManager : IDisposable
 
     public async Task StartAsync(PortForwardEntry rule, ServerEntry server, KeyEntry? key, Func<string, int, string, HostKeyTrust> check, JumpResolver? jumps = null)
     {
-        if (_running.ContainsKey(rule.Id)) return;
-
         var runner = new ForwardRunner(rule, server, key, check, jumps);
+        if (!_running.TryAdd(rule.Id, runner)) return;
+
         runner.Stopped += reason =>
         {
             if (_running.TryGetValue(rule.Id, out var current) && ReferenceEquals(current, runner)) _running.TryRemove(rule.Id, out _);
             StatusChanged?.Invoke(rule.Id, false, reason);
         };
-        await runner.StartAsync();
-        _running[rule.Id] = runner;
+        try
+        {
+            await runner.StartAsync();
+        }
+        catch
+        {
+            if (_running.TryGetValue(rule.Id, out var current) && ReferenceEquals(current, runner)) _running.TryRemove(rule.Id, out _);
+            throw;
+        }
         StatusChanged?.Invoke(rule.Id, true, null);
     }
 

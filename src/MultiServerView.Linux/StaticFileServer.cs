@@ -82,8 +82,9 @@ internal sealed class StaticFileServer : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already disposed */ }
         try { _listener.Close(); } catch (Exception) { /* already closed */ }
+        _cts.Dispose();
     }
 }
 

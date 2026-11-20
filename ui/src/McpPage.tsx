@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, isNative, type McpConfigStatus } from './bridge';
 import { IconCheck, IconCopy } from './Icons';
 import type { HostSettings } from './types';
+import { getUiSettings, onUiSettings, setUiSettings } from './uiSettings';
 
 interface Client {
   id: string;
@@ -65,22 +66,42 @@ const CLIENTS: Client[] = [
   },
 ];
 
-export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error') => void }) {
+const NO_WORKSPACE = '(none)';
+
+export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?: 'ok' | 'error') => void; workspaces?: string[] }) {
   const [host, setHost] = useState<HostSettings | null>(null);
   const [status, setStatus] = useState<{ running: boolean; error: string | null } | null>(null);
   const [client, setClient] = useState('claude-code');
   const [copied, setCopied] = useState('');
   const [cfg, setCfg] = useState<McpConfigStatus | null>(null);
+  const [allCfg, setAllCfg] = useState<Record<string, McpConfigStatus>>({});
+  const [vscodeFolder, setVscodeFolder] = useState('');
+  const [portText, setPortText] = useState('');
   const [cfgBusy, setCfgBusy] = useState(false);
   const [cfgNote, setCfgNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [ui, setUi] = useState(getUiSettings);
   const timer = useRef<number | undefined>(undefined);
 
+  useEffect(() => onUiSettings(setUi), []);
+
   const loadStatus = useCallback(() => void api.mcpStatus().then(setStatus).catch(() => undefined), []);
+  const loadAllCfg = useCallback(
+    () =>
+      void api
+        .mcpConfigureAll()
+        .then(setAllCfg)
+        .catch(() => setAllCfg({})),
+    [],
+  );
 
   useEffect(() => {
     void api.settingsGet().then(setHost).catch((e: Error) => toast(e.message, 'error'));
     loadStatus();
   }, [toast, loadStatus]);
+
+  useEffect(() => {
+    if (host) setPortText(String(host.mcpPort));
+  }, [host?.mcpPort]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -88,12 +109,20 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
 
   useEffect(() => {
     if (!isNative || !host?.mcpEnabled || !host.mcpToken) {
+      setAllCfg({});
+      return;
+    }
+    loadAllCfg();
+  }, [host?.mcpEnabled, host?.mcpPort, host?.mcpToken, loadAllCfg]);
+
+  useEffect(() => {
+    if (!isNative || !host?.mcpEnabled || !host.mcpToken || (client === 'vscode' && !vscodeFolder)) {
       setCfg(null);
       return;
     }
     let cancelled = false;
     void api
-      .mcpConfigure(client, 'status')
+      .mcpConfigure(client, 'status', client === 'vscode' ? vscodeFolder : undefined)
       .then((r) => {
         if (!cancelled) setCfg(r);
       })
@@ -103,7 +132,7 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
     return () => {
       cancelled = true;
     };
-  }, [client, host?.mcpEnabled, host?.mcpPort, host?.mcpToken]);
+  }, [client, vscodeFolder, host?.mcpEnabled, host?.mcpPort, host?.mcpToken]);
 
   const saveSettings = (next: HostSettings) => {
     api
@@ -139,13 +168,27 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
   const current = CLIENTS.find((c) => c.id === client) ?? CLIENTS[0];
   const snippet = host ? current.snippet(url, host.mcpToken) : '';
   const where = cfg?.supported && cfg.path ? cfg.path : current.where;
+  const outdatedClients = CLIENTS.filter((c) => allCfg[c.id]?.configured && !allCfg[c.id]?.upToDate).map((c) => c.label);
+
+  const pickVscodeFolder = async () => {
+    try {
+      const r = await api.pickFolder('Select VS Code workspace folder');
+      if (r.path) {
+        setVscodeFolder(r.path);
+        setCfgNote(null);
+      }
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
 
   const configure = async (action: 'add' | 'remove') => {
     setCfgBusy(true);
     setCfgNote(null);
     try {
-      const r = await api.mcpConfigure(client, action);
+      const r = await api.mcpConfigure(client, action, client === 'vscode' ? vscodeFolder : undefined);
       setCfg(r);
+      loadAllCfg();
       const bak = r.backupPath ? ' (backup saved as .bak)' : '';
       const hint =
         client === 'antigravity'
@@ -222,7 +265,88 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                     <div className="set-title">Port</div>
                   </div>
                   <div className="set-control">
-                    <input type="number" min={1024} max={65535} value={host.mcpPort} onChange={(e) => update({ mcpPort: Number(e.target.value) })} />
+                    <input
+                      type="number"
+                      min={1024}
+                      max={65535}
+                      value={portText}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPortText(v);
+                        const n = Number(v);
+                        if (v.trim() !== '' && Number.isInteger(n) && n >= 1024 && n <= 65535) update({ mcpPort: n });
+                      }}
+                      onBlur={() => setPortText(String(host.mcpPort))}
+                    />
+                  </div>
+                </div>
+                <div className="set-row">
+                  <div className="set-label">
+                    <div className="set-title">Read-only mode</div>
+                    <div className="muted small">Allows listing hosts and reading files/folders only. Blocks running commands and writing files.</div>
+                  </div>
+                  <div className="set-control">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={host.mcpReadOnly}
+                      aria-label="Read-only mode"
+                      className={'switch' + (host.mcpReadOnly ? ' on' : '')}
+                      onClick={() => update({ mcpReadOnly: !host.mcpReadOnly }, true)}
+                    >
+                      <i />
+                    </button>
+                  </div>
+                </div>
+                <div className="set-row">
+                  <div className="set-label">
+                    <div className="set-title">Allowed workspaces</div>
+                    <div className="muted small">Restrict which hosts the AI can see and access over MCP.</div>
+                  </div>
+                  <div className="set-control" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+                    <div className="seg slim fit">
+                      <button
+                        type="button"
+                        className={host.mcpAllowedWorkspaces.length === 0 ? 'on' : ''}
+                        onClick={() => update({ mcpAllowedWorkspaces: [] }, true)}
+                      >
+                        All workspaces
+                      </button>
+                      <button
+                        type="button"
+                        className={host.mcpAllowedWorkspaces.length > 0 ? 'on' : ''}
+                        onClick={() =>
+                          host.mcpAllowedWorkspaces.length === 0 &&
+                          update({ mcpAllowedWorkspaces: [workspaces[0] ?? NO_WORKSPACE] }, true)
+                        }
+                      >
+                        Selected only
+                      </button>
+                    </div>
+                    {host.mcpAllowedWorkspaces.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }}>
+                        {[NO_WORKSPACE, ...workspaces, ...host.mcpAllowedWorkspaces.filter((w) => w !== NO_WORKSPACE && !workspaces.includes(w))].map(
+                          (ws) => {
+                            const checked = host.mcpAllowedWorkspaces.includes(ws);
+                            return (
+                              <label key={ws} className="row-inline small" style={{ cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const next = checked
+                                      ? host.mcpAllowedWorkspaces.filter((x) => x !== ws)
+                                      : [...host.mcpAllowedWorkspaces, ws];
+                                    if (next.length > 0) update({ mcpAllowedWorkspaces: next }, true);
+                                  }}
+                                />
+                                {ws === NO_WORKSPACE ? 'No workspace' : ws}
+                              </label>
+                            );
+                          },
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="set-row">
@@ -236,6 +360,36 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                     </button>
                   </div>
                 </div>
+                {ui.autoLockMinutes > 0 && (
+                  <>
+                    <div className="set-row">
+                      <div className="set-label">
+                        <div className="set-title">Keep unlocked during MCP activity</div>
+                        <div className="muted small">
+                          Auto-lock is set to {ui.autoLockMinutes} min (Settings → Security). Enable this to reset the inactivity timer whenever an AI tool calls the
+                          MCP server.
+                        </div>
+                      </div>
+                      <div className="set-control">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={ui.mcpKeepUnlocked}
+                          aria-label="Keep unlocked during MCP activity"
+                          className={'switch' + (ui.mcpKeepUnlocked ? ' on' : '')}
+                          onClick={() => setUiSettings({ mcpKeepUnlocked: !ui.mcpKeepUnlocked })}
+                        >
+                          <i />
+                        </button>
+                      </div>
+                    </div>
+                    {!ui.mcpKeepUnlocked && (
+                      <div className="notice small" style={{ marginTop: 10 }}>
+                        Auto-lock is enabled ({ui.autoLockMinutes} min). Once the vault locks, AI tool calls will fail until you unlock MultiServerView again.
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             )}
           </section>
@@ -247,12 +401,39 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                 <p className="muted small">Pick your tool, copy the text and paste it where it says. Formats can change between versions of the tools, so check their documentation if something does not work.</p>
               </header>
               <div className="mode-switch wrap" style={{ margin: '4px 0 10px' }}>
-                {CLIENTS.map((c) => (
-                  <button type="button" key={c.id} className={client === c.id ? 'on' : ''} onClick={() => setClient(c.id)}>
-                    {c.label}
-                  </button>
-                ))}
+                {CLIENTS.map((c) => {
+                  const outdated = Boolean(allCfg[c.id]?.configured && !allCfg[c.id]?.upToDate);
+                  return (
+                    <button
+                      type="button"
+                      key={c.id}
+                      className={client === c.id ? 'on' : ''}
+                      title={outdated ? 'Saved config uses a different port or token' : undefined}
+                      onClick={() => setClient(c.id)}
+                    >
+                      {c.label}
+                      {outdated && (
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            background: 'var(--warn)',
+                            marginLeft: 6,
+                            verticalAlign: 'middle',
+                          }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
+              {outdatedClients.length > 0 && (
+                <div className="notice small" style={{ marginBottom: 10 }}>
+                  Outdated saved config: {outdatedClients.join(', ')} — open the tab and click <strong>Update config</strong>.
+                </div>
+              )}
               <p className="small">{current.intro}</p>
               {where && (
                 <p className="muted small">
@@ -264,6 +445,11 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                 <button className="primary" onClick={() => void copy(snippet, 'snippet')}>
                   {copied === 'snippet' ? <IconCheck size={14} /> : <IconCopy size={14} />} {copied === 'snippet' ? 'Copied' : 'Copy'}
                 </button>
+                {isNative && client === 'vscode' && (
+                  <button type="button" disabled={cfgBusy} onClick={() => void pickVscodeFolder()}>
+                    {vscodeFolder ? 'Change folder…' : 'Choose workspace folder…'}
+                  </button>
+                )}
                 {isNative && cfg?.supported && (
                   <>
                     {!cfg.configured && (
@@ -302,8 +488,17 @@ export function McpPage({ toast }: { toast: (msg: string, kind?: 'ok' | 'error')
                 </p>
               ) : null}
               <p className="muted small" style={{ marginTop: 12 }}>
-                Tools the AI gets: <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>. SSH
-                hosts only; MultiServerView itself never sends your saved passwords or keys to the AI.
+                Tools the AI gets:{' '}
+                {host.mcpReadOnly ? (
+                  <>
+                    <code>list_hosts</code>, <code>read_file</code>, <code>list_directory</code> (read-only mode)
+                  </>
+                ) : (
+                  <>
+                    <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>
+                  </>
+                )}
+                . SSH hosts only; MultiServerView itself never sends your saved passwords or keys to the AI.
               </p>
             </section>
           )}

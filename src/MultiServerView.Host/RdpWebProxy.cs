@@ -16,9 +16,12 @@ namespace MultiServerView.Host;
 /// </summary>
 public sealed class RdpWebProxy : IDisposable
 {
+    private const int MaxMessageBytes = 4 * 1024 * 1024;
+    private static readonly TimeSpan TokenTtl = TimeSpan.FromSeconds(30);
+
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
-    private readonly ConcurrentDictionary<string, (string Host, int Port)> _sessions = new();
+    private readonly ConcurrentDictionary<string, (string Host, int Port, DateTimeOffset Expires)> _sessions = new();
     private readonly int _port;
 
     public RdpWebProxy()
@@ -46,20 +49,24 @@ public sealed class RdpWebProxy : IDisposable
     /// <summary>Registers a target and returns the WebSocket address the UI has to connect to.</summary>
     public string Register(string host, int port)
     {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var kv in _sessions)
+            if (kv.Value.Expires <= now) _sessions.TryRemove(kv.Key, out _);
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
-        _sessions[token] = (host, port);
+        _sessions[token] = (host, port, now + TokenTtl);
         return $"ws://127.0.0.1:{_port}/rdp/{token}";
     }
 
     public void Dispose()
     {
-        _cts.Cancel();
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already disposed */ }
         try { _listener.Close(); } catch (Exception) { /* already closed */ }
+        _cts.Dispose();
     }
 
     private async Task AcceptLoop()
     {
-        while (!_cts.IsCancellationRequested)
+        while (true)
         {
             HttpListenerContext ctx;
             try { ctx = await _listener.GetContextAsync(); }
@@ -70,9 +77,14 @@ public sealed class RdpWebProxy : IDisposable
 
     private async Task HandleAsync(HttpListenerContext ctx)
     {
+        var hostHeader = ctx.Request.Headers["Host"];
+        var hostOk = hostHeader != null && (
+            hostHeader.Equals($"127.0.0.1:{_port}", StringComparison.OrdinalIgnoreCase) ||
+            hostHeader.Equals($"localhost:{_port}", StringComparison.OrdinalIgnoreCase) ||
+            hostHeader.Equals($"[::1]:{_port}", StringComparison.OrdinalIgnoreCase));
         var path = ctx.Request.Url?.AbsolutePath ?? "";
         var token = path.StartsWith("/rdp/", StringComparison.Ordinal) ? path[5..] : "";
-        if (!ctx.Request.IsWebSocketRequest || !_sessions.TryRemove(token, out var target))
+        if (!hostOk || !ctx.Request.IsWebSocketRequest || !_sessions.TryRemove(token, out var target) || target.Expires <= DateTimeOffset.UtcNow)
         {
             ctx.Response.StatusCode = 403;
             ctx.Response.Close();
@@ -99,13 +111,11 @@ public sealed class RdpWebProxy : IDisposable
         var ct = _cts.Token;
         var first = await ReceiveMessageAsync(ws, ct);
         if (first == null) return;
-        Console.Error.WriteLine("[rdp-proxy] request " + first.Length + " bytes: " + Convert.ToHexString(first.AsSpan(0, Math.Min(first.Length, 48))));
 
         RdpCleanPath.Request req;
         try { req = RdpCleanPath.ParseRequest(first); }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[rdp-proxy] bad request: " + ex.Message);
             await SendAsync(ws, RdpCleanPath.EncodeError(400, "Invalid request: " + ex.Message), ct);
             return;
         }
@@ -125,7 +135,6 @@ public sealed class RdpWebProxy : IDisposable
             // X.224 connection request / confirm (TPKT framed, still in clear text)
             await network.WriteAsync(req.X224, connectCts.Token);
             x224Response = await ReadTpktAsync(network, connectCts.Token);
-            Console.Error.WriteLine("[rdp-proxy] x224 response: " + Convert.ToHexString(x224Response));
 
             tls = new SslStream(network, false);
             await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
@@ -138,14 +147,12 @@ public sealed class RdpWebProxy : IDisposable
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[rdp-proxy] connect failed: " + ex.Message);
             await SendAsync(ws, RdpCleanPath.EncodeError(502, ex is OperationCanceledException ? "Connection timed out." : ex.Message), ct);
             return;
         }
 
         using (tls)
         {
-            Console.Error.WriteLine("[rdp-proxy] tls ok, cert " + cert.Length + " bytes");
             await SendAsync(ws, RdpCleanPath.EncodeResponse(x224Response, cert, $"{host}:{port}"), ct);
 
             // From here on only relay bytes.
@@ -196,6 +203,8 @@ public sealed class RdpWebProxy : IDisposable
         {
             var r = await ws.ReceiveAsync(buffer, ct);
             if (r.MessageType == WebSocketMessageType.Close) return null;
+            if (ms.Length + r.Count > MaxMessageBytes)
+                throw new InvalidDataException("WebSocket message exceeds maximum size.");
             ms.Write(buffer, 0, r.Count);
             if (r.EndOfMessage) return ms.ToArray();
         }

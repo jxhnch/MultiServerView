@@ -35,5 +35,22 @@ public class UpdateCheckerTests
         Assert.Null(UpdateChecker.Parse(Release.Replace("\"prerelease\": false", "\"prerelease\": true"), "1.0.0"));
         var evil = Release.Replace("https://github.com/jxhnch/MultiServerView/releases/download/v1.2.0/MultiServerView-Setup-1.2.0.exe", "https://evil.example.com/Setup.exe");
         Assert.Null(UpdateChecker.Parse(evil, "1.0.0")!.SetupUrl);
+
+        var foreignRepo = Release.Replace("https://github.com/jxhnch/MultiServerView/releases/download/v1.2.0/MultiServerView-Setup-1.2.0.exe", "https://github.com/attacker/fake/releases/download/v1.2.0/Setup.exe");
+        Assert.Null(UpdateChecker.Parse(foreignRepo, "1.0.0")!.SetupUrl);
     }
+
+    [Theory]
+    [InlineData("1.2.0")]
+    [InlineData("1.2.0-beta.1")]
+    public void SanitizeVersionForFileName_accepts_normal_versions(string v) =>
+        Assert.Equal(v, UpdateChecker.SanitizeVersionForFileName(v));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1.2.0/../../evil")]
+    [InlineData("1.2.0\\evil")]
+    [InlineData("1.2.0..evil")]
+    public void SanitizeVersionForFileName_rejects_traversal(string v) =>
+        Assert.Throws<InvalidOperationException>(() => UpdateChecker.SanitizeVersionForFileName(v));
 }

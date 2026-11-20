@@ -113,7 +113,7 @@ internal static class SelfTest
                 r.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
                 using var res = await http.SendAsync(r);
                 using var d = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-                var result = d.RootElement.GetProperty("result");
+                if (!d.RootElement.TryGetProperty("result", out var result)) return (d.RootElement.GetProperty("error").GetProperty("message").GetString() ?? "", true);
                 return (result.GetProperty("content")[0].GetProperty("text").GetString() ?? "", result.TryGetProperty("isError", out var e) && e.GetBoolean());
             }
 
@@ -146,6 +146,27 @@ internal static class SelfTest
             await Tool("save_snippet", new { name = "mcp-snippet", command = "uptime" });
             Check("MCP tools: snippets", (await Tool("list_snippets", new { })).Text.Contains("mcp-snippet") && !(await Tool("delete_snippet", new { snippet = "mcp-snippet" })).IsError);
             Check("MCP tools: a tool error is reported inside the result", (await Tool("get_host", new { host = "does-not-exist" })).IsError);
+
+            // read-only mode and the workspace limit must cover the AI tools too
+            await Call("servers.save", new { name = "ws-a", host = "10.9.0.1", protocol = "ssh", username = "u", workspace = "Allowed" });
+            await Call("servers.save", new { name = "ws-b", host = "10.9.0.2", protocol = "ssh", username = "u", workspace = "Secret" });
+            async Task SaveMcp(bool readOnly, string[] workspaces) => await Call("settings.save", new { sshKeepAliveSeconds = 30, sshConnectTimeoutSeconds = 15, rdpColorDepth = 32, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false, mcpEnabled = true, mcpPort = 47689, mcpToken = token, mcpReadOnly = readOnly, mcpAllowedWorkspaces = workspaces });
+            await SaveMcp(true, []);
+            string ListNow()
+            {
+                using var lr = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:47689/mcp") { Content = new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", Encoding.UTF8, "application/json") };
+                lr.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+                return http.Send(lr).Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            }
+            var roList = ListNow();
+            Check("MCP read-only mode: only looking tools are offered", roList.Contains("list_keys") && roList.Contains("read_file") && !roList.Contains("add_host") && !roList.Contains("terminal_open") && !roList.Contains("run_command") && !roList.Contains("delete_file"));
+            var roCall = await Tool("add_host", new { name = "x", host = "1.2.3.4" });
+            Check("MCP read-only mode: a changing tool is refused", roCall.IsError || roCall.Text.Contains("Unknown tool") || roCall.Text.Contains("read-only"));
+            await SaveMcp(false, ["Allowed"]);
+            var wsList = ListNow();
+            Check("MCP workspace limit: tools that are not tied to a host are not offered", !wsList.Contains("list_keys") && !wsList.Contains("local_read_file") && wsList.Contains("terminal_open"));
+            Check("MCP workspace limit: an allowed host is visible, another workspace is not", !(await Tool("get_host", new { host = "ws-a" })).IsError && (await Tool("get_host", new { host = "ws-b" })).IsError);
+            await SaveMcp(false, []);
 
             // SSH + SFTP against a real server
             var ssh = Environment.GetEnvironmentVariable("MSV_SMOKE_SSH");

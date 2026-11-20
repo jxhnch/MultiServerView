@@ -8,10 +8,12 @@ export interface UiSettings {
   vncQuality: number;
   /** Ask GitHub for a newer version when the app starts. */
   checkUpdates: boolean;
+  /** Reset the auto-lock inactivity timer on MCP requests. */
+  mcpKeepUnlocked: boolean;
 }
 
 const KEY = 'msv-ui';
-const DEFAULTS: UiSettings = { theme: 'light', autoLockMinutes: 0, vncScale: true, vncQuality: 6, checkUpdates: true };
+const DEFAULTS: UiSettings = { theme: 'light', autoLockMinutes: 0, vncScale: true, vncQuality: 6, checkUpdates: true, mcpKeepUnlocked: false };
 let current: UiSettings = load();
 const listeners = new Set<(s: UiSettings) => void>();
 

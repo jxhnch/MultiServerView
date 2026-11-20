@@ -32,10 +32,11 @@ public static class MRemoteNgImporter
         var mode = (string?)doc.Root.Attribute("BlockCipherMode") ?? "CBC";
         _ = int.TryParse((string?)doc.Root.Attribute("KdfIterations"), out var kdf);
         if (kdf <= 0) kdf = 1000;
+        if (kdf > 10_000_000) throw new ArgumentException("KdfIterations in mRemoteNG file is unreasonably high.");
 
-        // The "Protected" attribute holds a known text encrypted with the master password: use it to check the password.
+        // The "Protected" attribute holds "ThisIsProtected" encrypted with the master password: use it to check the password.
         var check = (string?)doc.Root.Attribute("Protected");
-        if (!string.IsNullOrEmpty(check) && MRemoteNgCrypto.TryDecrypt(check, masterPassword, mode, kdf) == null)
+        if (!string.IsNullOrEmpty(check) && MRemoteNgCrypto.TryDecrypt(check, masterPassword, mode, kdf) != "ThisIsProtected")
             throw new MasterPasswordRequiredException();
 
         var ctx = new Crypto(masterPassword, mode, kdf);

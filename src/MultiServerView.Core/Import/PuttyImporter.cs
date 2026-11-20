@@ -87,8 +87,10 @@ public static partial class PuttyImporter
                 case "Protocol": protocol = Unescape(val); break;
                 case "UserName": user = Unescape(val); break;
                 case "PortNumber":
-                    if (val.StartsWith("dword:", StringComparison.OrdinalIgnoreCase))
-                        port = Convert.ToInt32(val[6..], 16);
+                    if (val.StartsWith("dword:", StringComparison.OrdinalIgnoreCase) &&
+                        int.TryParse(val[6..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var parsed) &&
+                        parsed is > 0 and <= 65535)
+                        port = parsed;
                     break;
             }
         }

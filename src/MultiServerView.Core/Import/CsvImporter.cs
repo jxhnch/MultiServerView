@@ -86,7 +86,7 @@ public static class CsvImporter
                 else if (c == '"') quoted = false;
                 else field.Append(c);
             }
-            else if (c == '"') quoted = true;
+            else if (c == '"' && field.Length == 0) quoted = true;
             else if (c == delimiter) { row.Add(field.ToString()); field.Clear(); }
             else if (c == '\n' || c == '\r')
             {

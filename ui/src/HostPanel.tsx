@@ -72,7 +72,7 @@ export function HostPanel({
   const dirty = useMemo(
     () => isNew || JSON.stringify(build()) !== JSON.stringify(initial),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [s, tags],
+    [s, tags, initial, isNew],
   );
 
   function setProtocol(p: Protocol) {

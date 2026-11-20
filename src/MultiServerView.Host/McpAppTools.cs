@@ -23,21 +23,54 @@ internal sealed class McpAppTools : IMcpExtraTools
     private readonly ScreenHub _screens;
     private readonly Dictionary<string, (McpToolDef Def, Run Run)> _tools = new(StringComparer.Ordinal);
 
-    public McpAppTools(VaultStore vault, Func<string, JsonElement, Task<object?>> bridge, Action<Action<object>> subscribeEvents, ScreenHub screens)
+    // The MCP server can be switched to read-only and limited to some workspaces (settings, AI tools).
+    private readonly Func<bool> _readOnly;
+    private readonly Func<string, bool> _workspaceAllowed;
+    private readonly Func<bool> _workspaceLimited;
+
+    /// <summary>Tools that only look. In read-only mode nothing else is offered.</summary>
+    private static readonly HashSet<string> ReadOnlyTools = new(StringComparer.Ordinal)
+    {
+        "get_host", "list_keys", "list_snippets", "list_identities", "list_forwards", "connection_history", "list_known_hosts",
+        "file_info", "file_checksum", "local_list", "local_read_file", "list_proxmox", "list_proxmox_vms", "list_vmware_vms",
+        "screen_list", "screen_screenshot", "list_terminals",
+    };
+
+    /// <summary>Tools that are not tied to one host. With a workspace limit they are not offered at all.</summary>
+    private static readonly HashSet<string> GlobalTools = new(StringComparer.Ordinal)
+    {
+        "add_host", "list_keys", "generate_key", "save_key", "delete_key", "list_snippets", "save_snippet", "delete_snippet",
+        "list_identities", "save_identity", "delete_identity", "list_forwards", "connection_history", "list_known_hosts", "remove_known_host",
+        "local_list", "local_read_file", "local_write_file", "local_make_directory", "local_rename", "local_delete",
+        "list_proxmox", "list_proxmox_vms", "list_vmware_vms", "list_terminals",
+        "screen_list", "screen_screenshot", "screen_click", "screen_move", "screen_drag", "screen_scroll", "screen_type", "screen_key", "screen_close",
+    };
+
+    private bool Visible(string name) =>
+        _tools.ContainsKey(name) && (!_readOnly() || ReadOnlyTools.Contains(name)) && (!_workspaceLimited() || !GlobalTools.Contains(name));
+
+    public McpAppTools(VaultStore vault, Func<string, JsonElement, Task<object?>> bridge, Action<Action<object>> subscribeEvents, ScreenHub screens,
+        Func<bool>? readOnly = null, Func<string, bool>? workspaceAllowed = null, Func<bool>? workspaceLimited = null)
     {
         _vault = vault;
         _screens = screens;
+        _readOnly = readOnly ?? (() => false);
+        _workspaceAllowed = workspaceAllowed ?? (_ => true);
+        _workspaceLimited = workspaceLimited ?? (() => false);
         _bridge = bridge;
         _terminals = new TerminalHub(bridge, subscribeEvents);
         Register();
     }
 
-    public IReadOnlyList<McpToolDef> Tools => _tools.Values.Select(t => t.Def).ToList();
-    public bool Has(string name) => _tools.ContainsKey(name);
+    public IReadOnlyList<McpToolDef> Tools => _tools.Values.Where(t => Visible(t.Def.Name)).Select(t => t.Def).ToList();
+    public bool Has(string name) => Visible(name);
 
     public async Task<McpToolOutput> CallAsync(string name, JsonObject args, CancellationToken ct)
     {
         if (!_vault.IsUnlocked) throw new InvalidOperationException("The vault is locked. Unlock MultiServerView first.");
+        if (!Visible(name)) throw new InvalidOperationException(_readOnly() && !ReadOnlyTools.Contains(name)
+            ? "The MCP server is in read-only mode. Turn it off in MultiServerView (AI tools) to use this tool."
+            : "This tool is not available because the MCP server is limited to some workspaces.");
         var result = await _tools[name].Run(args, ct);
         return result switch
         {
@@ -62,7 +95,10 @@ internal sealed class McpAppTools : IMcpExtraTools
             ["properties"] = props ?? new JsonObject(),
             ["required"] = new JsonArray((required ?? []).Select(r => (JsonNode)JsonValue.Create(r)!).ToArray())
         };
-        _tools[name] = (new McpToolDef(name, description, schema), run);
+        var readOnly = ReadOnlyTools.Contains(name);
+        var destructive = !readOnly && (name.StartsWith("delete_", StringComparison.Ordinal) || name.StartsWith("remove_", StringComparison.Ordinal) || name is "local_delete" or "local_write_file" or "local_rename" or "rename_file" or "chmod_file" or "update_host" or "install_key");
+        var annotations = new JsonObject { ["readOnlyHint"] = readOnly, ["destructiveHint"] = destructive, ["idempotentHint"] = readOnly, ["openWorldHint"] = true };
+        _tools[name] = (new McpToolDef(name, description, schema, annotations), run);
     }
 
     private void Register()
@@ -188,6 +224,7 @@ internal sealed class McpAppTools : IMcpExtraTools
             Add(tool, $"{verb} a port forwarding rule.", new() { ["rule"] = P("string", "Name or id of the rule.") }, ["rule"], async (a, _) =>
             {
                 var r = _vault.ListForwards().FirstOrDefault(x => x.Id == Req(a, "rule") || x.Name.Equals(Req(a, "rule"), StringComparison.OrdinalIgnoreCase)) ?? throw new KeyNotFoundException("Rule not found.");
+                FindServer(r.ServerId); // not allowed when its host is outside the allowed workspaces
                 await Call(method, new { id = r.Id });
                 return $"{past} {r.Name}.";
             });
@@ -337,7 +374,7 @@ internal sealed class McpAppTools : IMcpExtraTools
 
     private ServerEntry FindServer(string reference)
     {
-        var all = _vault.List();
+        var all = _vault.List().Where(s => _workspaceAllowed(s.Workspace)).ToList();
         var matches = all.Where(s => s.Id == reference).ToList();
         if (matches.Count == 0) matches = all.Where(s => s.Name.Equals(reference, StringComparison.OrdinalIgnoreCase)).ToList();
         if (matches.Count == 0) throw new KeyNotFoundException($"No host named \"{reference}\". Use list_hosts to see the available hosts.");

@@ -41,11 +41,17 @@ public sealed class AutoSync : IDisposable
 
     private void EmitStatus(SourceStatus s) => _emit(StatusDto(s));
 
+    private readonly object _timerGate = new();
+    private bool _disposed;
+
     private void OnChanged()
     {
         if (!_store.IsUnlocked || !_source.Settings.IsConfigured) return;
         _source.MarkDirty(); // survives a crash: the next start saves it
-        _pushTimer.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+        lock (_timerGate)
+        {
+            if (!_disposed) _pushTimer.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+        }
     }
 
     private async Task PushQuietlyAsync()
@@ -88,7 +94,12 @@ public sealed class AutoSync : IDisposable
     {
         _store.Changed -= OnChanged;
         _source.StatusChanged -= EmitStatus;
-        _pushTimer.Dispose();
-        _pollTimer.Dispose();
+        lock (_timerGate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _pushTimer.Dispose();
+            _pollTimer.Dispose();
+        }
     }
 }

@@ -20,6 +20,9 @@ public sealed class JumpTunnel : IDisposable
     public string Host => "127.0.0.1";
     public int Port { get; private set; }
 
+    /// <summary>True while every hop client is connected and every local forward is running.</summary>
+    public bool IsConnected => _clients.Count > 0 && _clients.All(c => c.IsConnected) && _ports.All(p => p.IsStarted);
+
     /// <summary>Opens the tunnel. Returns null if the server has no jump host at all.</summary>
     public static async Task<JumpTunnel?> OpenAsync(ServerEntry target, JumpResolver? resolve,
         Func<string, int, string, HostKeyTrust> check, CancellationToken ct = default)

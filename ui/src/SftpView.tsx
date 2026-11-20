@@ -248,13 +248,13 @@ export function SftpView({
   async function moveInto(side: Side, entries: FileEntry[], folder: FileEntry) {
     const moving = entries.filter((e) => e.path !== folder.path);
     if (moving.length === 0) return;
-    const names = new Set((await (side === 'remote' ? api.sftpList(tabId, folder.path) : api.localBrowse(folder.path))).entries.map((e) => e.name));
-    const clash = moving.filter((m) => names.has(m.name));
-    if (clash.length > 0) {
-      setError(`"${clash[0].name}" already exists in "${folder.name}". Nothing was moved.`);
-      return;
-    }
     try {
+      const names = new Set((await (side === 'remote' ? api.sftpList(tabId, folder.path) : api.localBrowse(folder.path))).entries.map((e) => e.name));
+      const clash = moving.filter((m) => names.has(m.name));
+      if (clash.length > 0) {
+        setError(`"${clash[0].name}" already exists in "${folder.name}". Nothing was moved.`);
+        return;
+      }
       for (const e of moving) {
         const to = joinPath(folder.path, e.name, side);
         if (side === 'remote') await api.sftpRename(tabId, e.path, to);

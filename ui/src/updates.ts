@@ -22,5 +22,12 @@ export async function offerUpdate(u: UpdateStatus, toast: (msg: string, kind?: '
     title: 'Update available',
     confirmLabel: 'Open download page',
   });
-  if (yes && u.pageUrl) window.open(u.pageUrl, '_blank');
+  if (yes && u.pageUrl) {
+    try {
+      const parsed = new URL(u.pageUrl);
+      if (parsed.protocol === 'https:') window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+    } catch {
+      /* ignore invalid URL */
+    }
+  }
 }

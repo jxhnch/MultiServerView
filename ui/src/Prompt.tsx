@@ -21,7 +21,8 @@ export function PromptDialog({
   const [value, setValue] = useState(initial);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (value.trim()) onSubmit(value.trim());
+    const out = secret ? value : value.trim();
+    if (out) onSubmit(out);
   };
   return (
     <div className="overlay" onMouseDown={onClose}>
@@ -42,7 +43,7 @@ export function PromptDialog({
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="primary" disabled={!value.trim()}>
+          <button className="primary" disabled={secret ? !value : !value.trim()}>
             {confirmLabel}
           </button>
         </div>

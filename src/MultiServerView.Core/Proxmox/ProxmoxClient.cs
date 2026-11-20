@@ -78,14 +78,21 @@ public sealed class ProxmoxClient : IDisposable
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         try
         {
-            using var _ = await http.GetAsync(NormalizeUrl(url) + "/api2/json/version", ct);
+            try
+            {
+                using var _ = await http.GetAsync(NormalizeUrl(url) + "/api2/json/version", ct);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                throw new ProxmoxException(Describe(ex, url), ex);
+            }
+            if (seen == null) throw new ProxmoxException("The server did not send a certificate (check https:// and port 8006).");
+            return new ProxmoxCertificate(Group(FingerprintOf(seen)), seen.Subject, seen.NotAfter, trusted);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        finally
         {
-            throw new ProxmoxException(Describe(ex, url), ex);
+            seen?.Dispose();
         }
-        if (seen == null) throw new ProxmoxException("The server did not send a certificate (check https:// and port 8006).");
-        return new ProxmoxCertificate(Group(FingerprintOf(seen)), seen.Subject, seen.NotAfter, trusted);
     }
 
     public static string NormalizeUrl(string url)

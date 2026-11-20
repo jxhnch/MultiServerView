@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Nodes;
 using MultiServerView.Core;
 using MultiServerView.Core.Mcp;
@@ -12,9 +13,10 @@ public class McpTests
     {
         public string? LastHost, LastCommand;
         public int LastTimeout;
+        public int? LastStartLine, LastMaxLines;
 
         public Task<IReadOnlyList<McpHost>> ListHostsAsync(string query) =>
-            Task.FromResult<IReadOnlyList<McpHost>>(new[] { new McpHost("1", "web-1", "10.0.0.5", 22, "ssh", "Prod", "", "") }.Where(h => query.Length == 0 || h.Name.Contains(query)).ToList());
+            Task.FromResult<IReadOnlyList<McpHost>>(new[] { new McpHost("1", "web-1", "10.0.0.5", 22, "ssh", "Prod", "", "", "debian", "Primary web") }.Where(h => query.Length == 0 || h.Name.Contains(query)).ToList());
 
         public Task<McpExecResult> RunCommandAsync(string host, string command, int timeoutSeconds, CancellationToken ct)
         {
@@ -23,7 +25,12 @@ public class McpTests
             return Task.FromResult(new McpExecResult("hello\n", "", 0, false));
         }
 
-        public Task<string> ReadFileAsync(string host, string path, CancellationToken ct) => Task.FromResult("content of " + path);
+        public Task<string> ReadFileAsync(string host, string path, int? startLine, int? maxLines, CancellationToken ct)
+        {
+            LastStartLine = startLine;
+            LastMaxLines = maxLines;
+            return Task.FromResult("content of " + path);
+        }
         public Task WriteFileAsync(string host, string path, string content, CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<McpFileEntry>> ListDirectoryAsync(string host, string path, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<McpFileEntry>>(new[] { new McpFileEntry("a.txt", false, 3) });
@@ -191,5 +198,85 @@ public class McpTests
 
         var unknown = await Call(h, """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"nope","arguments":{}}}""");
         Assert.Equal(-32602, unknown["error"]!["code"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task Tools_expose_annotations_and_list_hosts_includes_os_and_notes()
+    {
+        var h = new McpHandler(new FakeBackend());
+        var list = await Call(h, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var tools = list["result"]!["tools"]!.AsArray().ToDictionary(t => t!["name"]!.GetValue<string>(), t => t!["annotations"]!.AsObject());
+
+        Assert.True(tools["list_hosts"]["readOnlyHint"]!.GetValue<bool>());
+        Assert.False(tools["list_hosts"]["destructiveHint"]!.GetValue<bool>());
+        Assert.True(tools["list_hosts"]["idempotentHint"]!.GetValue<bool>());
+
+        Assert.True(tools["read_file"]["readOnlyHint"]!.GetValue<bool>());
+        Assert.True(tools["list_directory"]["readOnlyHint"]!.GetValue<bool>());
+
+        Assert.False(tools["run_command"]["readOnlyHint"]!.GetValue<bool>());
+        Assert.True(tools["run_command"]["destructiveHint"]!.GetValue<bool>());
+        Assert.False(tools["run_command"]["idempotentHint"]!.GetValue<bool>());
+
+        Assert.False(tools["write_file"]["readOnlyHint"]!.GetValue<bool>());
+        Assert.True(tools["write_file"]["destructiveHint"]!.GetValue<bool>());
+        Assert.True(tools["write_file"]["idempotentHint"]!.GetValue<bool>());
+
+        var hosts = await Call(h, """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_hosts","arguments":{}}}""");
+        var json = hosts["result"]!["content"]![0]!["text"]!.GetValue<string>();
+        var items = JsonNode.Parse(json)!.AsArray();
+        Assert.Equal("debian", items[0]!["os"]!.GetValue<string>());
+        Assert.Equal("Primary web", items[0]!["notes"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Read_file_parses_optional_line_range_parameters()
+    {
+        var backend = new FakeBackend();
+        var h = new McpHandler(backend);
+
+        await Call(h, """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"host":"web-1","path":"/var/log/syslog"}}}""");
+        Assert.Null(backend.LastStartLine);
+        Assert.Null(backend.LastMaxLines);
+
+        await Call(h, """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_file","arguments":{"host":"web-1","path":"/var/log/syslog","start_line":10}}}""");
+        Assert.Equal((10, 200), (backend.LastStartLine, backend.LastMaxLines));
+
+        await Call(h, """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_file","arguments":{"host":"web-1","path":"/var/log/syslog","max_lines":50}}}""");
+        Assert.Equal((1, 50), (backend.LastStartLine, backend.LastMaxLines));
+
+        await Call(h, """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_file","arguments":{"host":"web-1","path":"/var/log/syslog","start_line":5.0,"max_lines":"25"}}}""");
+        Assert.Equal((5, 25), (backend.LastStartLine, backend.LastMaxLines));
+
+        var bad = await Call(h, """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_file","arguments":{"host":"web-1","path":"/var/log/syslog","start_line":"nope"}}}""");
+        Assert.Equal(-32602, bad["error"]!["code"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Sftp_detect_text_format_identifies_line_endings_and_bom()
+    {
+        Assert.Equal(("lf", false), SftpSession.DetectTextFormat("a\nb\n"u8));
+        Assert.Equal(("crlf", false), SftpSession.DetectTextFormat("a\r\nb\r\n"u8));
+        Assert.Equal(("lf", true), SftpSession.DetectTextFormat([0xEF, 0xBB, 0xBF, (byte)'a', (byte)'\n', (byte)'b']));
+        Assert.Equal(("crlf", true), SftpSession.DetectTextFormat([0xEF, 0xBB, 0xBF, (byte)'a', (byte)'\r', (byte)'\n', (byte)'b']));
+        Assert.Equal(("lf", false), SftpSession.DetectTextFormat(ReadOnlySpan<byte>.Empty));
+    }
+
+    [Fact]
+    public void Sftp_read_line_range_slices_utf8_crlf_bom_and_rejects_binary()
+    {
+        var lfBytes = Encoding.UTF8.GetBytes("one\ntwo\nthree\nfour\n");
+        using (var ms = new MemoryStream(lfBytes))
+            Assert.Equal("two\nthree", SftpSession.ReadLineRange(ms, 2, 2));
+
+        var bomCrlf = new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes("alpha\r\nbeta\r\ngamma")).ToArray();
+        using (var ms = new MemoryStream(bomCrlf))
+            Assert.Equal("alpha\nbeta", SftpSession.ReadLineRange(ms, 1, 2));
+
+        using (var ms = new MemoryStream(lfBytes))
+            Assert.Equal("", SftpSession.ReadLineRange(ms, 99, 10));
+
+        using (var ms = new MemoryStream(new byte[] { (byte)'a', 0, (byte)'b' }))
+            Assert.Throws<InvalidOperationException>(() => SftpSession.ReadLineRange(ms, 1, 10));
     }
 }

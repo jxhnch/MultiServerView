@@ -70,8 +70,9 @@ public sealed class Bridge : IDisposable
                 _emit(new { @event = "vault.changed" });
             return result;
         }
-        var tools = new McpAppTools(vault, ForMcp, tap => { lock (_eventTaps) _eventTaps.Add(tap); }, _screens);
-        _mcp = new McpService(vault, CheckHost, Jumps, tools);
+        var tools = new McpAppTools(vault, ForMcp, tap => { lock (_eventTaps) _eventTaps.Add(tap); }, _screens,
+            () => _mcp.IsReadOnly, ws => _mcp.IsWorkspaceAllowed(ws), () => _mcp.IsWorkspaceLimited);
+        _mcp = new McpService(vault, CheckHost, Jumps, tools, history, () => emit(new { @event = "mcp.activity" }));
         _mcp.Apply(settings.Current);
     }
 
@@ -154,6 +155,7 @@ public sealed class Bridge : IDisposable
                 foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
                 foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
                 _forwards.StopAll();
+                _mcp.InvalidateConnections();
                 return _vault.Clear(Str(p, "password"));
             }
             case "vault.lock":
@@ -161,6 +163,7 @@ public sealed class Bridge : IDisposable
                 foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
                 foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
                 _forwards.StopAll();
+                _mcp.InvalidateConnections();
                 _vault.Lock();
                 return null;
 
@@ -168,10 +171,15 @@ public sealed class Bridge : IDisposable
             case "servers.list":
                 return _vault.List();
             case "servers.save":
-                return _vault.Upsert(p.Deserialize<ServerEntry>(Json.Options)
-                                     ?? throw new ArgumentException("Invalid server."));
+            {
+                var saved = _vault.Upsert(p.Deserialize<ServerEntry>(Json.Options)
+                                          ?? throw new ArgumentException("Invalid server."));
+                _mcp.InvalidateConnections();
+                return saved;
+            }
             case "servers.delete":
                 _vault.Delete(Str(p, "id"));
+                _mcp.InvalidateConnections();
                 return null;
             case "servers.touch":
                 return _vault.Touch(Str(p, "id"));
@@ -179,6 +187,7 @@ public sealed class Bridge : IDisposable
             {
                 var server = _vault.Find(Str(p, "id")) ?? throw new KeyNotFoundException("Server not found.");
                 _vault.ForgetHostKey(server.Host, server.Port);
+                _mcp.InvalidateConnections();
                 return null;
             }
             case "import.mremoteng":
@@ -200,14 +209,19 @@ public sealed class Bridge : IDisposable
                 {
                     // Only renamed: the key material stays as it is.
                     existing.Name = key.Name;
-                    return KeyDto(_vault.UpsertKey(existing));
+                    var renamed = KeyDto(_vault.UpsertKey(existing));
+                    _mcp.InvalidateConnections();
+                    return renamed;
                 }
 
                 key.Kind = KeyTools.Inspect(key.PrivateKey, key.Passphrase);
-                return KeyDto(_vault.UpsertKey(key));
+                var savedKey = KeyDto(_vault.UpsertKey(key));
+                _mcp.InvalidateConnections();
+                return savedKey;
             }
             case "keys.delete":
                 _vault.DeleteKey(Str(p, "id"));
+                _mcp.InvalidateConnections();
                 return null;
             case "keys.generate":
             {
@@ -230,6 +244,7 @@ public sealed class Bridge : IDisposable
                     updated.Auth = AuthMethod.Key;
                     updated.KeyId = key.Id;
                     _vault.Upsert(updated);
+                    _mcp.InvalidateConnections();
                 }
                 return null;
             }
@@ -371,10 +386,13 @@ public sealed class Bridge : IDisposable
                 var existing = string.IsNullOrWhiteSpace(identity.Id) ? null : _vault.FindIdentity(identity.Id);
                 // Empty password field = unchanged (saved passwords never go to the UI).
                 if (existing != null && identity.Password.Length == 0 && identity.Auth == AuthMethod.Password) identity.Password = existing.Password;
-                return IdentityDto(_vault.UpsertIdentity(identity));
+                var saved = IdentityDto(_vault.UpsertIdentity(identity));
+                _mcp.InvalidateConnections();
+                return saved;
             }
             case "identities.delete":
                 _vault.DeleteIdentity(Str(p, "id"));
+                _mcp.InvalidateConnections();
                 return null;
 
             // ---------------------------------------------------------- Snippets
@@ -439,6 +457,7 @@ public sealed class Bridge : IDisposable
                 return _vault.ListKnownHosts().Select(kv => new { id = kv.Key, fingerprint = kv.Value }).ToList();
             case "knownhosts.remove":
                 _vault.RemoveKnownHost(Str(p, "id"));
+                _mcp.InvalidateConnections();
                 return null;
             case "history.list":
                 return _history.List();
@@ -519,7 +538,8 @@ public sealed class Bridge : IDisposable
                 return null;
             }
             case "sftp.cancel":
-                if (_transfers.TryGetValue(Str(p, "transferId"), out var toCancel)) toCancel.Cancel();
+                if (_transfers.TryGetValue(Str(p, "transferId"), out var toCancel))
+                    try { toCancel.Cancel(); } catch (ObjectDisposedException) { /* already finished */ }
                 return null;
             case "sftp.close":
                 CloseSftp(Str(p, "sessionId"));
@@ -575,6 +595,7 @@ public sealed class Bridge : IDisposable
             {
                 var saved = _settings.Save(p.Deserialize<AppSettings>(Json.Options) ?? throw new ArgumentException("Invalid settings."));
                 _mcp.Apply(saved);
+                _emit(new { @event = "mcp.status", running = _mcp.Running, error = _mcp.Error });
                 return saved;
             }
             case "app.info":
@@ -588,15 +609,18 @@ public sealed class Bridge : IDisposable
             {
                 var client = Str(p, "client");
                 var action = Str(p, "action");
+                var workspace = Opt(p, "workspace");
+                string? ws = workspace.Length > 0 ? workspace : null;
                 var s = _settings.Current;
                 var url = $"http://127.0.0.1:{s.McpPort}/mcp";
                 return action switch
                 {
-                    "status" => McpClientConfig.Status(client, url, s.McpToken),
+                    "status" => McpClientConfig.Status(client, url, s.McpToken, workspaceDir: ws),
+                    "statusAll" => McpClientConfig.StatusAll(url, s.McpToken),
                     "add" => s.McpEnabled && s.McpToken.Length > 0
-                        ? McpClientConfig.Add(client, url, s.McpToken)
+                        ? McpClientConfig.Add(client, url, s.McpToken, workspaceDir: ws)
                         : throw new InvalidOperationException("Enable the MCP server first."),
-                    "remove" => McpClientConfig.Remove(client),
+                    "remove" => McpClientConfig.Remove(client, workspaceDir: ws),
                     _ => throw new ArgumentException("Unknown action: " + action)
                 };
             }
@@ -678,7 +702,9 @@ public sealed class Bridge : IDisposable
             case "vmware.removeImported":
             {
                 var ids = _vault.List().Where(s => s.VmwareRef.Length > 0).Select(s => s.Id).ToList();
-                return new { removed = _vault.DeleteMany(ids) };
+                var removed = _vault.DeleteMany(ids);
+                _mcp.InvalidateConnections();
+                return new { removed };
             }
 
             // ---------------------------------------------------------- Proxmox
@@ -720,7 +746,9 @@ public sealed class Bridge : IDisposable
             {
                 var id = Str(p, "id");
                 var ids = _vault.List().Where(s => s.ProxmoxRef.StartsWith(id + ":", StringComparison.Ordinal)).Select(s => s.Id).ToList();
-                return new { removed = _vault.DeleteMany(ids) };
+                var removed = _vault.DeleteMany(ids);
+                _mcp.InvalidateConnections();
+                return new { removed };
             }
             case "proxmox.import":
             {
@@ -807,6 +835,7 @@ public sealed class Bridge : IDisposable
             _emit(new { @event = "ssh.closed", sessionId, reason });
         };
 
+        if (_ssh.TryGetValue(sessionId, out var prev) && !ReferenceEquals(prev, pump)) prev.Dispose();
         _ssh[sessionId] = pump;
         try
         {
@@ -815,7 +844,7 @@ public sealed class Bridge : IDisposable
         }
         catch (Exception ex)
         {
-            _ssh.TryRemove(sessionId, out _);
+            if (_ssh.TryGetValue(sessionId, out var cur) && ReferenceEquals(cur, pump)) _ssh.TryRemove(sessionId, out _);
             pump.Dispose();
             _history.End(hid, false, Friendly(ex));
             throw;
@@ -923,6 +952,11 @@ public sealed class Bridge : IDisposable
                 try
                 {
                     var path = Environment.ExpandEnvironmentVariables(file.StartsWith("~") ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), file[1..].TrimStart('/', (char)92)) : file);
+                    if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+                    {
+                        keysSkipped++;
+                        continue;
+                    }
                     if (!byFile.TryGetValue(path, out var key))
                     {
                         var text = File.ReadAllText(path);
@@ -977,11 +1011,13 @@ public sealed class Bridge : IDisposable
     /// </summary>
     private async Task OpenExternalAsync(string sessionId, SftpSession session, string remotePath)
     {
+        var name = remotePath.TrimEnd('/').Split('/').Last();
+        if (SftpSession.IsBlockedExternalExtension(name))
+            throw new InvalidOperationException($"For security reasons, \"{Path.GetExtension(name)}\" files cannot be opened with a local program. Use the built-in editor or download the file instead.");
         var dir = Path.Combine(Path.GetTempPath(), "msv-edit", Guid.NewGuid().ToString("N"));
+        var local = SftpSession.SafeLocalChildPath(dir, name);
         Directory.CreateDirectory(dir);
         await session.DownloadAsync(remotePath, dir, _ => { }, CancellationToken.None);
-        var name = remotePath.TrimEnd('/').Split('/').Last();
-        var local = Path.Combine(dir, name);
         if (!File.Exists(local)) throw new InvalidOperationException("Only files can be opened with a local program.");
         var remoteDir = SftpSession.ParentOf(remotePath);
 
@@ -1194,6 +1230,7 @@ public sealed class Bridge : IDisposable
         foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
         foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
         _forwards.StopAll();
+        _mcp.InvalidateConnections();
     }
 
     private static Rectangle Bounds(JsonElement p) =>

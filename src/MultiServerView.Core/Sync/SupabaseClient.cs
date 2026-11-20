@@ -104,7 +104,8 @@ public sealed class SupabaseClient
     {
         var version = row["version"]?.GetValue<long>() ?? 0;
         var blob = row["blob"]?.GetValue<string>() ?? throw new SyncException("Response without a blob.");
-        return new RemoteVault(version, Convert.FromBase64String(blob));
+        try { return new RemoteVault(version, Convert.FromBase64String(blob)); }
+        catch (FormatException) { throw new SyncException("The vault in Supabase is damaged."); }
     }
 
     // ------------------------------------------------------------------ HTTP

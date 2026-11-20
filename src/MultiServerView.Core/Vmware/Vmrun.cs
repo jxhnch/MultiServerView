@@ -73,9 +73,11 @@ public sealed class Vmrun : IVmrun
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(timeout);
             var stdout = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var stderr = process.StandardError.ReadToEndAsync(cts.Token);
             try
             {
                 await process.WaitForExitAsync(cts.Token);
+                _ = await stderr;
                 return (process.ExitCode == 0, await stdout);
             }
             catch (OperationCanceledException)

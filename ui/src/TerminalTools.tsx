@@ -8,7 +8,17 @@ import { builtinVars, fillVars, parseVars } from './snippetVars';
 import type { Server, Snippet } from './types';
 
 /** Popover that closes when you click outside. */
-function Popover({ button, title, children }: { button: ReactNode; title: string; children: (close: () => void) => ReactNode }) {
+function Popover({
+  button,
+  title,
+  onOpen,
+  children,
+}: {
+  button: ReactNode;
+  title: string;
+  onOpen?: () => void;
+  children: (close: () => void) => ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -19,7 +29,16 @@ function Popover({ button, title, children }: { button: ReactNode; title: string
   }, [open]);
   return (
     <div className="pop-anchor" ref={ref}>
-      <button title={title} onClick={() => setOpen((o) => !o)} className={open ? 'active' : ''}>
+      <button
+        title={title}
+        onClick={() =>
+          setOpen((o) => {
+            if (!o) onOpen?.();
+            return !o;
+          })
+        }
+        className={open ? 'active' : ''}
+      >
         {button}
       </button>
       {open && <div className="popover">{children(() => setOpen(false))}</div>}
@@ -41,8 +60,9 @@ export function SnippetMenu({ server, onSend, onManage }: { server: Server; onSe
     <>
     <Popover
       title="Snippets"
+      onOpen={load}
       button={
-        <span onClick={load} className="row-inline">
+        <span className="row-inline">
           <IconCode size={15} /> Snippets
         </span>
       }

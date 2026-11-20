@@ -6,6 +6,7 @@ import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
 import { PromptDialog } from './Prompt';
+import { clearLastValues } from './snippetVars';
 import { offerUpdate } from './updates';
 import { SessionCloseContext } from './SessionFrame';
 import { Keychain } from './Keychain';
@@ -88,6 +89,7 @@ export function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setThemeState] = useState<Theme>(getUiSettings().theme);
   const [splitPicker, setSplitPicker] = useState(false);
+  const [mcpRunning, setMcpRunning] = useState(false);
 
   // Workspaces: top level of the host list (e.g. a teacher). Which one is open and empty, newly created
   // workspaces are remembered by this device only; which host belongs where is stored in the vault and synced.
@@ -140,13 +142,18 @@ export function App() {
     });
   }, [refresh]);
 
+  useEffect(() => {
+    void api.mcpStatus().then((m) => setMcpRunning(m.running)).catch(() => undefined);
+  }, []);
+
   useEffect(
     () =>
       onEvent((e) => {
         if (e.event === 'source.status') {
           setSourceStatus({ kind: e.kind, state: e.state, message: e.message, lastSaved: e.lastSaved });
           if (e.state !== 'conflict') setConflictHidden(false);
-        } else if (e.event === 'vault.changed') void refresh();
+        } else if (e.event === 'mcp.status') setMcpRunning(e.running);
+        else if (e.event === 'vault.changed') void refresh();
         else if (e.event === 'vault.replaced') void lockAfterReplace();
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -450,15 +457,20 @@ export function App() {
   const lastActivity = useRef(Date.now());
   useEffect(() => {
     if (phase !== 'ready') return;
+    lastActivity.current = Date.now();
     const touch = () => (lastActivity.current = Date.now());
     const events = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'] as const;
     events.forEach((e) => window.addEventListener(e, touch, true));
+    const offMcp = onEvent((e) => {
+      if (e.event === 'mcp.activity' && getUiSettings().mcpKeepUnlocked) lastActivity.current = Date.now();
+    });
     const timer = window.setInterval(() => {
       const minutes = getUiSettings().autoLockMinutes;
       if (minutes > 0 && Date.now() - lastActivity.current > minutes * 60_000) void lock();
     }, 15_000);
     return () => {
       events.forEach((e) => window.removeEventListener(e, touch, true));
+      offMcp();
       window.clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -558,6 +570,7 @@ export function App() {
     setActive(HOME);
     setWorkspace('');
     rememberWorkspaces([]);
+    clearLastValues();
     await refresh();
   }
 
@@ -849,6 +862,12 @@ export function App() {
               </button>
               <button className={'nav-item' + (section === 'mcp' ? ' on' : '')} onClick={() => goTo('mcp')}>
                 <IconSparkle size={17} /> AI tools
+                {mcpRunning && (
+                  <span
+                    title="MCP server running"
+                    style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ok)', marginLeft: 'auto', flexShrink: 0 }}
+                  />
+                )}
               </button>
               <div className="nav-foot">
                 <button className={'nav-item grow' + (section === 'settings' ? ' on' : '')} onClick={() => goTo('settings')}>
@@ -908,7 +927,7 @@ export function App() {
                   toast={toast}
                 />
               )}
-              {section === 'mcp' && <McpPage toast={toast} />}
+              {section === 'mcp' && <McpPage toast={toast} workspaces={workspaces} />}
               {section === 'cloud' && <SourcePage info={sourceInfo} status={sourceStatus} onChanged={refresh} onReplaced={() => void lock()} toast={toast} />}
               {section === 'settings' && <SettingsPage onLock={() => void lock()} onCleared={afterVaultCleared} toast={toast} />}
             </div>

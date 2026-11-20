@@ -13,7 +13,7 @@ public static class HostBootstrap
         var sourceSettings = new SyncSettingsStore(Path.Combine(dataDir, "sync.json"), platform.Secrets);
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var source = new SourceService(vault, sourceSettings, cfg => new SupabaseClient(http, cfg.Url, cfg.AnonKey));
-        var appSettings = new AppSettingsStore(Path.Combine(dataDir, "settings.json"));
+        var appSettings = new AppSettingsStore(Path.Combine(dataDir, "settings.json"), platform.Secrets);
         var rdp = rdpFactory(() => appSettings.Current);
         var history = new HistoryStore(Path.Combine(dataDir, "history.json"));
         return new Bridge(vault, source, history, appSettings, rdp, emit, platform);

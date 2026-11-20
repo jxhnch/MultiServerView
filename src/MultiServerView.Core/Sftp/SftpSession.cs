@@ -36,28 +36,40 @@ public sealed class SftpSession : IDisposable
 
     private SftpClient Client => _client ?? throw new InvalidOperationException("The SFTP connection is not open.");
 
+    /// <summary>True while the underlying SFTP client and any jump tunnel remain connected.</summary>
+    public bool IsConnected => _client?.IsConnected == true && (_tunnel == null || _tunnel.IsConnected);
+
     public async Task<string> ConnectAsync(CancellationToken ct = default)
     {
         var tunnel = await JumpTunnel.OpenAsync(_server, _jumps, _check, ct);
-        var client = new SftpClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
-        var hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
+        SftpClient? client = null;
+        Func<string?>? hostKeyError = null;
         try
         {
+            client = new SftpClient(SshConnector.BuildConnectionInfo(_server, _key, tunnel?.Host, tunnel?.Port)) { KeepAliveInterval = SshConnector.KeepAlive };
+            hostKeyError = SshConnector.HookHostKey(client, _server, _check, null);
             await Task.Run(() => client.Connect(), ct);
+        }
+        catch (SshConnectException)
+        {
+            client?.Dispose();
+            tunnel?.Dispose();
+            throw;
         }
         catch (Exception ex)
         {
-            client.Dispose();
+            client?.Dispose();
             tunnel?.Dispose();
-            throw new SshConnectException(hostKeyError() ?? SshConnector.Describe(ex), ex);
+            throw new SshConnectException(hostKeyError?.Invoke() ?? SshConnector.Describe(ex), ex);
         }
         _client = client;
         _tunnel = tunnel;
         return client.WorkingDirectory;
     }
 
-    public Task<BrowseResult> ListAsync(string path) => Task.Run(() =>
+    public Task<BrowseResult> ListAsync(string path, CancellationToken ct = default) => Task.Run(() =>
     {
+        ct.ThrowIfCancellationRequested();
         var client = Client;
         var full = Normalize(client.WorkingDirectory, path);
         var entries = client.ListDirectory(full)
@@ -67,7 +79,7 @@ public sealed class SftpSession : IDisposable
             .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return new BrowseResult(full, ParentOf(full), entries);
-    });
+    }, ct);
 
     public Task MakeDirAsync(string path) => Task.Run(() => Client.CreateDirectory(path));
 
@@ -181,11 +193,51 @@ public sealed class SftpSession : IDisposable
         progress(new TransferProgress(name, total, total, true));
     }
 
+    /// <summary>
+    /// Combines <paramref name="localDir"/> and a single remote entry name and verifies the resulting path stays
+    /// strictly inside <paramref name="localDir"/> (blocks traversal, path separators and rooted names).
+    /// </summary>
+    public static string SafeLocalChildPath(string localDir, string entryName)
+    {
+        if (string.IsNullOrWhiteSpace(entryName) || entryName is "." or ".."
+            || entryName.IndexOfAny(new[] { '/', '\\', '\0', ':' }) >= 0)
+            throw new InvalidOperationException("Unsafe remote file name: " + entryName);
+
+        var fullRoot = Path.GetFullPath(localDir);
+        var rootWithSep = fullRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
+        var fullTarget = Path.GetFullPath(Path.Combine(fullRoot, entryName));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!fullTarget.StartsWith(rootWithSep, comparison))
+            throw new InvalidOperationException("Unsafe remote file name: " + entryName);
+        return fullTarget;
+    }
+
+    private static readonly HashSet<string> BlockedExternalExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".com", ".bat", ".cmd", ".msi", ".msp", ".msu",
+        ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".ps1", ".psm1", ".psd1",
+        ".scr", ".pif", ".lnk", ".hta", ".cpl", ".msc", ".reg", ".inf",
+        ".jar", ".dll", ".sys", ".appimage", ".desktop"
+    };
+
+    /// <summary>
+    /// True if opening <paramref name="fileName"/> with the OS default handler (ShellExecute / xdg-open)
+    /// could execute remote code instead of opening a text editor.
+    /// </summary>
+    public static bool IsBlockedExternalExtension(string fileName)
+    {
+        var ext = Path.GetExtension(fileName);
+        return !string.IsNullOrEmpty(ext) && BlockedExternalExtensions.Contains(ext);
+    }
+
     /// <summary>Downloads a file or a whole folder (recursively) into the local folder <paramref name="localDir"/>.</summary>
     public async Task DownloadAsync(string remotePath, string localDir, Action<TransferProgress> progress, CancellationToken ct)
     {
         var client = Client;
         var name = remotePath.TrimEnd('/').Split('/').Last();
+        var rootLocal = SafeLocalChildPath(localDir, name);
 
         var (files, dirs) = await Task.Run(() =>
         {
@@ -194,11 +246,10 @@ public sealed class SftpSession : IDisposable
             var d = new List<string>();
             if (attrs.IsDirectory)
             {
-                var rootLocal = Path.Combine(localDir, name);
                 d.Add(rootLocal);
                 CollectRemote(client, remotePath, rootLocal, f, d);
             }
-            else f.Add((remotePath, Path.Combine(localDir, name), attrs.Size));
+            else f.Add((remotePath, rootLocal, attrs.Size));
             foreach (var dir in d) Directory.CreateDirectory(dir);
             return (f, d);
         }, ct);
@@ -219,25 +270,28 @@ public sealed class SftpSession : IDisposable
     }
 
     private static void CollectRemote(SftpClient client, string remoteDir, string localDir,
-        List<(string, string, long)> files, List<string> dirs)
+        List<(string, string, long)> files, List<string> dirs, int depth = 0)
     {
+        if (depth > 64) return; // protects against link loops
         foreach (var f in client.ListDirectory(remoteDir))
         {
             if (f.Name is "." or "..") continue;
-            var local = Path.Combine(localDir, f.Name);
+            if (f.IsSymbolicLink) continue;
+            var local = SafeLocalChildPath(localDir, f.Name);
             if (f.IsDirectory)
             {
                 dirs.Add(local);
-                CollectRemote(client, f.FullName, local, files, dirs);
+                CollectRemote(client, f.FullName, local, files, dirs, depth + 1);
             }
             else files.Add((f.FullName, local, f.Length));
         }
     }
 
-    private static void DeleteRecursive(SftpClient client, string path)
+    private static void DeleteRecursive(SftpClient client, string path, int depth = 0)
     {
-        var attrs = client.GetAttributes(path);
-        if (!attrs.IsDirectory)
+        if (depth > 64) throw new InvalidOperationException("Folder nesting is too deep to delete safely.");
+        var item = client.Get(path);
+        if (!item.IsDirectory || item.IsSymbolicLink)
         {
             client.DeleteFile(path);
             return;
@@ -245,7 +299,7 @@ public sealed class SftpSession : IDisposable
         foreach (var f in client.ListDirectory(path))
         {
             if (f.Name is "." or "..") continue;
-            if (f.IsDirectory) DeleteRecursive(client, f.FullName);
+            if (f.IsDirectory && !f.IsSymbolicLink) DeleteRecursive(client, f.FullName, depth + 1);
             else client.DeleteFile(f.FullName);
         }
         client.DeleteDirectory(path);
@@ -257,8 +311,9 @@ public sealed class SftpSession : IDisposable
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     /// <summary>Reads a UTF-8 text file for editing. Binary files and very large files are rejected.</summary>
-    public Task<RemoteText> ReadTextAsync(string path) => Task.Run(() =>
+    public Task<RemoteText> ReadTextAsync(string path, CancellationToken ct = default) => Task.Run(() =>
     {
+        ct.ThrowIfCancellationRequested();
         var client = Client;
         var attrs = client.GetAttributes(path);
         if (attrs.IsDirectory) throw new InvalidOperationException("A folder cannot be edited.");
@@ -280,14 +335,144 @@ public sealed class SftpSession : IDisposable
 
         var crlf = text.Contains("\r\n", StringComparison.Ordinal);
         return new RemoteText(crlf ? text.Replace("\r\n", "\n") : text, crlf ? "crlf" : "lf", hasBom, bytes.Length, UnixSeconds(attrs.LastWriteTimeUtc));
-    });
+    }, ct);
+
+    /// <summary>Reads a 1-based line range from a UTF-8 text file (works on files larger than 2 MB).</summary>
+    public Task<string> ReadTextRangeAsync(string path, int startLine, int maxLines, CancellationToken ct = default) => Task.Run(() =>
+    {
+        ct.ThrowIfCancellationRequested();
+        var client = Client;
+        var attrs = client.GetAttributes(path);
+        if (attrs.IsDirectory) throw new InvalidOperationException("A folder cannot be edited.");
+        using var stream = client.OpenRead(path);
+        return ReadLineRange(stream, startLine, maxLines, ct);
+    }, ct);
+
+    /// <summary>Detects line ending ("crlf" or "lf") and UTF-8 BOM of an existing remote file, or ("lf", false) otherwise.</summary>
+    public Task<(string LineEnding, bool Bom)> TryDetectFormatAsync(string path, CancellationToken ct = default) => Task.Run(() =>
+    {
+        ct.ThrowIfCancellationRequested();
+        var client = Client;
+        try
+        {
+            if (!client.Exists(path)) return ("lf", false);
+            using var stream = client.OpenRead(path);
+            var buf = new byte[8192];
+            var total = 0;
+            while (total < buf.Length)
+            {
+                ct.ThrowIfCancellationRequested();
+                var n = stream.Read(buf, total, buf.Length - total);
+                if (n == 0) break;
+                total += n;
+            }
+            return DetectTextFormat(buf.AsSpan(0, total));
+        }
+        catch (Exception ex) when (ex is Renci.SshNet.Common.SshException or IOException)
+        {
+            return ("lf", false);
+        }
+    }, ct);
+
+    public static (string LineEnding, bool Bom) DetectTextFormat(ReadOnlySpan<byte> sample)
+    {
+        var bom = sample.Length >= 3 && sample[0] == 0xEF && sample[1] == 0xBB && sample[2] == 0xBF;
+        var crlf = sample.IndexOf("\r\n"u8) >= 0;
+        return (crlf ? "crlf" : "lf", bom);
+    }
+
+    public static string ReadLineRange(Stream stream, int startLine, int maxLines, CancellationToken ct = default)
+    {
+        if (startLine < 1) startLine = 1;
+        if (maxLines < 1) maxLines = 1;
+        var endLine = (long)startLine + maxLines;
+
+        var decoder = StrictUtf8.GetDecoder();
+        var byteBuf = new byte[16384];
+        var charBuf = new char[16384];
+        var sb = new StringBuilder();
+        var line = new StringBuilder();
+        long lineNo = 1;
+        var collected = 0;
+        var atStart = true;
+        var pendingCr = false;
+        var truncated = false;
+        var keepReading = true;
+
+        bool EmitLine()
+        {
+            if (lineNo >= startLine && lineNo < endLine)
+            {
+                if (collected > 0)
+                {
+                    if (sb.Length + 1 > MaxEditBytes) { truncated = true; return false; }
+                    sb.Append('\n');
+                }
+                var take = Math.Min(line.Length, (int)MaxEditBytes - sb.Length);
+                sb.Append(line, 0, take);
+                collected++;
+                if (take < line.Length) { truncated = true; return false; }
+            }
+            line.Clear();
+            lineNo++;
+            return lineNo < endLine;
+        }
+
+        while (keepReading)
+        {
+            ct.ThrowIfCancellationRequested();
+            var n = stream.Read(byteBuf, 0, byteBuf.Length);
+            if (n > 0 && Array.IndexOf(byteBuf, (byte)0, 0, n) >= 0)
+                throw new InvalidOperationException("This is not a text file (it contains binary data).");
+
+            int charCount;
+            try
+            {
+                charCount = decoder.GetChars(byteBuf, 0, n, charBuf, 0, flush: n == 0);
+            }
+            catch (DecoderFallbackException)
+            {
+                throw new InvalidOperationException("The file is not UTF-8 encoded and cannot be edited safely here.");
+            }
+
+            for (var i = 0; i < charCount; i++)
+            {
+                var ch = charBuf[i];
+                if (atStart)
+                {
+                    atStart = false;
+                    if (ch == '\uFEFF') continue;
+                }
+                if (pendingCr)
+                {
+                    pendingCr = false;
+                    if (!EmitLine()) { keepReading = false; break; }
+                    if (ch == '\n') continue;
+                }
+                if (ch == '\r') { pendingCr = true; continue; }
+                if (ch == '\n')
+                {
+                    if (!EmitLine()) { keepReading = false; break; }
+                    continue;
+                }
+                if (lineNo >= startLine && line.Length < MaxEditBytes + 32) line.Append(ch);
+            }
+
+            if (n == 0) break;
+        }
+
+        if (keepReading && (pendingCr || line.Length > 0)) EmitLine();
+        if (truncated) sb.Append("\n[output truncated]");
+        return sb.ToString();
+    }
 
     /// <summary>
     /// Writes the edited text back (line ending and BOM as in the original; permissions and owner stay because the same file
     /// is overwritten). Without <paramref name="force"/> it aborts if the file was changed since it was read.
     /// </summary>
-    public Task<(long Modified, long Size)> WriteTextAsync(string path, string content, string lineEnding, bool bom, long expectedModified, long expectedSize, bool force) => Task.Run(() =>
+    public Task<(long Modified, long Size)> WriteTextAsync(string path, string content, string lineEnding, bool bom, long expectedModified, long expectedSize, bool force, CancellationToken ct = default) => Task.Run(() =>
     {
+        ct.ThrowIfCancellationRequested();
         var client = Client;
         if (!force)
         {
@@ -301,7 +486,7 @@ public sealed class SftpSession : IDisposable
         using (var ms = new MemoryStream(bytes)) client.UploadFile(ms, path, true);
         var written = client.GetAttributes(path);
         return (UnixSeconds(written.LastWriteTimeUtc), written.Size);
-    });
+    }, ct);
 
     private static long UnixSeconds(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
 

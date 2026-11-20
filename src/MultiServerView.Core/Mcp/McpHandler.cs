@@ -7,19 +7,20 @@ namespace MultiServerView.Core.Mcp;
 /// <summary>What the MCP tools do. Implemented by the app on top of the vault and the SSH/SFTP code.</summary>
 public interface IMcpBackend
 {
+    bool IsReadOnly => false;
     Task<IReadOnlyList<McpHost>> ListHostsAsync(string query);
     Task<McpExecResult> RunCommandAsync(string host, string command, int timeoutSeconds, CancellationToken ct);
-    Task<string> ReadFileAsync(string host, string path, CancellationToken ct);
+    Task<string> ReadFileAsync(string host, string path, int? startLine, int? maxLines, CancellationToken ct);
     Task WriteFileAsync(string host, string path, string content, CancellationToken ct);
     Task<IReadOnlyList<McpFileEntry>> ListDirectoryAsync(string host, string path, CancellationToken ct);
 }
 
-public sealed record McpHost(string Id, string Name, string Address, int Port, string Protocol, string Workspace, string Group, string Tags);
+public sealed record McpHost(string Id, string Name, string Address, int Port, string Protocol, string Workspace, string Group, string Tags, string Os = "", string Notes = "");
 public sealed record McpExecResult(string StdOut, string StdErr, int ExitCode, bool TimedOut);
 public sealed record McpFileEntry(string Name, bool IsDirectory, long Size);
 
 /// <summary>A tool that is described by data (name, description, JSON schema) instead of being built into the handler.</summary>
-public sealed record McpToolDef(string Name, string Description, JsonObject Schema);
+public sealed record McpToolDef(string Name, string Description, JsonObject Schema, JsonObject? Annotations = null);
 
 /// <summary>An image returned to the AI (screenshot).</summary>
 public sealed record McpImage(string Base64, string MimeType);
@@ -145,6 +146,9 @@ public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null
 
         try
         {
+            if (backend.IsReadOnly && name is "run_command" or "write_file")
+                return Result("The MCP server is in read-only mode. Disable read-only mode in MultiServerView (AI tools) to run commands or write files.", true);
+
             string text;
             switch (name)
             {
@@ -159,8 +163,14 @@ public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null
                     return Result(text, isError: r.ExitCode != 0 || r.TimedOut);
                 }
                 case "read_file":
-                    text = await backend.ReadFileAsync(Required(Str(a, "host"), "host"), Required(Str(a, "path"), "path"), ct);
+                {
+                    int? startLine = a.TryGetPropertyValue("start_line", out var sl) && sl != null ? Int(a, "start_line", 1, 1, int.MaxValue) : null;
+                    int? maxLines = a.TryGetPropertyValue("max_lines", out var ml) && ml != null ? Int(a, "max_lines", 200, 1, 10_000) : null;
+                    if (startLine != null && maxLines == null) maxLines = 200;
+                    else if (maxLines != null && startLine == null) startLine = 1;
+                    text = await backend.ReadFileAsync(Required(Str(a, "host"), "host"), Required(Str(a, "path"), "path"), startLine, maxLines, ct);
                     break;
+                }
                 case "write_file":
                     if (!a.TryGetPropertyValue("content", out var contentNode) || contentNode == null)
                         throw new McpException(-32602, "content is required.");
@@ -230,27 +240,62 @@ public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null
         var all = Tools();
         if (extra == null) return all;
         foreach (var t in extra.Tools)
-            all.Add(new JsonObject { ["name"] = t.Name, ["description"] = t.Description, ["inputSchema"] = t.Schema.DeepClone() });
+        {
+            var tool = new JsonObject { ["name"] = t.Name, ["description"] = t.Description, ["inputSchema"] = t.Schema.DeepClone() };
+            if (t.Annotations != null) tool["annotations"] = t.Annotations.DeepClone();
+            all.Add(tool);
+        }
         return all;
     }
 
-    private static JsonArray Tools()
+    private JsonArray Tools()
     {
         static JsonObject Prop(string type, string description) => new() { ["type"] = type, ["description"] = description };
-        static JsonObject Tool(string name, string description, JsonObject props, params string[] required) => new()
+        static JsonObject Ann(bool readOnly, bool destructive, bool idempotent, bool openWorld) => new()
+        {
+            ["readOnlyHint"] = readOnly,
+            ["destructiveHint"] = destructive,
+            ["idempotentHint"] = idempotent,
+            ["openWorldHint"] = openWorld
+        };
+        static JsonObject Tool(string name, string description, JsonObject annotations, JsonObject props, params string[] required) => new()
         {
             ["name"] = name,
             ["description"] = description,
+            ["annotations"] = annotations,
             ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["required"] = new JsonArray(required.Select(r => (JsonNode)JsonValue.Create(r)!).ToArray()) }
         };
         JsonObject host() => Prop("string", "Host name or id from list_hosts."); // a JSON node can only have one parent
-        return new JsonArray(
-            Tool("list_hosts", "List the servers saved in MultiServerView (no passwords).", new JsonObject { ["query"] = Prop("string", "Optional text to filter by name, address, workspace or tag.") }),
+        var tools = new JsonArray(
+            Tool("list_hosts", "List the servers saved in MultiServerView (no passwords).",
+                Ann(readOnly: true, destructive: false, idempotent: true, openWorld: false),
+                new JsonObject { ["query"] = Prop("string", "Optional text to filter by name, address, workspace, OS or tag.") }),
             Tool("run_command", "Run a shell command on an SSH host and return stdout, stderr and the exit code.",
+                Ann(readOnly: false, destructive: true, idempotent: false, openWorld: true),
                 new JsonObject { ["host"] = host(), ["command"] = Prop("string", "The command line."), ["timeout_seconds"] = Prop("integer", "Default 60, maximum 900.") }, "host", "command"),
-            Tool("read_file", "Read a text file from an SSH host over SFTP (up to 2 MB).", new JsonObject { ["host"] = host(), ["path"] = Prop("string", "Absolute or home-relative path.") }, "host", "path"),
-            Tool("write_file", "Write (overwrite) a text file on an SSH host over SFTP.", new JsonObject { ["host"] = host(), ["path"] = Prop("string", "Absolute or home-relative path."), ["content"] = Prop("string", "The new file content.") }, "host", "path", "content"),
-            Tool("list_directory", "List a directory on an SSH host over SFTP.", new JsonObject { ["host"] = host(), ["path"] = Prop("string", "Directory, default is the home folder.") }, "host"));
+            Tool("read_file", "Read a UTF-8 text file (or a line range of a large file) from an SSH host over SFTP.",
+                Ann(readOnly: true, destructive: false, idempotent: true, openWorld: true),
+                new JsonObject
+                {
+                    ["host"] = host(),
+                    ["path"] = Prop("string", "Absolute or home-relative path."),
+                    ["start_line"] = Prop("integer", "Optional 1-based start line for reading a slice (defaults to 1 when max_lines is set)."),
+                    ["max_lines"] = Prop("integer", "Optional maximum number of lines to read (1-10000, defaults to 200 when start_line is set).")
+                }, "host", "path"),
+            Tool("write_file", "Write (overwrite) a text file on an SSH host over SFTP, preserving existing line endings and BOM.",
+                Ann(readOnly: false, destructive: true, idempotent: true, openWorld: true),
+                new JsonObject { ["host"] = host(), ["path"] = Prop("string", "Absolute or home-relative path."), ["content"] = Prop("string", "The new file content.") }, "host", "path", "content"),
+            Tool("list_directory", "List a directory on an SSH host over SFTP.",
+                Ann(readOnly: true, destructive: false, idempotent: true, openWorld: true),
+                new JsonObject { ["host"] = host(), ["path"] = Prop("string", "Directory, default is the home folder.") }, "host"));
+        if (backend.IsReadOnly)
+        {
+            // read-only mode: the tools that change something are not even offered
+            foreach (var name in new[] { "run_command", "write_file" })
+                for (var i = tools.Count - 1; i >= 0; i--)
+                    if (tools[i]?["name"]?.GetValue<string>() == name) tools.RemoveAt(i);
+        }
+        return tools;
     }
 }
 

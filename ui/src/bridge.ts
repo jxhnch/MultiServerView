@@ -40,6 +40,8 @@ export type HostEvent =
   | { event: 'sftp.progress'; sessionId: string; transferId: string; name: string; done: number; total: number; finished: boolean }
   | { event: 'sftp.externalSaved'; sessionId: string; name: string; error: string | null }
   | { event: 'window.state'; maximized: boolean }
+  | { event: 'mcp.status'; running: boolean; error: string | null }
+  | { event: 'mcp.activity' }
   | { event: 'vault.changed' }
   | { event: 'mcp.screen'; requestId: string; op: string; args: Record<string, unknown> };
 
@@ -181,7 +183,7 @@ function loadMock(): MockState {
     snippets: [],
     forwards: [],
     history: [],
-    settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false, mcpEnabled: false, mcpPort: 7676, mcpToken: '' },
+    settings: { sshKeepAliveSeconds: 30, sshConnectTimeoutSeconds: 15, rdpColorDepth: 32, rdpClipboard: true, rdpDrives: false, rdpDynamicResize: true, rdpWarnOnCertificate: false, mcpEnabled: false, mcpPort: 7676, mcpToken: '', mcpReadOnly: false, mcpAllowedWorkspaces: [] },
     source: { configured: false, mode: 'local', folder: '', url: '', anonKey: '', email: '', hasPassword: false, lastSaved: null },
   };
 }
@@ -507,6 +509,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'mcp.screenReply':
       return null;
     case 'mcp.configure':
+      if (params.action === 'statusAll') return {};
       if (params.action === 'status') return { supported: false, path: '', exists: false, configured: false, upToDate: false };
       return onlyNative('Configuring AI tools');
     case 'app.info':
@@ -971,8 +974,9 @@ export const api = {
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
   mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),
   mcpScreenReply: (requestId: string, ok: boolean, result?: unknown, error?: string) => call<void>('mcp.screenReply', { requestId, ok, result, error }),
-  mcpConfigure: (client: string, action: 'status' | 'add' | 'remove') =>
-    call<McpConfigStatus>('mcp.configure', { client, action }),
+  mcpConfigure: (client: string, action: 'status' | 'add' | 'remove', workspace?: string) =>
+    call<McpConfigStatus>('mcp.configure', { client, action, ...(workspace ? { workspace } : {}) }),
+  mcpConfigureAll: () => call<Record<string, McpConfigStatus>>('mcp.configure', { client: '', action: 'statusAll' }),
   updateCheck: () => call<UpdateStatus>('update.check'),
   updateInstall: () => call<void>('update.install'),
 

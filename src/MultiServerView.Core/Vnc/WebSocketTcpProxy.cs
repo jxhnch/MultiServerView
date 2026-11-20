@@ -29,12 +29,17 @@ public sealed class WebSocketTcpProxy : IDisposable
 
     public int Port { get; private set; }
 
+    private readonly object _startLock = new();
+
     public void Start()
     {
-        if (_acceptLoop != null) return;
-        _listener.Start();
-        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-        _acceptLoop = Task.Run(AcceptLoop);
+        lock (_startLock)
+        {
+            if (_acceptLoop != null) return;
+            _listener.Start();
+            Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            _acceptLoop = Task.Run(AcceptLoop);
+        }
     }
 
     /// <summary>Registers a target and returns the WebSocket URL (usable once, valid for 30 s).</summary>
@@ -50,12 +55,13 @@ public sealed class WebSocketTcpProxy : IDisposable
 
     private async Task AcceptLoop()
     {
-        while (!_cts.IsCancellationRequested)
+        var token = _cts.Token;
+        while (!token.IsCancellationRequested)
         {
             TcpClient client;
             try
             {
-                client = await _listener.AcceptTcpClientAsync(_cts.Token);
+                client = await _listener.AcceptTcpClientAsync(token);
             }
             catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
             {
