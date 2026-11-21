@@ -214,6 +214,10 @@ internal static class SelfTest
                 Directory.CreateDirectory(downDir);
                 Check("MCP tools: download_file", !(await Tool("download_file", new { host = "selftest-ssh", remote_paths = new[] { mcpRemote + "/mcp-up.txt" }, local_dir = downDir })).IsError && File.ReadAllText(Path.Combine(downDir, "mcp-up.txt")) == "uploaded by the AI");
                 Check("MCP tools: file_checksum and delete_file", (await Tool("file_checksum", new { host = "selftest-ssh", path = mcpRemote + "/mcp-up.txt" })).Text.Length > 20 && !(await Tool("delete_file", new { host = "selftest-ssh", path = mcpRemote })).IsError);
+                await Call("ssh.open", new { sessionId = "st-log", serverId, cols = 80, rows = 24 });
+                Check("Logs: an open SSH session is running", (await Call("history.list")).EnumerateArray().Any(h => h.GetProperty("kind").GetString() == "ssh" && h.GetProperty("result").GetString() == "running"));
+                await Call("ssh.close", new { sessionId = "st-log" });
+                Check("Logs: closing the SSH tab ends its entry (nothing stays running)", !(await Call("history.list")).EnumerateArray().Any(h => h.GetProperty("result").GetString() == "running"));
                 Check("SFTP: cleaned up", true);
             }
             await Call("settings.save", new { sshKeepAliveSeconds = 30, sshConnectTimeoutSeconds = 15, rdpColorDepth = 32, rdpClipboard = true, rdpDrives = false, rdpDynamicResize = true, rdpWarnOnCertificate = false, mcpEnabled = false, mcpPort = 47689, mcpToken = "" });

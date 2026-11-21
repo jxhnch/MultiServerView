@@ -43,3 +43,10 @@ Name: "{autodesktop}\MultiServerView"; Filename: "{app}\MultiServerView.exe"; Ta
 
 [Run]
 Filename: "{app}\MultiServerView.exe"; Description: "Start MultiServerView"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\MultiServerView.exe"; Flags: nowait skipifnotsilent; Check: ShouldRelaunch
+
+[Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;

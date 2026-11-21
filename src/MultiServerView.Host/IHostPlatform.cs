@@ -55,5 +55,5 @@ public interface IHostPlatform
     IReadOnlyList<PuttySession>? ReadPuttySessions();
 
     /// <summary>Downloads and starts the installer of a new version and closes the app.</summary>
-    Task InstallUpdateAsync(string setupUrl, string version);
+    Task InstallUpdateAsync(string setupUrl, string version, string? expectedSha256 = null);
 }

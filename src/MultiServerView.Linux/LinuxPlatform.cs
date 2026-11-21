@@ -102,7 +102,7 @@ internal sealed class LinuxPlatform : IHostPlatform
 
     public IReadOnlyList<PuttySession>? ReadPuttySessions() => null;
 
-    public Task InstallUpdateAsync(string setupUrl, string version) =>
+    public Task InstallUpdateAsync(string setupUrl, string version, string? expectedSha256 = null) =>
         throw new InvalidOperationException("Linux updates come with the package or the AppImage. Download the new version from the releases page.");
 
     private static void Start(string exe, params string[] args)

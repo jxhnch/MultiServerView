@@ -36,11 +36,13 @@ public sealed class Bridge : IDisposable
     private readonly ConcurrentDictionary<string, SftpSession> _sftp = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _transfers = new();
     private readonly ConcurrentDictionary<string, string> _historyIds = new();
+    private readonly ConcurrentDictionary<string, string> _sshHistory = new(); // SSH session id -> history entry
     private readonly PortForwardManager _forwards = new();
     private readonly WebSocketTcpProxy _vncProxy = new();
     private readonly McpService _mcp;
     private readonly List<Action<object>> _eventTaps = new();
     private readonly ScreenHub _screens;
+    private (UpdateInfo Info, DateTimeOffset At)? _cachedUpdate;
 
     public Bridge(VaultStore vault, SourceService source, HistoryStore history, AppSettingsStore settings, IRdpController rdp, Action<object> emit, IHostPlatform platform)
     {
@@ -355,15 +357,31 @@ public sealed class Bridge : IDisposable
             case "update.check":
             {
                 var current = AppVersion;
-                var info = await UpdateChecker.CheckAsync(_http, current);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var info = await UpdateChecker.CheckAsync(_http, current, cts.Token);
+                _cachedUpdate = info != null ? (info, DateTimeOffset.UtcNow) : null;
                 return new { current, available = info != null, version = info?.Version ?? "", notes = info?.Notes ?? "", pageUrl = info?.PageUrl ?? "", canInstall = info?.SetupUrl != null && _platform.CanSelfUpdate };
             }
             case "update.install":
             {
-                var info = await UpdateChecker.CheckAsync(_http, AppVersion);
-                if (info?.SetupUrl == null || !UpdateChecker.IsGitHubUrl(info.SetupUrl)) throw new InvalidOperationException("No installer found for the new version. Download it from the releases page.");
+                var cached = _cachedUpdate;
+                UpdateInfo? info;
+                if (cached is { } c && DateTimeOffset.UtcNow - c.At < TimeSpan.FromMinutes(10))
+                {
+                    info = c.Info;
+                }
+                else
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    info = await UpdateChecker.CheckAsync(_http, AppVersion, cts.Token);
+                    _cachedUpdate = info != null ? (info, DateTimeOffset.UtcNow) : null;
+                }
+                if (info?.SetupUrl == null || !UpdateChecker.IsGitHubUrl(info.SetupUrl, UpdateChecker.Repository)) throw new InvalidOperationException("No installer found for the new version. Download it from the releases page.");
                 if (!_platform.CanSelfUpdate) throw new InvalidOperationException("This copy cannot update itself. Download the new version from the releases page.");
-                await _platform.InstallUpdateAsync(info.SetupUrl, info.Version);
+                string? expectedSha256 = null;
+                if (info.ChecksumsUrl != null && info.SetupName != null)
+                    expectedSha256 = await UpdateChecker.FetchExpectedSha256Async(_http, info.ChecksumsUrl, info.SetupName);
+                await _platform.InstallUpdateAsync(info.SetupUrl, info.Version, expectedSha256);
                 return null;
             }
             case "teamviewer.open":
@@ -823,6 +841,7 @@ public sealed class Bridge : IDisposable
         server = WithTypedCredentials(server, p, out var saveCredentials);
         var key = server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null;
         var hid = _history.Begin(server, "ssh");
+        _sshHistory[sessionId] = hid;
 
         var session = new SshTerminalSession(server, key, CheckHost, Jumps);
         var pump = new SshPump(session, chunk => _emit(new { @event = "ssh.data", sessionId, data = Convert.ToBase64String(chunk) }));
@@ -832,6 +851,7 @@ public sealed class Bridge : IDisposable
             pump.Flush();
             if (_ssh.TryRemove(sessionId, out var gone) && ReferenceEquals(gone, pump)) pump.Dispose();
             _history.End(hid, reason == null, reason ?? "");
+            _sshHistory.TryRemove(new KeyValuePair<string, string>(sessionId, hid));
             _emit(new { @event = "ssh.closed", sessionId, reason });
         };
 
@@ -847,6 +867,7 @@ public sealed class Bridge : IDisposable
             if (_ssh.TryGetValue(sessionId, out var cur) && ReferenceEquals(cur, pump)) _ssh.TryRemove(sessionId, out _);
             pump.Dispose();
             _history.End(hid, false, Friendly(ex));
+            _sshHistory.TryRemove(new KeyValuePair<string, string>(sessionId, hid));
             throw;
         }
 
@@ -865,6 +886,8 @@ public sealed class Bridge : IDisposable
     private void CloseSsh(string sessionId)
     {
         if (_ssh.TryRemove(sessionId, out var pump)) pump.Dispose();
+        // Closing the tab does not raise the "closed" event of the session: end the log entry here, otherwise it stays "running" forever.
+        if (_sshHistory.TryRemove(sessionId, out var hid)) _history.End(hid, true, "Closed.");
     }
 
     private void CloseAllSessions()

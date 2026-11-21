@@ -1,0 +1,41 @@
+# Maintainer: jxhnch <123569094+jxhnch@users.noreply.github.com>
+# Build and install on Arch-based distributions:
+#   cd packaging/linux && makepkg -si
+# Before publishing to AUR, run `updpkgsums` to pin real SHA-256 checksums.
+
+pkgname=multiserverview-bin
+pkgver=1.7.0
+pkgrel=1
+pkgdesc='SSH, SFTP, RDP and VNC in one window with an end-to-end encrypted vault'
+arch=('x86_64')
+url='https://github.com/jxhnch/MultiServerView'
+license=('LicenseRef-MultiServerView')
+depends=('webkit2gtk-4.1' 'gtk3' 'libnotify' 'xdg-utils')
+optdepends=(
+  'freerdp: external RDP client support (xfreerdp)'
+  'remmina: alternative external RDP client'
+)
+provides=('multiserverview')
+conflicts=('multiserverview')
+options=('!strip')
+source=(
+  "MultiServerView-${pkgver}-linux-x64.tar.gz::https://github.com/jxhnch/MultiServerView/releases/download/v${pkgver}/MultiServerView-${pkgver}-linux-x64.tar.gz"
+  "multiserverview-${pkgver}.desktop::https://raw.githubusercontent.com/jxhnch/MultiServerView/v${pkgver}/packaging/linux/multiserverview.desktop"
+  "multiserverview-${pkgver}.png::https://raw.githubusercontent.com/jxhnch/MultiServerView/v${pkgver}/docs/screenshots/icon.png"
+  "LICENSE-${pkgver}::https://raw.githubusercontent.com/jxhnch/MultiServerView/v${pkgver}/LICENSE"
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -dm755 "${pkgdir}/opt/multiserverview" "${pkgdir}/usr/bin"
+  cp -a "${srcdir}/multiserverview/." "${pkgdir}/opt/multiserverview/"
+  chmod 755 "${pkgdir}/opt/multiserverview/multiserverview"
+  ln -s /opt/multiserverview/multiserverview "${pkgdir}/usr/bin/multiserverview"
+
+  install -Dm644 "${srcdir}/multiserverview-${pkgver}.desktop" \
+    "${pkgdir}/usr/share/applications/multiserverview.desktop"
+  install -Dm644 "${srcdir}/multiserverview-${pkgver}.png" \
+    "${pkgdir}/usr/share/icons/hicolor/512x512/apps/multiserverview.png"
+  install -Dm644 "${srcdir}/LICENSE-${pkgver}" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

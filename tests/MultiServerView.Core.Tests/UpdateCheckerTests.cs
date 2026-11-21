@@ -53,4 +53,41 @@ public class UpdateCheckerTests
     [InlineData("1.2.0..evil")]
     public void SanitizeVersionForFileName_rejects_traversal(string v) =>
         Assert.Throws<InvalidOperationException>(() => UpdateChecker.SanitizeVersionForFileName(v));
+
+    [Fact]
+    public void Parses_checksums_asset_and_extracts_sha256_entries()
+    {
+        var withSums = Release.Replace("] }", ", { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/jxhnch/MultiServerView/releases/download/v1.2.0/SHA256SUMS.txt\" } ] }");
+        var info = UpdateChecker.Parse(withSums, "1.1.0")!;
+        Assert.Equal("MultiServerView-Setup-1.2.0.exe", info.SetupName);
+        Assert.EndsWith("SHA256SUMS.txt", info.ChecksumsUrl);
+
+        var hash = new string('a', 64);
+        var manifest = $"{hash.ToUpperInvariant()}  MultiServerView-Setup-1.2.0.exe\n{new string('b', 64)} *other.zip\n";
+        Assert.Equal(hash, UpdateChecker.ParseSha256Sum(manifest, "MultiServerView-Setup-1.2.0.exe"));
+        Assert.Equal(new string('b', 64), UpdateChecker.ParseSha256Sum(manifest, "other.zip"));
+        Assert.Null(UpdateChecker.ParseSha256Sum(manifest, "missing.exe"));
+        Assert.Null(UpdateChecker.ParseSha256Sum("not-a-hash  MultiServerView-Setup-1.2.0.exe\n", "MultiServerView-Setup-1.2.0.exe"));
+    }
+
+    [Fact]
+    public async Task CheckAsync_returns_null_on_404_and_throws_on_rate_limit_or_error()
+    {
+        using var notFound = new HttpClient(new StubHandler(System.Net.HttpStatusCode.NotFound));
+        Assert.Null(await UpdateChecker.CheckAsync(notFound, "1.0.0"));
+
+        using var rateLimited = new HttpClient(new StubHandler(System.Net.HttpStatusCode.Forbidden));
+        var rlEx = await Assert.ThrowsAsync<InvalidOperationException>(() => UpdateChecker.CheckAsync(rateLimited, "1.0.0"));
+        Assert.Contains("rate limit", rlEx.Message, StringComparison.OrdinalIgnoreCase);
+
+        using var serverError = new HttpClient(new StubHandler(System.Net.HttpStatusCode.InternalServerError));
+        var seEx = await Assert.ThrowsAsync<InvalidOperationException>(() => UpdateChecker.CheckAsync(serverError, "1.0.0"));
+        Assert.Contains("500", seEx.Message);
+    }
+
+    private sealed class StubHandler(System.Net.HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status));
+    }
 }

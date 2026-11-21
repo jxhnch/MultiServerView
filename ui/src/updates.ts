@@ -1,7 +1,7 @@
-import { api, type UpdateStatus } from './bridge';
+import { api, getPlatform, type UpdateStatus } from './bridge';
 import { askConfirm } from './Confirm';
 
-/** Shows "new version available" and, if the user agrees, installs it (installed app) or opens the download page (portable). */
+/** Shows "new version available" and, if the user agrees, installs it (installed app) or opens the download page. */
 export async function offerUpdate(u: UpdateStatus, toast: (msg: string, kind?: 'ok' | 'error') => void): Promise<void> {
   const notes = u.notes.trim().split('\n').slice(0, 8).join('\n');
   if (u.canInstall) {
@@ -18,7 +18,12 @@ export async function offerUpdate(u: UpdateStatus, toast: (msg: string, kind?: '
     }
     return;
   }
-  const yes = await askConfirm(`Version ${u.version} is available (you have ${u.current}).${notes ? '\n\n' + notes : ''}\n\nThis copy cannot update itself (portable version). Open the download page?`, {
+  const { platform } = await getPlatform();
+  const reason =
+    platform === 'linux'
+      ? 'Linux updates are installed from the releases page (.deb, AppImage or .tar.gz).'
+      : 'This copy cannot update itself (portable version).';
+  const yes = await askConfirm(`Version ${u.version} is available (you have ${u.current}).${notes ? '\n\n' + notes : ''}\n\n${reason} Open the download page?`, {
     title: 'Update available',
     confirmLabel: 'Open download page',
   });

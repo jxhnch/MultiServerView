@@ -36,6 +36,24 @@ public sealed class HistoryStore
     {
         _path = path;
         _items = Load();
+        EndStale();
+    }
+
+    /// <summary>
+    /// Entries that are still "running" when the store is opened belong to an earlier run of the app (it was closed or
+    /// killed while the session was open) - nothing can end them any more. Without this they would stay "running" forever.
+    /// </summary>
+    private void EndStale()
+    {
+        var stale = _items.Where(e => e.EndedAt == null).ToList();
+        if (stale.Count == 0) return;
+        foreach (var e in stale)
+        {
+            e.EndedAt = e.StartedAt;
+            e.Result = "ok";
+            if (e.Message.Length == 0) e.Message = "Ended when the app was closed.";
+        }
+        Save();
     }
 
     public string Begin(ServerEntry server, string kind)

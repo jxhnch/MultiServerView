@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace MultiServerView.Core.Update;
 
 /// <summary>A newer release found on GitHub.</summary>
-public sealed record UpdateInfo(string Version, string Notes, string PageUrl, string? SetupUrl);
+public sealed record UpdateInfo(string Version, string Notes, string PageUrl, string? SetupUrl, string? SetupName = null, string? ChecksumsUrl = null);
 
 /// <summary>
 /// Asks the GitHub Releases API of the official repository whether a newer version exists.
@@ -20,7 +20,11 @@ public static class UpdateChecker
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("MultiServerView", currentVersion));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         using var response = await http.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode) return null; // no release yet, rate limit, offline proxy ...
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null; // no release published yet
+        if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
+            throw new InvalidOperationException("GitHub rate limit reached while checking for updates. Please try again later.");
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Could not check for updates (HTTP {(int)response.StatusCode}).");
         return Parse(await response.Content.ReadAsStringAsync(ct), currentVersion, repository);
     }
 
@@ -36,13 +40,23 @@ public static class UpdateChecker
         if (!IsNewer(latest, currentVersion)) return null;
 
         string? setup = null;
+        string? setupName = null;
+        string? checksums = null;
         if (root.TryGetProperty("assets", out var assets))
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
                 var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
-                if (url != null && name.Contains("Setup", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && IsGitHubUrl(url, repository))
+                if (url == null || !IsGitHubUrl(url, repository)) continue;
+                if (name.Contains("Setup", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
                     setup = url;
+                    setupName = name;
+                }
+                else if (name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase) || name.Equals("SHA256SUMS", StringComparison.OrdinalIgnoreCase))
+                {
+                    checksums = url;
+                }
             }
 
         var pageUrl = root.TryGetProperty("html_url", out var h) ? h.GetString() ?? "" : "";
@@ -52,7 +66,41 @@ public static class UpdateChecker
             latest,
             root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "",
             pageUrl,
-            setup);
+            setup,
+            setupName,
+            checksums);
+    }
+
+    /// <summary>Extracts the lowercase 64-char SHA-256 hex digest for <paramref name="fileName"/> from a sha256sum manifest.</summary>
+    public static string? ParseSha256Sum(string checksumsText, string fileName)
+    {
+        foreach (var raw in checksumsText.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length < 66) continue;
+            var sep = line.IndexOfAny(new[] { ' ', '\t' });
+            if (sep != 64) continue;
+            var hash = line[..64];
+            if (!hash.All(Uri.IsHexDigit)) continue;
+            var name = line[64..].TrimStart(' ', '\t', '*');
+            if (name.Equals(fileName, StringComparison.OrdinalIgnoreCase)) return hash.ToLowerInvariant();
+        }
+        return null;
+    }
+
+    /// <summary>Downloads a release SHA256SUMS manifest from GitHub and returns the expected SHA-256 for <paramref name="fileName"/>.</summary>
+    public static async Task<string> FetchExpectedSha256Async(HttpClient http, string checksumsUrl, string fileName, CancellationToken ct = default, string repository = Repository)
+    {
+        if (!IsGitHubUrl(checksumsUrl, repository))
+            throw new InvalidOperationException("Refusing to download checksums from an untrusted URL.");
+        using var response = await http.GetAsync(checksumsUrl, ct);
+        response.EnsureSuccessStatusCode();
+        var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? "";
+        if (!IsGitHubUrl(finalUrl, repository))
+            throw new InvalidOperationException("Checksum download redirected to an untrusted host.");
+        var text = await response.Content.ReadAsStringAsync(ct);
+        return ParseSha256Sum(text, fileName)
+            ?? throw new InvalidOperationException($"The release checksums file does not contain an entry for {fileName}.");
     }
 
     /// <summary>true if <paramref name="candidate"/> (e.g. "1.2.0") is a higher version than <paramref name="current"/>.</summary>
