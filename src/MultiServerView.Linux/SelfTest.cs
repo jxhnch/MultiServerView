@@ -137,6 +137,10 @@ internal static class SelfTest
                 Check("SFTP: chmod 640", stat.GetProperty("permissions").GetInt32() == 0x1A0);
                 await Call("sftp.delete", new { sessionId = "st-sftp", path = remoteDir });
                 await Call("sftp.close", new { sessionId = "st-sftp" });
+                await Call("ssh.open", new { sessionId = "st-log", serverId, cols = 80, rows = 24 });
+                Check("Logs: an open SSH session is running", (await Call("history.list")).EnumerateArray().Any(h => h.GetProperty("kind").GetString() == "ssh" && h.GetProperty("result").GetString() == "running"));
+                await Call("ssh.close", new { sessionId = "st-log" });
+                Check("Logs: closing the SSH tab ends its entry (nothing stays running)", !(await Call("history.list")).EnumerateArray().Any(h => h.GetProperty("result").GetString() == "running"));
                 Check("SFTP: cleaned up", true);
             }
         }
