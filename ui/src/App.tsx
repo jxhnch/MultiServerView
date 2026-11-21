@@ -574,7 +574,7 @@ export function App() {
   const drawerOpen = panel !== null && active !== HOME;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [vmwareOpen, setVmwareOpen] = useState(false);
-  const overlayOpen = paletteOpen || drawerOpen || confirmOpen || vmwareOpen;
+  const overlayOpen = paletteOpen || drawerOpen || confirmOpen || vmwareOpen || tabMenu !== null; // the tab menu hangs over the RDP area too
   useEffect(() => {
     if (isNative && phase === 'ready') void api.rdpSuspend(overlayOpen).catch(() => undefined);
   }, [overlayOpen, phase]);
