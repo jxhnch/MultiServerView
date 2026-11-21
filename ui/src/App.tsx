@@ -1,6 +1,6 @@
 import { allScreens, getScreen, sleep, type ScreenHandle } from './mcpScreens';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, isNative, onEvent } from './bridge';
+import { api, getPlatform, isNative, onEvent } from './bridge';
 import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
@@ -271,6 +271,8 @@ export function App() {
           server = mcpDeps.current.serversById.get(String(args.serverId));
         }
         if (!server) throw new Error('Host not found.');
+        if (server.protocol === 'rdp' && (await getPlatform()).platform !== 'linux')
+          throw new Error('RDP screens can only be operated by AI tools in the Linux app for now (Windows uses the native RDP control). VNC hosts work on both systems; for RDP use terminals or files on the server instead.');
         const found = () => allScreens().find((h) => h.serverId === server.id && h.state() === 'connected');
         if (!found()) {
           await d.open(server, false, 'session');

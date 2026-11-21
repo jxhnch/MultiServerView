@@ -211,8 +211,8 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
         <div>
           <h1>AI tools</h1>
           <p className="muted">
-            An MCP server lets AI assistants (Claude Code, Codex, Cursor, Antigravity and others) work on your servers through MultiServerView: list hosts, run
-            commands, read and write files.
+            An MCP server lets AI assistants (Claude Code, Codex, Cursor, Antigravity and others) work in MultiServerView like you do: manage hosts and keys,
+            run commands, work with files on servers and on this PC, use interactive terminals and operate RDP and VNC screens.
           </p>
         </div>
       </div>
@@ -229,7 +229,7 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
               <div className="set-label">
                 <div className="set-title">Enable</div>
                 <div className="muted small">
-                  Listens on 127.0.0.1 only and needs the token below. While it is on, any program that knows the token can run commands on your SSH hosts,
+                  Listens on 127.0.0.1 only and needs the token below. While it is on, any program that knows the token can use MultiServerView like you do (run commands, change files and hosts, operate remote desktops),
                   as long as the vault is unlocked. Only enable it when you want that.
                 </div>
               </div>
@@ -283,7 +283,7 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
                 <div className="set-row">
                   <div className="set-label">
                     <div className="set-title">Read-only mode</div>
-                    <div className="muted small">Allows listing hosts and reading files/folders only. Blocks running commands and writing files.</div>
+                    <div className="muted small">Only tools that look (list and read). Everything that changes something is blocked and not even offered.</div>
                   </div>
                   <div className="set-control">
                     <button
@@ -487,19 +487,59 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
                   Configured in <code>{cfg.path}</code>.
                 </p>
               ) : null}
-              <p className="muted small" style={{ marginTop: 12 }}>
-                Tools the AI gets:{' '}
+              <div className="notice small" style={{ marginTop: 12 }}>
+                <strong>Use with care.</strong> An AI tool that has the token can do almost everything you can do here, as long as the vault is unlocked: change
+                or delete hosts and keys, run commands and change files on your servers and on this PC, and work on remote desktops. Only connect tools you trust.
+                Saved passwords and private keys are never shown to the AI. Every connection it makes appears under Logs. You can limit it with read-only mode
+                or to some workspaces above.
+              </div>
+              <details className="small" style={{ marginTop: 10 }}>
+                <summary>
+                  {host.mcpReadOnly ? 'Tools the AI gets (read-only mode)' : 'Tools the AI gets'}
+                </summary>
                 {host.mcpReadOnly ? (
-                  <>
-                    <code>list_hosts</code>, <code>read_file</code>, <code>list_directory</code> (read-only mode)
-                  </>
+                  <p className="muted small">
+                    Only tools that look, nothing is changed: <code>list_hosts</code>, <code>get_host</code>, <code>read_file</code>, <code>list_directory</code>,{' '}
+                    <code>file_info</code>, <code>file_checksum</code>, <code>list_keys</code>, <code>list_snippets</code>, <code>list_identities</code>,{' '}
+                    <code>list_forwards</code>, <code>connection_history</code>, <code>local_list</code>, <code>local_read_file</code>, <code>list_proxmox</code>,{' '}
+                    <code>list_vmware_vms</code>, <code>screen_list</code>, <code>screen_screenshot</code>.
+                  </p>
                 ) : (
-                  <>
-                    <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>, <code>list_directory</code>
-                  </>
+                  <ul className="muted small" style={{ margin: '6px 0 0 18px' }}>
+                    <li>
+                      <strong>Servers (SSH):</strong> <code>list_hosts</code>, <code>run_command</code>, <code>read_file</code>, <code>write_file</code>,{' '}
+                      <code>list_directory</code>, <code>upload_file</code>, <code>download_file</code>, <code>make_directory</code>, <code>rename_file</code>,{' '}
+                      <code>delete_file</code>, <code>chmod_file</code>, <code>file_info</code>, <code>file_checksum</code>
+                    </li>
+                    <li>
+                      <strong>Terminals:</strong> <code>terminal_open</code>, <code>terminal_send</code>, <code>terminal_key</code>, <code>terminal_read</code>,{' '}
+                      <code>terminal_close</code>, <code>list_terminals</code>
+                    </li>
+                    <li>
+                      <strong>Hosts and keys:</strong> <code>get_host</code>, <code>add_host</code>, <code>update_host</code>, <code>delete_host</code>,{' '}
+                      <code>list_keys</code>, <code>generate_key</code>, <code>save_key</code>, <code>install_key</code>, <code>delete_key</code>
+                    </li>
+                    <li>
+                      <strong>Snippets, identities, forwards:</strong> <code>list_snippets</code>, <code>save_snippet</code>, <code>delete_snippet</code>,{' '}
+                      <code>list_identities</code>, <code>save_identity</code>, <code>delete_identity</code>, <code>list_forwards</code>, <code>save_forward</code>,{' '}
+                      <code>start_forward</code>, <code>stop_forward</code>, <code>delete_forward</code>
+                    </li>
+                    <li>
+                      <strong>This PC:</strong> <code>local_list</code>, <code>local_read_file</code>, <code>local_write_file</code>,{' '}
+                      <code>local_make_directory</code>, <code>local_rename</code>, <code>local_delete</code> (recycle bin)
+                    </li>
+                    <li>
+                      <strong>Remote desktops (RDP, VNC):</strong> <code>screen_open</code>, <code>screen_screenshot</code>, <code>screen_click</code>,{' '}
+                      <code>screen_move</code>, <code>screen_drag</code>, <code>screen_scroll</code>, <code>screen_type</code>, <code>screen_key</code>,{' '}
+                      <code>screen_close</code>, <code>screen_list</code> (needs the window open; RDP screens are controllable in the Linux app, VNC on both)
+                    </li>
+                    <li>
+                      <strong>Other:</strong> <code>connection_history</code>, <code>list_known_hosts</code>, <code>remove_known_host</code>, <code>list_proxmox</code>,{' '}
+                      <code>list_proxmox_vms</code>, <code>list_vmware_vms</code>
+                    </li>
+                  </ul>
                 )}
-                . SSH hosts only; MultiServerView itself never sends your saved passwords or keys to the AI.
-              </p>
+              </details>
             </section>
           )}
         </>
