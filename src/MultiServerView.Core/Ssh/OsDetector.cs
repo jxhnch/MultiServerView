@@ -11,7 +11,9 @@ public static class OsDetector
         ["opensuse-leap"] = "opensuse", ["opensuse-tumbleweed"] = "opensuse", ["sles"] = "opensuse",
         ["amzn"] = "amazon", ["nixos"] = "nixos", ["kali"] = "kali", ["linuxmint"] = "mint", ["pop"] = "pop",
         ["gentoo"] = "gentoo", ["void"] = "void", ["freebsd"] = "freebsd", ["openbsd"] = "openbsd",
-        ["proxmox"] = "proxmox"
+        ["proxmox"] = "proxmox", ["endeavouros"] = "endeavouros", ["zorin"] = "zorin", ["elementary"] = "elementary",
+        ["mx"] = "mx", ["tails"] = "tails", ["openwrt"] = "openwrt", ["qubes"] = "qubes", ["ol"] = "redhat",
+        ["rhel-based"] = "redhat", ["truenas"] = "truenas", ["opnsense"] = "opnsense", ["pfsense"] = "pfsense"
     };
 
     /// <summary>
@@ -26,7 +28,11 @@ public static class OsDetector
         if (output.Contains("Microsoft Windows [", StringComparison.OrdinalIgnoreCase)
             || output.Contains("not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
             || output.Contains("nicht als interner oder externer Befehl", StringComparison.OrdinalIgnoreCase)
-            || output.Contains("is not recognized as the name of a cmdlet", StringComparison.OrdinalIgnoreCase))
+            || output.Contains("is not recognized as the name of a cmdlet", StringComparison.OrdinalIgnoreCase)
+            // Windows OpenSSH with PowerShell as the default shell: "uname" and "||" are errors there
+            || output.Contains("is not a valid statement separator", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("Cannot find path", StringComparison.OrdinalIgnoreCase) && output.Contains("os-release", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("ObjectNotFound", StringComparison.OrdinalIgnoreCase) && output.Contains("os-release", StringComparison.OrdinalIgnoreCase))
             return "windows";
 
         string? id = null;

@@ -165,6 +165,10 @@ public class OsDetectorTests
     [InlineData("\nMicrosoft Windows [Version 10.0.26100.33674]\n", "windows")]
     [InlineData("'cat' is not recognized as an internal or external command,\noperable program or batch file.", "windows")]
     [InlineData("'cat' ist nicht als interner oder externer Befehl, ausführbares Programm oder Batchdatei", "windows")]
+    [InlineData("cat : Cannot find path '/etc/os-release' because it does not exist.\n---\nThe token '||' is not a valid statement separator in this version.", "windows")]
+    [InlineData("ID=endeavouros\nID_LIKE=arch\n---\nLinux", "endeavouros")]
+    [InlineData("ID=openwrt\n---\nLinux", "openwrt")]
+    [InlineData("ID=ol\nID_LIKE=\"fedora\"\n---\nLinux", "redhat")]
     public void Parses_os_release(string output, string expected) => Assert.Equal(expected, OsDetector.Parse(output));
 }
 

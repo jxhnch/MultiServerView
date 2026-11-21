@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { IconEdit, IconFolder, IconGrid, IconPlus, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay } from './Icons';
+import { IconEdit, IconFolder, IconGrid, IconPlus, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay } from './Icons';
+import { api } from './bridge';
 import { HostTile } from './HostTile';
 import { ContextMenu } from './ContextMenu';
 import { PromptDialog } from './Prompt';
@@ -312,6 +313,18 @@ export function HostsPage({
             { label: 'Edit details', icon: <IconEdit size={14} />, onClick: () => onSelect(menu.server), separator: true },
             { label: menu.server.favorite ? 'Remove favorite' : 'Mark as favorite', icon: <IconStar size={14} filled={menu.server.favorite} />, onClick: () => onFav(menu.server) },
             { label: 'Move to workspace…', icon: <IconFolder size={14} />, onClick: () => setWsDialog({ kind: 'move', server: menu.server }) },
+            ...(menu.server.protocol === 'ssh'
+              ? [{ label: 'Detect system (logo)', icon: <IconRefresh size={14} />, onClick: () => void api.hostsDetectOs([menu.server.id]).catch(() => undefined) }]
+              : []),
+            ...(servers.some((x) => x.protocol === 'ssh' && !x.os)
+              ? [
+                  {
+                    label: 'Detect system of all hosts without a logo',
+                    icon: <IconRefresh size={14} />,
+                    onClick: () => void api.hostsDetectOs(servers.filter((x) => x.protocol === 'ssh' && !x.os).map((x) => x.id)).catch(() => undefined),
+                  },
+                ]
+              : []),
             { label: 'Duplicate', icon: <IconDuplicate size={14} />, onClick: () => onDuplicateHost(menu.server) },
             { label: 'Delete', icon: <IconTrash size={14} />, danger: true, separator: true, onClick: () => onDelete(menu.server) },
           ]}

@@ -214,6 +214,8 @@ internal static class SelfTest
                 Directory.CreateDirectory(downDir);
                 Check("MCP tools: download_file", !(await Tool("download_file", new { host = "selftest-ssh", remote_paths = new[] { mcpRemote + "/mcp-up.txt" }, local_dir = downDir })).IsError && File.ReadAllText(Path.Combine(downDir, "mcp-up.txt")) == "uploaded by the AI");
                 Check("MCP tools: file_checksum and delete_file", (await Tool("file_checksum", new { host = "selftest-ssh", path = mcpRemote + "/mcp-up.txt" })).Text.Length > 20 && !(await Tool("delete_file", new { host = "selftest-ssh", path = mcpRemote })).IsError);
+                var detected = await Call("hosts.detectOs", new { ids = new[] { serverId } });
+                Check("OS logo: the system of a host can be detected on request", detected.GetArrayLength() == 1 && !string.IsNullOrEmpty(detected[0].GetProperty("os").GetString()), detected.ToString());
                 await Call("ssh.open", new { sessionId = "st-log", serverId, cols = 80, rows = 24 });
                 Check("Logs: an open SSH session is running", (await Call("history.list")).EnumerateArray().Any(h => h.GetProperty("kind").GetString() == "ssh" && h.GetProperty("result").GetString() == "running"));
                 await Call("ssh.close", new { sessionId = "st-log" });

@@ -185,6 +185,33 @@ public sealed class Bridge : IDisposable
                 return null;
             case "servers.touch":
                 return _vault.Touch(Str(p, "id"));
+            case "hosts.detectOs":
+            {
+                // Looks at the system of a host without opening a tab (for the logo). Several ids: one after the other.
+                var ids = Strings(p, "ids");
+                var found = new List<object>();
+                foreach (var hostId in ids)
+                {
+                    var target = _vault.FindResolved(hostId);
+                    if (target == null || target.Protocol != Protocol.Ssh) continue;
+                    var login = target.Auth == AuthMethod.Key ? _vault.FindKey(target.KeyId) : null;
+                    string detected;
+                    try
+                    {
+                        var run = await SshExec.RunAsync(target, login, CheckHost, Jumps, OsDetector.ProbeCommand, TimeSpan.FromSeconds(8), CancellationToken.None);
+                        detected = OsDetector.Parse(run.StdOut + "\n" + run.StdErr);
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                    {
+                        found.Add(new { id = hostId, os = "", error = Friendly(ex) });
+                        continue;
+                    }
+                    if (detected.Length > 0) _vault.SetOs(hostId, detected);
+                    found.Add(new { id = hostId, os = detected, error = detected.Length == 0 ? "The system could not be recognized." : "" });
+                }
+                _emit(new { @event = "vault.changed" });
+                return found;
+            }
             case "hosts.forget":
             {
                 var server = _vault.Find(Str(p, "id")) ?? throw new KeyNotFoundException("Server not found.");

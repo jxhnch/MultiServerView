@@ -504,6 +504,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return null;
     case 'teamviewer.open':
       return onlyNative('TeamViewer');
+    case 'hosts.detectOs':
+      return [];
     case 'ssh.ping':
       return true;
     case 'mcp.status':
@@ -974,6 +976,7 @@ export const api = {
   rdpSuspend: (suspended: boolean) => call<void>('rdp.suspend', { suspended }),
   rdpExternal: (serverId: string) => call<void>('rdp.external', { serverId }),
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
+  hostsDetectOs: (ids: string[]) => call<{ id: string; os: string; error: string }[]>('hosts.detectOs', { ids }),
   sshPing: (sessionId: string) => call<boolean>('ssh.ping', { sessionId }),
   mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),
   mcpScreenReply: (requestId: string, ok: boolean, result?: unknown, error?: string) => call<void>('mcp.screenReply', { requestId, ok, result, error }),
