@@ -8,7 +8,7 @@ namespace MultiServerView.Core.Ssh;
 /// An interactive SSH shell (PTY). Data comes out as raw bytes and goes in as raw bytes -
 /// the terminal itself (xterm.js) lives in the UI.
 /// </summary>
-public sealed class SshTerminalSession : IDisposable
+public sealed class SshTerminalSession : ITerminalSession
 {
     private readonly ServerEntry _server;
     private readonly KeyEntry? _key;

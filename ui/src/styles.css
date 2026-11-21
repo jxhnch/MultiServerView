@@ -283,6 +283,12 @@ label {
 .tile.teamviewer {
   background: #0e8ee9;
 }
+.tile.telnet {
+  background: #b45309;
+}
+.tile.serial {
+  background: #4b5563;
+}
 .tile.sm {
   width: 22px;
   height: 22px;

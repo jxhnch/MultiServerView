@@ -7,7 +7,13 @@ public enum Protocol
     Vnc,
 
     /// <summary>Remote support through the TeamViewer client; Host = TeamViewer ID.</summary>
-    Teamviewer
+    Teamviewer,
+
+    /// <summary>Telnet (network devices, old servers). Not encrypted.</summary>
+    Telnet,
+
+    /// <summary>Serial console: Host = port name (COM3, /dev/ttyUSB0), Port = baud rate.</summary>
+    Serial
 }
 
 public enum AuthMethod
@@ -78,6 +84,8 @@ public sealed class ServerEntry : IVaultItem
         Protocol.Ssh => 22,
         Protocol.Rdp => 3389,
         Protocol.Vnc => 5900,
+        Protocol.Telnet => 23,
+        Protocol.Serial => 9600,
         _ => 0
     };
 }

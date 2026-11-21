@@ -508,6 +508,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return {};
     case 'vms.power':
       return onlyNative('Controlling VMs');
+    case 'serial.ports':
+      return ['COM3', '/dev/ttyUSB0'];
     case 'hosts.detectOs':
       return [];
     case 'ssh.ping':
@@ -985,6 +987,7 @@ export const api = {
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
   vmsStatus: () => call<Record<string, VmState>>('vms.status'),
   vmsPower: (hostId: string, action: VmAction) => call<{ ok: boolean }>('vms.power', { hostId, action }),
+  serialPorts: () => call<string[]>('serial.ports'),
   hostsDetectOs: (ids: string[]) => call<{ id: string; os: string; error: string }[]>('hosts.detectOs', { ids }),
   sshPing: (sessionId: string) => call<boolean>('ssh.ping', { sessionId }),
   mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),

@@ -185,6 +185,8 @@ public sealed class Bridge : IDisposable
                 return null;
             case "servers.touch":
                 return _vault.Touch(Str(p, "id"));
+            case "serial.ports":
+                return SerialTerminalSession.PortNames();
             case "hosts.detectOs":
             {
                 // Looks at the system of a host without opening a tab (for the logo). Several ids: one after the other.
@@ -297,6 +299,8 @@ public sealed class Bridge : IDisposable
             {
                 // Does the connection still answer? A tiny command on a second channel of the same connection.
                 if (!_ssh.TryGetValue(Str(p, "sessionId"), out var pingTarget)) return false;
+                // only SSH can be asked; Telnet and serial lines have no second channel: they count as alive while they are open
+                if (pingTarget.Session is not SshTerminalSession) return true;
                 var answer = await pingTarget.Session.RunCommandAsync("echo", TimeSpan.FromSeconds(4));
                 return answer != null;
             }
@@ -931,12 +935,19 @@ public sealed class Bridge : IDisposable
         CloseSsh(sessionId); // reconnect with the same id
 
         var server = _vault.FindResolved(serverId) ?? throw new KeyNotFoundException("Server not found.");
-        server = WithTypedCredentials(server, p, out var saveCredentials);
-        var key = server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null;
-        var hid = _history.Begin(server, "ssh");
+        Action? saveCredentials = null;
+        if (server.Protocol == Protocol.Ssh) server = WithTypedCredentials(server, p, out saveCredentials);
+        var key = server.Protocol == Protocol.Ssh && server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null;
+        var hid = _history.Begin(server, server.Protocol.ToString().ToLowerInvariant());
         _sshHistory[sessionId] = hid;
 
-        var session = new SshTerminalSession(server, key, CheckHost, Jumps);
+        // SSH, Telnet (network devices) and serial consoles all end up in the same terminal of the UI
+        ITerminalSession session = server.Protocol switch
+        {
+            Protocol.Telnet => new TelnetTerminalSession(server.Host, server.Port),
+            Protocol.Serial => new SerialTerminalSession(server.Host, server.Port),
+            _ => new SshTerminalSession(server, key, CheckHost, Jumps)
+        };
         var pump = new SshPump(session, chunk => _emit(new { @event = "ssh.data", sessionId, data = Convert.ToBase64String(chunk) }));
         session.Info += message => _emit(new { @event = "ssh.info", sessionId, message });
         session.Closed += reason =>
@@ -997,9 +1008,9 @@ public sealed class Bridge : IDisposable
         private bool _scheduled;
         private bool _disposed;
 
-        public SshTerminalSession Session { get; }
+        public ITerminalSession Session { get; }
 
-        public SshPump(SshTerminalSession session, Action<byte[]> send)
+        public SshPump(ITerminalSession session, Action<byte[]> send)
         {
             Session = session;
             _send = send;

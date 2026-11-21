@@ -107,7 +107,7 @@ export function HostsPage({
     else if (target) onQuick(target);
   }
 
-  const sub = (s: Server) => `${s.protocol}, ${s.username || s.host}`;
+  const sub = (s: Server) => (s.protocol === 'serial' ? `serial, ${s.host} ${s.port} baud` : `${s.protocol}, ${s.username || s.host}`);
 
   return (
     <div className="hosts-main">

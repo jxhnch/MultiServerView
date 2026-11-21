@@ -2,7 +2,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { allScreens, getScreen, sleep, type ScreenHandle } from './mcpScreens';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, getPlatform, isNative, onEvent, type VmAction, type VmState } from './bridge';
-import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
+import { emptyServer, isTerminalProtocol, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
 import { HostPanel } from './HostPanel';
@@ -1050,7 +1050,7 @@ export function App() {
             <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
               <SessionCloseContext.Provider value={() => closeTab(t.id)}>
               {t.kind === 'sftp' && <SftpView {...common} />}
-              {t.kind === 'session' && s.protocol === 'ssh' && (
+              {t.kind === 'session' && (s.protocol === 'ssh' || s.protocol === 'telnet' || s.protocol === 'serial') && (
                 <TerminalView {...common} onOpenSftp={() => void open(s, false, 'sftp')} onManageSnippets={() => goTo('snippets')} />
               )}
               {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
@@ -1088,7 +1088,7 @@ export function App() {
         />
       )}
 
-      {splitPicker && <SplitPicker servers={servers.filter((x) => x.protocol === 'ssh')} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
+      {splitPicker && <SplitPicker servers={servers.filter((x) => isTerminalProtocol(x.protocol))} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
 
       {paletteOpen && (
         <CommandPalette

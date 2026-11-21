@@ -1,4 +1,7 @@
-export type Protocol = 'ssh' | 'rdp' | 'vnc' | 'teamviewer';
+export type Protocol = 'ssh' | 'rdp' | 'vnc' | 'teamviewer' | 'telnet' | 'serial';
+
+/** Protocols that are a text terminal (the same terminal view). */
+export const isTerminalProtocol = (p: Protocol) => p === 'ssh' || p === 'telnet' || p === 'serial';
 export type AuthMethod = 'password' | 'key';
 
 export interface Server {
@@ -159,9 +162,9 @@ export interface SourceStatus {
 /** Lifecycle of a session (for the dot on the tab). */
 export type SessionStatus = 'connecting' | 'connected' | 'closed' | 'error';
 
-export const DEFAULT_PORT: Record<Protocol, number> = { ssh: 22, rdp: 3389, vnc: 5900, teamviewer: 0 };
+export const DEFAULT_PORT: Record<Protocol, number> = { ssh: 22, rdp: 3389, vnc: 5900, teamviewer: 0, telnet: 23, serial: 9600 };
 
-export const PROTOCOL_LABEL: Record<Protocol, string> = { ssh: 'SSH', rdp: 'RDP', vnc: 'VNC', teamviewer: 'TeamViewer' };
+export const PROTOCOL_LABEL: Record<Protocol, string> = { ssh: 'SSH', rdp: 'RDP', vnc: 'VNC', teamviewer: 'TeamViewer', telnet: 'Telnet', serial: 'Serial' };
 
 export function emptyServer(): Server {
   return {

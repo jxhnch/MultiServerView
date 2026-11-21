@@ -42,8 +42,8 @@ export function timeAgo(iso: string | null): string {
 
 /** Recognizes "[ssh://|rdp://|vnc://][user@]host[:port]" (also with a leading "ssh "). */
 export function parseTarget(input: string): Partial<Server> | null {
-  const text = input.trim().replace(/^ssh\s+/i, '');
-  const m = /^(?:(ssh|rdp|vnc):\/\/)?(?:([^@\s]+)@)?([A-Za-z0-9._-]+|\[[0-9a-fA-F:]+\])(?::(\d{1,5}))?$/.exec(text);
+  const text = input.trim().replace(/^(ssh|telnet)\s+/i, (_all, word: string) => (word.toLowerCase() === 'telnet' ? 'telnet://' : ''));
+  const m = /^(?:(ssh|rdp|vnc|telnet):\/\/)?(?:([^@\s]+)@)?([A-Za-z0-9._-]+|\[[0-9a-fA-F:]+\])(?::(\d{1,5}))?$/.exec(text);
   if (!m) return null;
   const protocol = (m[1]?.toLowerCase() as Server['protocol'] | undefined) ?? 'ssh';
   const host = m[3];

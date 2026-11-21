@@ -263,7 +263,11 @@ export function TerminalView({
     let cancelled = false;
 
     if (reconnectKey > 0) term.writeln('\x1b[2m────────── new connection ──────────\x1b[0m');
-    term.writeln(`\x1b[2mConnecting to ${server.username ? server.username + '@' : ''}${server.host}:${server.port} …\x1b[0m`);
+    term.writeln(
+      server.protocol === 'serial'
+        ? `\x1b[2mOpening ${server.host} at ${server.port} baud …\x1b[0m`
+        : `\x1b[2m${server.protocol === 'telnet' ? 'Telnet: connecting to ' : 'Connecting to '}${server.username && server.protocol === 'ssh' ? server.username + '@' : ''}${server.host}:${server.port} …\x1b[0m`,
+    );
     const cred = credRef.current;
     credRef.current = undefined;
 
@@ -410,7 +414,7 @@ export function TerminalView({
           <button className="ghost" title="Terminal does not react? Resets the keyboard input and checks the connection" onClick={() => void fixInput()} disabled={status !== 'connected'}>
             Fix input
           </button>
-          <SftpButton onClick={onOpenSftp} />
+          {server.protocol === 'ssh' && <SftpButton onClick={onOpenSftp} />}
         </>
       }
     >

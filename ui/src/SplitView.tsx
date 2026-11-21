@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TerminalView } from './TerminalView';
 import { IconBroadcast, IconClose, IconEdit, IconGrid, IconPlus, IconRefresh } from './Icons';
 import { HostTile } from './HostTile';
-import type { Server, SessionStatus } from './types';
+import { isTerminalProtocol, type Server, type SessionStatus } from './types';
 
 export interface SplitPane {
   id: string;
@@ -68,7 +68,7 @@ export function SplitView({
   }, [adding]);
 
   const cols = panes.length <= 1 ? 1 : panes.length <= 4 ? 2 : panes.length <= 9 ? 3 : 4;
-  const sshHosts = useMemo(() => servers.filter((s) => s.protocol === 'ssh').sort((a, b) => a.name.localeCompare(b.name)), [servers]);
+  const sshHosts = useMemo(() => servers.filter((s) => isTerminalProtocol(s.protocol)).sort((a, b) => a.name.localeCompare(b.name)), [servers]);
   const bump = (id: string) => onPanesChange(panes.map((p) => (p.id === id ? { ...p, reconnectKey: p.reconnectKey + 1 } : p)));
 
   return (

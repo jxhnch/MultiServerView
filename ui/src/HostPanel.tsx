@@ -1,11 +1,11 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api } from './bridge';
 import { IconClose, IconEye, IconCheck, IconFolder } from './Icons';
 import { HostTile } from './HostTile';
 import { DEFAULT_PORT, PROTOCOL_LABEL, type Identity, type KeyInfo, type Protocol, type Server } from './types';
 import { askConfirm } from './Confirm';
 
-const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'teamviewer'];
+const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'telnet', 'serial', 'teamviewer'];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -56,7 +56,11 @@ export function HostPanel({
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [serialPorts, setSerialPorts] = useState<string[]>([]);
   const isNew = !initial.id;
+  useEffect(() => {
+    if (s.protocol === 'serial') void api.serialPorts().then(setSerialPorts).catch(() => undefined);
+  }, [s.protocol]);
   // Focus the first missing field (e.g. the password after quick connect with "ssh root@host").
   const focusField: 'host' | 'user' | 'pw' = !initial.host ? 'host' : !initial.username ? 'user' : 'pw';
 
@@ -158,8 +162,16 @@ export function HostPanel({
               autoFocus={isNew && focusField === 'host'}
               value={s.host}
               onChange={(e) => set('host', e.target.value)}
-              placeholder={s.protocol === 'teamviewer' ? 'TeamViewer ID, e.g. 123 456 789' : '192.168.1.10 or server.example.com'}
+              list={s.protocol === 'serial' ? 'serial-ports' : undefined}
+              placeholder={
+                s.protocol === 'teamviewer' ? 'TeamViewer ID, e.g. 123 456 789' : s.protocol === 'serial' ? 'COM3 or /dev/ttyUSB0' : '192.168.1.10 or server.example.com'
+              }
             />
+            <datalist id="serial-ports">
+              {serialPorts.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
           </div>
         </div>
 
@@ -196,14 +208,15 @@ export function HostPanel({
         {s.protocol !== 'teamviewer' && (
         <div className="group-card">
           <div className="port-row">
-            {PROTOCOL_LABEL[s.protocol]} on
+            {s.protocol === 'serial' ? 'Speed' : PROTOCOL_LABEL[s.protocol] + ' on'}
             <input type="number" value={s.port} onChange={(e) => set('port', Number(e.target.value))} />
-            Port
+            {s.protocol === 'serial' ? 'baud (8 data bits, no parity, 1 stop bit)' : 'Port'}
           </div>
+          {s.protocol === 'telnet' && <p className="hint">Telnet is not encrypted: everything you type, including passwords, travels in clear text. Use it only in trusted networks.</p>}
         </div>
         )}
 
-        {s.protocol !== 'teamviewer' && (
+        {(s.protocol === 'ssh' || s.protocol === 'rdp' || s.protocol === 'vnc') && (
         <div className="group-card">
           <h3>Connection</h3>
           <Field label="Via jump host">
@@ -222,6 +235,7 @@ export function HostPanel({
         </div>
         )}
 
+        {s.protocol !== 'telnet' && s.protocol !== 'serial' && (
         <div className="group-card">
           <h3>Credentials</h3>
           {identities.length > 0 && (
@@ -294,6 +308,7 @@ export function HostPanel({
             </>
           )}
         </div>
+        )}
 
         <div className="group-card">
           <h3>Notes</h3>
