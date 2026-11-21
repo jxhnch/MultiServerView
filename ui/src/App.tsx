@@ -1,3 +1,4 @@
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import { allScreens, getScreen, sleep, type ScreenHandle } from './mcpScreens';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, getPlatform, isNative, onEvent } from './bridge';
@@ -31,7 +32,7 @@ import { SplitPicker } from './SplitPicker';
 import { HostsPage } from './HostsPage';
 import { getUiSettings, onUiSettings, setUiSettings } from './uiSettings';
 import { readTextAuto } from './files';
-import { IconClock, IconClose, IconCloud, IconCode, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconServer, IconSettings, IconShield, IconSparkle, IconSun, IconUpload } from './Icons';
+import { IconClock, IconClose, IconCloud, IconCode, IconDuplicate, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconRefresh, IconServer, IconSettings, IconShield, IconSparkle, IconSun, IconUpload } from './Icons';
 import { askConfirm, ConfirmHost } from './Confirm';
 
 const readLocal = (key: string, fallback: string) => {
@@ -338,11 +339,45 @@ export function App() {
   const duplicate = useCallback(
     (id: string) => {
       const t = tabs.find((x) => x.id === id);
-      const s = t && byId.get(t.serverId);
-      if (s && t.kind !== 'split') void open(s, true, t.kind);
+      if (!t) return;
+      if (t.kind === 'split') {
+        // clone the whole split view: same hosts, new sessions
+        const panes: SplitPane[] = (t.panes ?? []).map((p) => ({ id: crypto.randomUUID(), serverId: p.serverId, reconnectKey: 0 }));
+        const copy: Tab = { id: crypto.randomUUID(), serverId: t.serverId, kind: 'split', panes, reconnectKey: 0 };
+        setTabs((prev) => {
+          const i = prev.findIndex((x) => x.id === id);
+          return [...prev.slice(0, i + 1), copy, ...prev.slice(i + 1)];
+        });
+        setActive(copy.id);
+        return;
+      }
+      const s = byId.get(t.serverId);
+      if (s) void open(s, true, t.kind);
     },
     [tabs, byId, open],
   );
+
+  // Right-click menu of a tab
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const closeTabs = useCallback(
+    (keep: (t: Tab, index: number) => boolean, from: string) => {
+      const next = tabs.filter(keep);
+      setTabs(next);
+      setStatuses((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => next.some((t) => t.id === k))));
+      if (!next.some((t) => t.id === active)) setActive(next.some((t) => t.id === from) ? from : (next[next.length - 1]?.id ?? HOME));
+    },
+    [tabs, active],
+  );
+  const tabMenuItems = (id: string): MenuItem[] => {
+    const i = tabs.findIndex((t) => t.id === id);
+    return [
+      { label: 'Duplicate tab', icon: <IconDuplicate size={14} />, onClick: () => duplicate(id) },
+      { label: 'Reconnect', icon: <IconRefresh size={14} />, onClick: () => reconnect(id) },
+      { label: 'Close', icon: <IconClose size={14} />, onClick: () => closeTab(id), separator: true },
+      { label: 'Close other tabs', onClick: () => closeTabs((t) => t.id === id, id), disabled: tabs.length < 2 },
+      { label: 'Close tabs to the right', onClick: () => closeTabs((_t, idx) => idx <= i, id), disabled: i < 0 || i >= tabs.length - 1 },
+    ];
+  };
 
   const cycle = useCallback(
     (dir: 1 | -1) => {
@@ -746,6 +781,10 @@ export function App() {
                 title="Split view"
                 onClick={() => setActive(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setTabMenu({ x: e.clientX, y: e.clientY, id: t.id });
+                }}
               >
                 <span className="tile sm neutral">
                   <IconGrid size={13} />
@@ -776,6 +815,10 @@ export function App() {
               title={`${s.name} – ${s.host}`}
               onClick={() => setActive(t.id)}
               onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setTabMenu({ x: e.clientX, y: e.clientY, id: t.id });
+              }}
             >
               <HostTile server={s} size="sm" />
               <span className="tab-name">{s.name}</span>
@@ -799,6 +842,7 @@ export function App() {
             </button>
           );
         })}
+        {tabMenu && <ContextMenu x={tabMenu.x} y={tabMenu.y} items={tabMenuItems(tabMenu.id)} onClose={() => setTabMenu(null)} />}
         <button
           className="tab-add"
           title="New connection (Ctrl+K)"

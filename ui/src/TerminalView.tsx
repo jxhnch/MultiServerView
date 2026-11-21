@@ -57,6 +57,11 @@ export function TerminalView({
   const [prompt, setPrompt] = useState<'none' | 'missing' | 'failed'>('none');
   const reconnectRef = useRef(onReconnect);
   const [status, setStatusState] = useState<SessionStatus>('connecting');
+  // "The terminal does not react": typed keys, but nothing comes back (dead key stuck, focus lost, connection gone)
+  const [stuck, setStuck] = useState(false);
+  const lastDataRef = useRef(Date.now());
+  const keysSinceDataRef = useRef(0);
+  const tailRef = useRef('');
   const [bg, setBg] = useState(() => findTheme(getTermSettings().theme).bg);
   activeRef.current = active;
   reconnectRef.current = onReconnect;
@@ -135,10 +140,43 @@ export function TerminalView({
     };
     hostEl.addEventListener('contextmenu', onContext);
 
+    // Dead keys (^, ´, `) or an input method can leave the hidden input field in a half finished state, then no key
+    // arrives any more. If no key follows a dead key for a moment, the input field is reset.
+    let deadTimer: number | undefined;
+    const resetInput = () => {
+      const ta = term.textarea;
+      if (ta) {
+        ta.blur();
+        ta.value = '';
+      }
+      term.focus();
+    };
+    const onKeyCapture = (ev: KeyboardEvent) => {
+      window.clearTimeout(deadTimer);
+      if (ev.key === 'Dead') deadTimer = window.setTimeout(resetInput, 2500);
+    };
+    const onCompositionEnd = () => window.clearTimeout(deadTimer);
+    hostEl.addEventListener('keydown', onKeyCapture, true);
+    hostEl.addEventListener('compositionend', onCompositionEnd, true);
+    // a click anywhere in the terminal area (also the padding) and coming back to the window give the keyboard back to the terminal
+    const wrap = hostEl.parentElement;
+    const refocus = () => {
+      if (activeRef.current) term.focus();
+    };
+    wrap?.addEventListener('mousedown', refocus);
+    window.addEventListener('focus', refocus);
+
     term.onData((d) => {
       if (statusRef.current === 'connected') {
         void api.sshInput(tabId, toB64(d)).catch(() => undefined);
         inputRef.current?.(d);
+        keysSinceDataRef.current++;
+        if (
+          keysSinceDataRef.current >= 4 &&
+          Date.now() - lastDataRef.current > 6000 &&
+          !/pass(word|phrase|wort)|\bpin\b|\[sudo\]/i.test(tailRef.current)
+        )
+          setStuck(true);
       }
       else if (d === '\r' && (statusRef.current === 'closed' || statusRef.current === 'error')) reconnectRef.current();
     });
@@ -162,7 +200,13 @@ export function TerminalView({
     // Events from the host for this session
     const off = onEvent((e) => {
       if (!('sessionId' in e) || e.sessionId !== tabId) return;
-      if (e.event === 'ssh.data') term.write(fromB64(e.data));
+      if (e.event === 'ssh.data') {
+        lastDataRef.current = Date.now();
+        keysSinceDataRef.current = 0;
+        tailRef.current = (tailRef.current + atob(e.data)).slice(-80);
+        setStuck((v) => (v ? false : v));
+        term.write(fromB64(e.data));
+      }
       else if (e.event === 'ssh.info') term.writeln(`\x1b[2m${e.message}\x1b[0m`);
       else if (e.event === 'ssh.closed') {
         setStatus('closed');
@@ -199,6 +243,11 @@ export function TerminalView({
       ro.disconnect();
       cancelAnimationFrame(raf);
       hostEl.removeEventListener('contextmenu', onContext);
+      hostEl.removeEventListener('keydown', onKeyCapture, true);
+      hostEl.removeEventListener('compositionend', onCompositionEnd, true);
+      wrap?.removeEventListener('mousedown', refocus);
+      window.removeEventListener('focus', refocus);
+      window.clearTimeout(deadTimer);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -280,6 +329,42 @@ export function TerminalView({
     return () => cancelAnimationFrame(id);
   }, [active]);
 
+  /** Resets the keyboard input of the terminal and checks that the connection still answers. */
+  const fixInput = async () => {
+    const term = termRef.current;
+    if (!term) return;
+    const ta = term.textarea;
+    if (ta) {
+      ta.blur();
+      ta.value = '';
+    }
+    term.focus();
+    if (statusRef.current !== 'connected') return;
+    const alive = await api.sshPing(tabId).catch(() => false);
+    if (alive) {
+      setStuck(false);
+      keysSinceDataRef.current = 0;
+      term.writeln('\r\n\x1b[2m● Connection is alive, input was reset.\x1b[0m');
+    } else {
+      setStuck(false);
+      setStatus('error');
+      term.writeln('\r\n\x1b[31m✖ The connection does not answer any more. Press Enter to reconnect.\x1b[0m');
+    }
+  };
+
+  const stuckBanner = stuck && status === 'connected' && (
+    <div className="term-stuck" role="alert">
+      <span>The terminal does not react.</span>
+      <button className="primary" onClick={() => void fixInput()}>
+        Check and fix
+      </button>
+      <button onClick={onReconnect}>Reconnect</button>
+      <button className="ghost" onClick={() => setStuck(false)} aria-label="Hide">
+        ×
+      </button>
+    </div>
+  );
+
   const passwordModal = prompt !== 'none' && (
     <PasswordPrompt
       server={server}
@@ -298,6 +383,7 @@ export function TerminalView({
       <div className="bare-body" style={{ background: bg }}>
         <div className="term-wrap" style={{ background: bg }}>
           <div className="term-host" ref={hostRef} />
+          {stuckBanner}
         </div>
         {passwordModal}
       </div>
@@ -321,12 +407,16 @@ export function TerminalView({
             onManage={onManageSnippets}
           />
           <AppearanceMenu />
+          <button className="ghost" title="Terminal does not react? Resets the keyboard input and checks the connection" onClick={() => void fixInput()} disabled={status !== 'connected'}>
+            Fix input
+          </button>
           <SftpButton onClick={onOpenSftp} />
         </>
       }
     >
       <div className="term-wrap" style={{ background: bg }}>
         <div className="term-host" ref={hostRef} />
+        {stuckBanner}
       </div>
       {passwordModal}
     </SessionFrame>

@@ -266,6 +266,13 @@ public sealed class Bridge : IDisposable
             case "ssh.close":
                 CloseSsh(Str(p, "sessionId"));
                 return null;
+            case "ssh.ping":
+            {
+                // Does the connection still answer? A tiny command on a second channel of the same connection.
+                if (!_ssh.TryGetValue(Str(p, "sessionId"), out var pingTarget)) return false;
+                var answer = await pingTarget.Session.RunCommandAsync("echo", TimeSpan.FromSeconds(4));
+                return answer != null;
+            }
 
             // ---------------------------------------------------------- VNC
             case "vnc.open":
