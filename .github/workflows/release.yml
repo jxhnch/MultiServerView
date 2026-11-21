@@ -151,6 +151,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -la dist
           gh release create '${{ github.ref_name }}' dist/* --title '${{ github.ref_name }}' --generate-notes \
             --notes 'Windows: the installer needs no admin rights, the ZIP is portable. SmartScreen may warn on first start because the files are not code-signed yet (More info, then Run anyway). Linux: .deb (easiest, installs the needed libraries), .AppImage or .tar.gz, see the README.'

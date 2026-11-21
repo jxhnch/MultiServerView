@@ -341,9 +341,12 @@ public sealed class Bridge : IDisposable
             case "update.install":
             {
                 var info = await UpdateChecker.CheckAsync(_http, AppVersion);
-                if (info?.SetupUrl == null || !UpdateChecker.IsGitHubUrl(info.SetupUrl)) throw new InvalidOperationException("No installer found for the new version. Download it from the releases page.");
+                if (info?.SetupUrl == null || !UpdateChecker.IsGitHubUrl(info.SetupUrl, UpdateChecker.Repository)) throw new InvalidOperationException("No installer found for the new version. Download it from the releases page.");
                 if (!_platform.CanSelfUpdate) throw new InvalidOperationException("This copy cannot update itself. Download the new version from the releases page.");
-                await _platform.InstallUpdateAsync(info.SetupUrl, info.Version);
+                string? expectedSha256 = null;
+                if (info.ChecksumsUrl != null && info.SetupName != null)
+                    expectedSha256 = await UpdateChecker.FetchExpectedSha256Async(_http, info.ChecksumsUrl, info.SetupName);
+                await _platform.InstallUpdateAsync(info.SetupUrl, info.Version, expectedSha256);
                 return null;
             }
             case "teamviewer.open":

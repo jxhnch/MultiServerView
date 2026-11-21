@@ -53,4 +53,20 @@ public class UpdateCheckerTests
     [InlineData("1.2.0..evil")]
     public void SanitizeVersionForFileName_rejects_traversal(string v) =>
         Assert.Throws<InvalidOperationException>(() => UpdateChecker.SanitizeVersionForFileName(v));
+
+    [Fact]
+    public void Parses_checksums_asset_and_extracts_sha256_entries()
+    {
+        var withSums = Release.Replace("] }", ", { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/jxhnch/MultiServerView/releases/download/v1.2.0/SHA256SUMS.txt\" } ] }");
+        var info = UpdateChecker.Parse(withSums, "1.1.0")!;
+        Assert.Equal("MultiServerView-Setup-1.2.0.exe", info.SetupName);
+        Assert.EndsWith("SHA256SUMS.txt", info.ChecksumsUrl);
+
+        var hash = new string('a', 64);
+        var manifest = $"{hash.ToUpperInvariant()}  MultiServerView-Setup-1.2.0.exe\n{new string('b', 64)} *other.zip\n";
+        Assert.Equal(hash, UpdateChecker.ParseSha256Sum(manifest, "MultiServerView-Setup-1.2.0.exe"));
+        Assert.Equal(new string('b', 64), UpdateChecker.ParseSha256Sum(manifest, "other.zip"));
+        Assert.Null(UpdateChecker.ParseSha256Sum(manifest, "missing.exe"));
+        Assert.Null(UpdateChecker.ParseSha256Sum("not-a-hash  MultiServerView-Setup-1.2.0.exe\n", "MultiServerView-Setup-1.2.0.exe"));
+    }
 }
