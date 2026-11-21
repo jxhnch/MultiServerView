@@ -36,6 +36,7 @@ public sealed class Bridge : IDisposable
     private readonly ConcurrentDictionary<string, SftpSession> _sftp = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _transfers = new();
     private readonly ConcurrentDictionary<string, string> _historyIds = new();
+    private readonly ConcurrentDictionary<string, string> _sshHistory = new(); // SSH session id -> history entry
     private readonly PortForwardManager _forwards = new();
     private readonly WebSocketTcpProxy _vncProxy = new();
     private readonly McpService _mcp;
@@ -817,6 +818,7 @@ public sealed class Bridge : IDisposable
         server = WithTypedCredentials(server, p, out var saveCredentials);
         var key = server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null;
         var hid = _history.Begin(server, "ssh");
+        _sshHistory[sessionId] = hid;
 
         var session = new SshTerminalSession(server, key, CheckHost, Jumps);
         var pump = new SshPump(session, chunk => _emit(new { @event = "ssh.data", sessionId, data = Convert.ToBase64String(chunk) }));
@@ -826,6 +828,7 @@ public sealed class Bridge : IDisposable
             pump.Flush();
             if (_ssh.TryRemove(sessionId, out var gone) && ReferenceEquals(gone, pump)) pump.Dispose();
             _history.End(hid, reason == null, reason ?? "");
+            _sshHistory.TryRemove(new KeyValuePair<string, string>(sessionId, hid));
             _emit(new { @event = "ssh.closed", sessionId, reason });
         };
 
@@ -841,6 +844,7 @@ public sealed class Bridge : IDisposable
             if (_ssh.TryGetValue(sessionId, out var cur) && ReferenceEquals(cur, pump)) _ssh.TryRemove(sessionId, out _);
             pump.Dispose();
             _history.End(hid, false, Friendly(ex));
+            _sshHistory.TryRemove(new KeyValuePair<string, string>(sessionId, hid));
             throw;
         }
 
@@ -859,6 +863,8 @@ public sealed class Bridge : IDisposable
     private void CloseSsh(string sessionId)
     {
         if (_ssh.TryRemove(sessionId, out var pump)) pump.Dispose();
+        // Closing the tab does not raise the "closed" event of the session: end the log entry here, otherwise it stays "running" forever.
+        if (_sshHistory.TryRemove(sessionId, out var hid)) _history.End(hid, true, "Closed.");
     }
 
     private void CloseAllSessions()

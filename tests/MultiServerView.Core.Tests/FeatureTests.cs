@@ -132,6 +132,22 @@ public class HistoryTests : IDisposable
         Assert.Equal(2, new HistoryStore(_path).List().Count);
         Assert.DoesNotContain("Password", File.ReadAllText(_path));
     }
+
+    [Fact]
+    public void Entries_that_were_still_running_when_the_app_closed_do_not_stay_running_forever()
+    {
+        var h = new HistoryStore(_path);
+        var s = new ServerEntry { Id = "1", Name = "one", Host = "h1", Port = 22 };
+        var open = h.Begin(s, "ssh");
+        Assert.Equal("running", h.List()[0].Result); // a session that is open right now is really running
+
+        // the app is closed or killed, the next start opens the store again
+        var next = new HistoryStore(_path).List();
+        Assert.Equal(open, next[0].Id);
+        Assert.Equal("ok", next[0].Result);
+        Assert.NotNull(next[0].EndedAt);
+        Assert.Contains("app was closed", next[0].Message);
+    }
 }
 
 public class OsDetectorTests
