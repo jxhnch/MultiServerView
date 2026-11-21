@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds an AppImage and a .deb from a published linux-x64 folder.
+# Builds .deb, .rpm, AppImage and .tar.gz packages from a published linux-x64 folder.
 # usage: build-packages.sh <publish-dir> <version> <out-dir>
 set -euo pipefail
 PUB=$(realpath "$1"); VER="$2"; OUT=$(realpath -m "$3")
@@ -30,6 +30,56 @@ Description: SSH, SFTP, RDP and VNC in one window
 EOF
 find "$D" -type d -exec chmod 755 {} +
 dpkg-deb --root-owner-group --build "$D" "$OUT/MultiServerView-$VER-linux-x64.deb"
+
+# ---------------- .rpm (Fedora / RHEL-based: dnf installs the needed libraries by itself)
+R="$WORK/rpm"
+RPM_VER="${VER//-/_}"
+mkdir -p "$R/BUILD" "$R/RPMS" "$R/SOURCES" "$R/SPECS" "$R/SRPMS" "$R/TMP"
+cat > "$R/SPECS/multiserverview.spec" <<EOF
+%global debug_package %{nil}
+%global __strip /bin/true
+%define _build_id_links none
+
+Name:           multiserverview
+Version:        $RPM_VER
+Release:        1
+Summary:        SSH, SFTP, RDP and VNC in one window
+License:        LicenseRef-MultiServerView
+URL:            https://github.com/jxhnch/MultiServerView
+BuildArch:      x86_64
+AutoReqProv:    no
+Requires:       webkit2gtk4.1, gtk3, libnotify, xdg-utils
+Recommends:     freerdp
+
+%description
+Server manager with an end-to-end encrypted vault.
+
+%install
+mkdir -p %{buildroot}/opt/multiserverview
+mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/usr/share/applications
+mkdir -p %{buildroot}/usr/share/icons/hicolor/512x512/apps
+cp -r %{pub_dir}/. %{buildroot}/opt/multiserverview/
+chmod 755 %{buildroot}/opt/multiserverview/multiserverview
+ln -s /opt/multiserverview/multiserverview %{buildroot}/usr/bin/multiserverview
+cp %{here_dir}/multiserverview.desktop %{buildroot}/usr/share/applications/multiserverview.desktop
+cp %{icon_file} %{buildroot}/usr/share/icons/hicolor/512x512/apps/multiserverview.png
+
+%files
+%defattr(-,root,root,0755)
+/opt/multiserverview
+/usr/bin/multiserverview
+/usr/share/applications/multiserverview.desktop
+/usr/share/icons/hicolor/512x512/apps/multiserverview.png
+EOF
+rpmbuild -bb --target x86_64 \
+  --define "_topdir $R" \
+  --define "_tmppath $R/TMP" \
+  --define "pub_dir $PUB" \
+  --define "here_dir $HERE" \
+  --define "icon_file $ICON" \
+  "$R/SPECS/multiserverview.spec"
+cp "$R/RPMS/x86_64/multiserverview-$RPM_VER-1.x86_64.rpm" "$OUT/MultiServerView-$VER-linux-x64.rpm"
 
 # ---------------- AppImage (the system still provides WebKitGTK, see the release notes)
 A="$WORK/MultiServerView.AppDir"

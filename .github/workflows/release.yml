@@ -121,10 +121,10 @@ jobs:
       - name: Self-test (no window)
         run: ./out/msv/multiserverview --selftest "$RUNNER_TEMP/selftest"
 
-      - name: Tools for the AppImage
-        run: sudo apt-get install -y desktop-file-utils
+      - name: Tools for Linux packages
+        run: sudo apt-get install -y desktop-file-utils rpm
 
-      - name: Build AppImage, .deb and .tar.gz
+      - name: Build .deb, .rpm, AppImage and .tar.gz
         run: bash packaging/linux/build-packages.sh out/msv "${{ steps.ver.outputs.v }}" dist
 
       - uses: actions/upload-artifact@v4
@@ -154,4 +154,4 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -la dist
           gh release create '${{ github.ref_name }}' dist/* --title '${{ github.ref_name }}' --generate-notes \
-            --notes 'Windows: the installer needs no admin rights, the ZIP is portable. SmartScreen may warn on first start because the files are not code-signed yet (More info, then Run anyway). Linux: .deb (easiest, installs the needed libraries), .AppImage or .tar.gz, see the README.'
+            --notes 'Windows: the installer needs no admin rights, the ZIP is portable. SmartScreen may warn on first start because the files are not code-signed yet (More info, then Run anyway). Linux: .deb (Debian/Ubuntu), .rpm (Fedora/RHEL), .AppImage or .tar.gz (plus PKGBUILD for Arch), see the README.'
