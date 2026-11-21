@@ -13,7 +13,10 @@ public enum Protocol
     Telnet,
 
     /// <summary>Serial console: Host = port name (COM3, /dev/ttyUSB0), Port = baud rate.</summary>
-    Serial
+    Serial,
+
+    /// <summary>PowerShell on a Windows server through WinRM (no SSH needed); Port 5986 = HTTPS, 5985 = HTTP.</summary>
+    Winrm
 }
 
 public enum AuthMethod
@@ -86,6 +89,7 @@ public sealed class ServerEntry : IVaultItem
         Protocol.Vnc => 5900,
         Protocol.Telnet => 23,
         Protocol.Serial => 9600,
+        Protocol.Winrm => 5986,
         _ => 0
     };
 }

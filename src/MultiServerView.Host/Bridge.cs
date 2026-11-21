@@ -946,6 +946,9 @@ public sealed class Bridge : IDisposable
         {
             Protocol.Telnet => new TelnetTerminalSession(server.Host, server.Port),
             Protocol.Serial => new SerialTerminalSession(server.Host, server.Port),
+            Protocol.Winrm => server.Password.Length == 0 || server.Username.Length == 0
+                ? throw new InvalidOperationException("WinRM needs a user name and a saved password for this host (edit the host).")
+                : new MultiServerView.Core.Windows.WinRmTerminalSession(server.Host, server.Port, server.Username, server.Password),
             _ => new SshTerminalSession(server, key, CheckHost, Jumps)
         };
         var pump = new SshPump(session, chunk => _emit(new { @event = "ssh.data", sessionId, data = Convert.ToBase64String(chunk) }));

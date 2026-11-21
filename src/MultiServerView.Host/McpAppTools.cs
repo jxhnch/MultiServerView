@@ -114,7 +114,7 @@ internal sealed class McpAppTools : IMcpExtraTools
         {
             ["name"] = P("string", "Display name."),
             ["host"] = P("string", "Address (IP or DNS name). For TeamViewer: the TeamViewer ID. For serial: the port (COM3, /dev/ttyUSB0)."),
-            ["protocol"] = P("string", "ssh, rdp, vnc, telnet, serial or teamviewer."),
+            ["protocol"] = P("string", "ssh, rdp, vnc, telnet, serial, winrm (PowerShell on Windows without SSH, port 5986) or teamviewer."),
             ["port"] = P("integer", "Port; the default of the protocol if omitted. For serial: the baud rate (default 9600)."),
             ["username"] = P("string", "User name (for Windows domains: DOMAIN\\user)."),
             ["password"] = P("string", "Password (stored encrypted in the vault)."),
@@ -408,7 +408,7 @@ internal sealed class McpAppTools : IMcpExtraTools
         if (a.ContainsKey("name")) s.Name = Req(a, "name");
         if (a.ContainsKey("host")) s.Host = Req(a, "host");
         if (a.ContainsKey("protocol"))
-            s.Protocol = Enum.TryParse<Protocol>(Opt(a, "protocol"), true, out var proto) ? proto : throw new ArgumentException("protocol must be ssh, rdp, vnc, telnet, serial or teamviewer.");
+            s.Protocol = Enum.TryParse<Protocol>(Opt(a, "protocol"), true, out var proto) ? proto : throw new ArgumentException("protocol must be ssh, rdp, vnc, telnet, serial, winrm or teamviewer.");
         if (a.ContainsKey("port")) s.Port = IntOr(a, "port", 0);
         else if (creating) s.Port = ServerEntry.DefaultPort(s.Protocol);
         if (a.ContainsKey("username")) s.Username = Opt(a, "username");
@@ -544,7 +544,7 @@ internal sealed class TerminalHub
 
     public async Task<object?> OpenAsync(ServerEntry server, int cols, int rows, CancellationToken ct)
     {
-        if (server.Protocol is not (Protocol.Ssh or Protocol.Telnet or Protocol.Serial)) throw new InvalidOperationException($"\"{server.Name}\" is a {server.Protocol} host. Terminals work for SSH, Telnet and serial hosts.");
+        if (server.Protocol is not (Protocol.Ssh or Protocol.Telnet or Protocol.Serial or Protocol.Winrm)) throw new InvalidOperationException($"\"{server.Name}\" is a {server.Protocol} host. Terminals work for SSH, Telnet, serial and WinRM hosts.");
         var id = "mcp-term-" + Guid.NewGuid().ToString("N")[..8];
         var term = new Term { Host = server.Name };
         lock (_terms) _terms[id] = term;

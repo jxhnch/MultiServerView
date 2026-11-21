@@ -220,7 +220,18 @@ public sealed class McpService : IMcpBackend, IDisposable
     public async Task<McpExecResult> RunCommandAsync(string host, string command, int timeoutSeconds, CancellationToken ct)
     {
         if (IsReadOnly) throw new InvalidOperationException("The MCP server is in read-only mode.");
-        var (server, key) = Resolve(host);
+        var (server, key) = Resolve(host, allowWinrm: true);
+        if (server.Protocol == Protocol.Winrm)
+        {
+            // Windows server without SSH: the command is PowerShell
+            return await AuditAsync(server, $"run_command (WinRM): {Snip(command, 80)}", async () =>
+            {
+                if (server.Username.Length == 0 || server.Password.Length == 0) throw new InvalidOperationException("This WinRM host needs a user name and a saved password.");
+                using var winrm = new MultiServerView.Core.Windows.WinRmClient(server.Host, server.Port, server.Username, server.Password);
+                var res = await winrm.RunPowerShellAsync(command, TimeSpan.FromSeconds(timeoutSeconds), ct);
+                return new McpExecResult(res.StdOut, res.StdErr, res.ExitCode, res.TimedOut);
+            });
+        }
         return await AuditAsync(server, $"run_command: {Snip(command, 80)}", () => _sshPool.ExecuteAsync(
             server.Id,
             token => SshExecSession.ConnectAsync(server, key, _check, _jumps, token),
@@ -325,7 +336,7 @@ public sealed class McpService : IMcpBackend, IDisposable
 
     private VaultStore Unlocked() => _vault.IsUnlocked ? _vault : throw new InvalidOperationException("The vault is locked. Unlock MultiServerView first.");
 
-    private (ServerEntry Server, KeyEntry? Key) Resolve(string reference)
+    private (ServerEntry Server, KeyEntry? Key) Resolve(string reference, bool allowWinrm = false)
     {
         var allowed = AllowedSnapshot();
         var all = Unlocked().List().Where(s => AppSettings.IsWorkspaceAllowed(s.Workspace, allowed)).ToList();
@@ -334,7 +345,8 @@ public sealed class McpService : IMcpBackend, IDisposable
         if (matches.Count == 0) throw new KeyNotFoundException($"No host named \"{reference}\". Use list_hosts to see the available hosts.");
         if (matches.Count > 1) throw new InvalidOperationException($"\"{reference}\" matches {matches.Count} hosts. Use the id from list_hosts.");
         var server = _vault.FindResolved(matches[0].Id) ?? throw new KeyNotFoundException("Host not found.");
-        if (server.Protocol != Protocol.Ssh) throw new InvalidOperationException($"\"{server.Name}\" is a {server.Protocol} host. Only SSH hosts are supported.");
+        if (server.Protocol != Protocol.Ssh && !(allowWinrm && server.Protocol == Protocol.Winrm))
+            throw new InvalidOperationException($"\"{server.Name}\" is a {server.Protocol} host. Only SSH hosts are supported" + (allowWinrm ? " (and WinRM for commands)." : "."));
         return (server, server.Auth == AuthMethod.Key ? _vault.FindKey(server.KeyId) : null);
     }
 }

@@ -286,6 +286,9 @@ label {
 .tile.telnet {
   background: #b45309;
 }
+.tile.winrm {
+  background: #1e4f8f;
+}
 .tile.serial {
   background: #4b5563;
 }

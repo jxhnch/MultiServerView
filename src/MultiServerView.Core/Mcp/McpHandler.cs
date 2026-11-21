@@ -270,7 +270,7 @@ public sealed class McpHandler(IMcpBackend backend, IMcpExtraTools? extra = null
             Tool("list_hosts", "List the servers saved in MultiServerView (no passwords).",
                 Ann(readOnly: true, destructive: false, idempotent: true, openWorld: false),
                 new JsonObject { ["query"] = Prop("string", "Optional text to filter by name, address, workspace, OS or tag.") }),
-            Tool("run_command", "Run a shell command on an SSH host and return stdout, stderr and the exit code.",
+            Tool("run_command", "Run a shell command on an SSH host (or a PowerShell command on a WinRM host) and return stdout, stderr and the exit code.",
                 Ann(readOnly: false, destructive: true, idempotent: false, openWorld: true),
                 new JsonObject { ["host"] = host(), ["command"] = Prop("string", "The command line."), ["timeout_seconds"] = Prop("integer", "Default 60, maximum 900.") }, "host", "command"),
             Tool("read_file", "Read a UTF-8 text file (or a line range of a large file) from an SSH host over SFTP.",

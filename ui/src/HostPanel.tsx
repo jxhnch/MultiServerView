@@ -5,7 +5,7 @@ import { HostTile } from './HostTile';
 import { DEFAULT_PORT, PROTOCOL_LABEL, type Identity, type KeyInfo, type Protocol, type Server } from './types';
 import { askConfirm } from './Confirm';
 
-const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'telnet', 'serial', 'teamviewer'];
+const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'winrm', 'telnet', 'serial', 'teamviewer'];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -212,6 +212,11 @@ export function HostPanel({
             <input type="number" value={s.port} onChange={(e) => set('port', Number(e.target.value))} />
             {s.protocol === 'serial' ? 'baud (8 data bits, no parity, 1 stop bit)' : 'Port'}
           </div>
+          {s.protocol === 'winrm' && (
+            <p className="hint">
+              PowerShell on a Windows server without SSH. Port 5986 = HTTPS (recommended), 5985 = HTTP (needs basic authentication on the server). On the server, as administrator: <code>winrm quickconfig</code>. Needs a user name and a saved password. Experimental: not yet tested against a real Windows server.
+            </p>
+          )}
           {s.protocol === 'telnet' && <p className="hint">Telnet is not encrypted: everything you type, including passwords, travels in clear text. Use it only in trusted networks.</p>}
         </div>
         )}

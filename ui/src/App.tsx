@@ -1050,7 +1050,7 @@ export function App() {
             <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
               <SessionCloseContext.Provider value={() => closeTab(t.id)}>
               {t.kind === 'sftp' && <SftpView {...common} />}
-              {t.kind === 'session' && (s.protocol === 'ssh' || s.protocol === 'telnet' || s.protocol === 'serial') && (
+              {t.kind === 'session' && isTerminalProtocol(s.protocol) && (
                 <TerminalView {...common} onOpenSftp={() => void open(s, false, 'sftp')} onManageSnippets={() => goTo('snippets')} />
               )}
               {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
