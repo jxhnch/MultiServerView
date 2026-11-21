@@ -20,7 +20,11 @@ public static class UpdateChecker
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("MultiServerView", currentVersion));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         using var response = await http.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode) return null; // no release yet, rate limit, offline proxy ...
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null; // no release published yet
+        if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
+            throw new InvalidOperationException("GitHub rate limit reached while checking for updates. Please try again later.");
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Could not check for updates (HTTP {(int)response.StatusCode}).");
         return Parse(await response.Content.ReadAsStringAsync(ct), currentVersion, repository);
     }
 
