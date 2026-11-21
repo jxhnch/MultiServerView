@@ -190,11 +190,18 @@ SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a f
 
 ## Linux
 
-Download from the [Releases](https://github.com/jxhnch/MultiServerView/releases) page:
+Download from the [Releases](https://github.com/jxhnch/MultiServerView/releases) page (`linux-x64`):
 
-- **`.deb`** (Ubuntu/Debian, easiest): `sudo apt install ./MultiServerView-<version>-linux-x64.deb` - installs the needed libraries too.
-- **`.AppImage`**: `chmod +x MultiServerView-*.AppImage && ./MultiServerView-*.AppImage`. Needs `libwebkit2gtk-4.1-0 libgtk-3-0 libnotify4` from your distribution.
-- **`.tar.gz`**: unpack and run `multiserverview`.
+- **Debian / Ubuntu (`.deb`)**: `sudo apt install ./MultiServerView-<version>-linux-x64.deb` - installs the needed libraries automatically.
+- **Fedora / RHEL-based (`.rpm`)**: `sudo dnf install ./MultiServerView-<version>-linux-x64.rpm` - installs the needed libraries automatically.
+- **Arch-based (Arch, Manjaro, EndeavourOS, CachyOS)**: install via the provided [`packaging/linux/PKGBUILD`](packaging/linux/PKGBUILD):
+  ```bash
+  cd packaging/linux && makepkg -si
+  ```
+- **Generic (`.AppImage` / `.tar.gz`)**: `chmod +x MultiServerView-*.AppImage && ./MultiServerView-*.AppImage`, or unpack the `.tar.gz` and run `multiserverview`. Requires WebKitGTK 4.1, GTK 3, libnotify and xdg-utils from your distribution:
+  - Debian / Ubuntu: `libwebkit2gtk-4.1-0 libgtk-3-0 libnotify4 xdg-utils`
+  - Fedora / RHEL: `webkit2gtk4.1 gtk3 libnotify xdg-utils`
+  - Arch: `webkit2gtk-4.1 gtk3 libnotify xdg-utils` (and `fuse2` for AppImages, or run with `--appimage-extract-and-run`)
 
 Same vault and UI as on Windows, RDP is drawn inside the app. Differences: system title bar, secrets protected by a key file (mode 600) instead of DPAPI, no in-app self-update (download the new version from the releases page). `multiserverview --selftest <folder>` checks vault, sources, MCP and (with `MSV_SMOKE_SSH=host:port:user:password`) SSH/SFTP without a window.
 
@@ -204,7 +211,6 @@ Same vault and UI as on Windows, RDP is drawn inside the app. Differences: syste
 - Convert PuTTY keys (`.ppk`) to OpenSSH format in PuTTYgen first.
 - Import of saved passwords: mRemoteNG (decrypted with its master password, default or custom) and CSV; keys via `IdentityFile` of an OpenSSH config. PuTTY sessions and Proxmox/VMware have no readable passwords, and PuTTY `.ppk` keys must be converted to OpenSSH format first. There is no Termius import.
 - No Telnet/Serial/Mosh, no AI autocomplete, no teams. See the [comparison with Termius](docs/comparison-with-termius.md).
-- Windows only.
 
 ## License
 

@@ -18,11 +18,11 @@ context menu, settings page (including master password change, auto-lock, backup
 | Jump hosts | chain inherited per group | chain per host (multi-hop) yes, per group no |
 | Terminal | AI autocomplete | missing |
 | Split view | up to 16 panes, layouts by drag | grid with several panes, broadcast yes; no free layouts |
-| SFTP | change permissions, two servers side by side | missing |
+| SFTP | change permissions, two servers side by side | change permissions yes; two servers side by side missing |
 | Snippets | packages (groups) | single snippets with variables |
 | Keys | SSH certificates, FIDO2 keys, agent forwarding | import and generation of keys only |
 | Import | known_hosts, whole ~/.ssh folder including keys | ssh_config, PuTTY, CSV, mRemoteNG, Proxmox, VMware (without keys and passwords) |
 | Logs | record terminal output per host, sync logs | connection history only |
 | Teams | shared vaults with permissions, SSO, collaboration | personal vault only |
-| Platforms | Windows, macOS, Linux, iOS, Android, iPadOS | Windows only |
+| Platforms | Windows, macOS, Linux, iOS, Android, iPadOS | Windows and Linux |
 | Environment variables per host | yes (Pro) | missing |
