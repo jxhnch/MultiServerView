@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { IconEdit, IconFolder, IconGrid, IconPlus, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay } from './Icons';
-import { api } from './bridge';
+import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay } from './Icons';
+import { api, type VmAction } from './bridge';
 import { HostTile } from './HostTile';
-import { ContextMenu } from './ContextMenu';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import { PromptDialog } from './Prompt';
 import { filterServers, parseTarget } from './search';
 import type { Server } from './types';
@@ -30,8 +30,13 @@ export function HostsPage({
   onRenameWorkspace,
   onDissolveWorkspace,
   onMove,
+  vmStates,
+  onVmPower,
 }: {
   servers: Server[];
+  /** Power state of VMs imported from Proxmox or VMware (host id -> state). */
+  vmStates: Record<string, string>;
+  onVmPower: (s: Server, action: VmAction) => void;
   query: string;
   setQuery: (q: string) => void;
   selectedId?: string;
@@ -56,6 +61,7 @@ export function HostsPage({
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
+  const [powerMenu, setPowerMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const [wsMenu, setWsMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | null>(null);
   const [dropWs, setDropWs] = useState<string | null>(null);
@@ -217,7 +223,7 @@ export function HostsPage({
                     onDoubleClick={(e) => onConnect(s, e.shiftKey)}
                     onKeyDown={(e) => e.key === 'Enter' && onConnect(s, e.shiftKey)}
                   >
-                    <HostTile server={s} />
+                    <HostTile server={s} vmState={vmStates[s.id]} />
                     <span className="hcard-text">
                       <span className="hcard-name">{s.name}</span>
                       <span className="hcard-sub">{sub(s)}</span>
@@ -228,6 +234,22 @@ export function HostsPage({
                       </span>
                     )}
                     {openServerIds.has(s.id) && <span className="status-dot connected live-dot" title="Session open" />}
+                    {vmStates[s.id] && vmStates[s.id] !== 'unknown' && (
+                      <button
+                        type="button"
+                        className="edit-btn power-btn"
+                        title={`Power: ${vmStates[s.id]}`}
+                        aria-label={`Power of ${s.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setPowerMenu({ x: r.left, y: r.bottom + 4, server: s });
+                        }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                      >
+                        <IconPower size={15} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="edit-btn"
@@ -298,6 +320,26 @@ export function HostsPage({
             setWsDialog(null);
             onMove([server], target);
           }}
+        />
+      )}
+
+      {powerMenu && (
+        <ContextMenu
+          x={powerMenu.x}
+          y={powerMenu.y}
+          onClose={() => setPowerMenu(null)}
+          items={(() => {
+            const st = vmStates[powerMenu.server.id];
+            const act = (label: string, action: VmAction, extra: Partial<MenuItem> = {}): MenuItem => ({ label, onClick: () => onVmPower(powerMenu.server, action), ...extra });
+            return st === 'running'
+              ? [
+                  act('Shut down (graceful)', 'shutdown'),
+                  act('Restart', 'reboot'),
+                  act('Suspend', 'suspend'),
+                  act('Force stop', 'stop', { danger: true, separator: true }),
+                ]
+              : [act('Start', 'start')];
+          })()}
         />
       )}
 

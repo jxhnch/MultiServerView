@@ -1,7 +1,7 @@
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { allScreens, getScreen, sleep, type ScreenHandle } from './mcpScreens';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, getPlatform, isNative, onEvent } from './bridge';
+import { api, getPlatform, isNative, onEvent, type VmAction, type VmState } from './bridge';
 import { emptyServer, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
@@ -355,6 +355,37 @@ export function App() {
       if (s) void open(s, true, t.kind);
     },
     [tabs, byId, open],
+  );
+
+  // Power state of imported VMs (Proxmox, VMware): looked at while the host list is visible
+  const [vmStates, setVmStates] = useState<Record<string, VmState>>({});
+  const hasVms = useMemo(() => servers.some((s) => s.proxmoxRef || s.vmwareRef), [servers]);
+  const loadVmStates = useCallback(() => {
+    if (!isNative) return Promise.resolve();
+    return api.vmsStatus().then(setVmStates).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (!hasVms || active !== HOME || section !== 'hosts') return;
+    void loadVmStates();
+    const id = window.setInterval(() => void loadVmStates(), 15000);
+    return () => window.clearInterval(id);
+  }, [hasVms, active, section, loadVmStates]);
+  const vmPower = useCallback(
+    async (s: Server, action: VmAction) => {
+      const labels: Record<VmAction, string> = { start: 'Starting', shutdown: 'Shutting down', reboot: 'Restarting', suspend: 'Suspending', stop: 'Stopping' };
+      try {
+        await api.vmsPower(s.id, action);
+        toast(`${labels[action]} ${s.name}…`);
+        // look again a few times: the state changes a moment later
+        for (const wait of [1500, 3000, 5000, 8000]) {
+          await new Promise((r) => setTimeout(r, wait));
+          await loadVmStates();
+        }
+      } catch (e) {
+        toast((e as Error).message, 'error');
+      }
+    },
+    [toast, loadVmStates],
   );
 
   // Right-click menu of a tab
@@ -929,6 +960,8 @@ export function App() {
               {section === 'hosts' && (
                 <HostsPage
                   servers={servers}
+                  vmStates={vmStates}
+                  onVmPower={(s, action) => void vmPower(s, action)}
                   query={query}
                   setQuery={setQuery}
                   selectedId={panel?.server.id || undefined}

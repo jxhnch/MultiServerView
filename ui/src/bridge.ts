@@ -504,6 +504,10 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return null;
     case 'teamviewer.open':
       return onlyNative('TeamViewer');
+    case 'vms.status':
+      return {};
+    case 'vms.power':
+      return onlyNative('Controlling VMs');
     case 'hosts.detectOs':
       return [];
     case 'ssh.ping':
@@ -918,6 +922,9 @@ export interface SourceConfigInput {
   password: string;
 }
 
+export type VmState = 'running' | 'stopped' | 'paused' | 'unknown';
+export type VmAction = 'start' | 'shutdown' | 'stop' | 'reboot' | 'suspend';
+
 export interface McpConfigStatus {
   supported: boolean;
   path: string;
@@ -976,6 +983,8 @@ export const api = {
   rdpSuspend: (suspended: boolean) => call<void>('rdp.suspend', { suspended }),
   rdpExternal: (serverId: string) => call<void>('rdp.external', { serverId }),
   teamviewerOpen: (serverId: string) => call<void>('teamviewer.open', { serverId }),
+  vmsStatus: () => call<Record<string, VmState>>('vms.status'),
+  vmsPower: (hostId: string, action: VmAction) => call<{ ok: boolean }>('vms.power', { hostId, action }),
   hostsDetectOs: (ids: string[]) => call<{ id: string; os: string; error: string }[]>('hosts.detectOs', { ids }),
   sshPing: (sessionId: string) => call<boolean>('ssh.ping', { sessionId }),
   mcpStatus: () => call<{ running: boolean; error: string | null }>('mcp.status'),

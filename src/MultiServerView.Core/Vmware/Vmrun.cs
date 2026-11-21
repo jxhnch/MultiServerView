@@ -44,6 +44,22 @@ public sealed class Vmrun : IVmrun
         return ok ? ParseIp(output) : null;
     }
 
+    /// <summary>Power action of a VM: start, shutdown (graceful), stop (forced), reboot, suspend. Returns an error text or null.</summary>
+    public async Task<string?> PowerAsync(string vmxPath, string action, CancellationToken ct = default)
+    {
+        string[] args = action switch
+        {
+            "start" => new[] { "-T", "ws", "start", vmxPath, "nogui" },
+            "shutdown" => new[] { "-T", "ws", "stop", vmxPath, "soft" },
+            "stop" => new[] { "-T", "ws", "stop", vmxPath, "hard" },
+            "reboot" => new[] { "-T", "ws", "reset", vmxPath, "soft" },
+            "suspend" => new[] { "-T", "ws", "suspend", vmxPath, "soft" },
+            _ => throw new ArgumentException("Unknown power action: " + action)
+        };
+        var (ok, output) = await RunAsync(args, TimeSpan.FromSeconds(90), ct);
+        return ok ? null : "VMware did not do it" + (string.IsNullOrWhiteSpace(output) ? "." : ": " + output.Trim());
+    }
+
     /// <summary>"Total running VMs: 2" followed by one path per line.</summary>
     public static IReadOnlyList<string> ParseList(string output) =>
         output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("Total running VMs", StringComparison.OrdinalIgnoreCase)).ToList();

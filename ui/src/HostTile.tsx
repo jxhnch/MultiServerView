@@ -30,7 +30,19 @@ const OS_LABEL: Record<string, string> = {
 export const osLabel = (os: string) => OS_LABEL[os] ?? '';
 
 /** Color tile of a host: distro logo (SSH, once detected) or protocol icon. */
-export function HostTile({ server, size = 'md' }: { server: Pick<Server, 'protocol' | 'os'>; size?: 'sm' | 'md' | 'lg' }) {
+export function HostTile({ server, size = 'md', vmState }: { server: Pick<Server, 'protocol' | 'os'>; size?: 'sm' | 'md' | 'lg'; vmState?: string }) {
+  const tile = <HostTileBase server={server} size={size} />;
+  if (!vmState || vmState === 'unknown') return tile;
+  const label = vmState === 'running' ? 'Running' : vmState === 'paused' ? 'Paused / suspended' : 'Stopped';
+  return (
+    <span className="tile-wrap">
+      {tile}
+      <span className={`vm-dot ${vmState}`} title={label} aria-label={label} />
+    </span>
+  );
+}
+
+function HostTileBase({ server, size = 'md' }: { server: Pick<Server, 'protocol' | 'os'>; size?: 'sm' | 'md' | 'lg' }) {
   const px = size === 'sm' ? 13 : size === 'lg' ? 24 : 20;
   if (server.protocol === 'ssh' && server.os === 'windows')
     return (

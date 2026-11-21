@@ -269,3 +269,10 @@ export const IconSparkle = (p: IconProps) => (
     <path d="M19 3.5v3M17.5 5h3" />
   </Svg>
 );
+
+export const IconPower = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v8" />
+    <path d="M7.05 6.6a7.5 7.5 0 1 0 9.9 0" />
+  </Svg>
+);

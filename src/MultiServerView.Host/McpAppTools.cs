@@ -32,7 +32,7 @@ internal sealed class McpAppTools : IMcpExtraTools
     private static readonly HashSet<string> ReadOnlyTools = new(StringComparer.Ordinal)
     {
         "get_host", "list_keys", "list_snippets", "list_identities", "list_forwards", "connection_history", "list_known_hosts",
-        "file_info", "file_checksum", "local_list", "local_read_file", "list_proxmox", "list_proxmox_vms", "list_vmware_vms",
+        "file_info", "file_checksum", "local_list", "local_read_file", "list_proxmox", "list_proxmox_vms", "list_vmware_vms", "vm_status",
         "screen_list", "screen_screenshot", "list_terminals",
     };
 
@@ -42,7 +42,7 @@ internal sealed class McpAppTools : IMcpExtraTools
         "add_host", "list_keys", "generate_key", "save_key", "delete_key", "list_snippets", "save_snippet", "delete_snippet",
         "list_identities", "save_identity", "delete_identity", "list_forwards", "connection_history", "list_known_hosts", "remove_known_host",
         "local_list", "local_read_file", "local_write_file", "local_make_directory", "local_rename", "local_delete",
-        "list_proxmox", "list_proxmox_vms", "list_vmware_vms", "list_terminals",
+        "list_proxmox", "list_proxmox_vms", "list_vmware_vms", "vm_status", "list_terminals",
         "screen_list", "screen_screenshot", "screen_click", "screen_move", "screen_drag", "screen_scroll", "screen_type", "screen_key", "screen_close",
     };
 
@@ -281,6 +281,20 @@ internal sealed class McpAppTools : IMcpExtraTools
         Add("list_proxmox", "List the saved Proxmox connections.", null, null, (_, _) => Call("proxmox.list", new { }));
         Add("list_proxmox_vms", "List the VMs and containers of a Proxmox connection.", new() { ["connection"] = P("string", "Connection id from list_proxmox.") }, ["connection"], (a, _) => Call("proxmox.vms", new { id = Req(a, "connection") }));
         Add("list_vmware_vms", "List the VMware Workstation VMs on this PC.", null, null, (_, _) => Call("vmware.scan", new { }));
+
+        Add("vm_status", "Power state (running, stopped, paused) of the hosts that were imported from Proxmox or VMware.", null, null, async (_, _) =>
+        {
+            var states = await Call("vms.status", new { }) as JsonObject ?? new JsonObject();
+            var byId = _vault.List().ToDictionary(x => x.Id);
+            return states.Select(kv => new { host = byId.TryGetValue(kv.Key, out var h) ? h.Name : kv.Key, id = kv.Key, state = kv.Value?.GetValue<string>() ?? "unknown" }).OrderBy(x => x.host).ToList();
+        });
+        Add("vm_power", "Start, shut down, restart, suspend or force-stop a VM that was imported from Proxmox or VMware (the host in MultiServerView stands for the VM).",
+            new() { ["host"] = Host(), ["action"] = P("string", "start, shutdown (graceful), reboot, suspend or stop (forced, like pulling the plug).") }, ["host", "action"], async (a, _) =>
+            {
+                var vm = FindServer(Req(a, "host"));
+                await Call("vms.power", new { hostId = vm.Id, action = Req(a, "action").ToLowerInvariant() });
+                return $"{Req(a, "action")} sent to {vm.Name}. Call vm_status to see the new state.";
+            });
 
         // ------------------------------------------------------------ Interactive terminals
         Add("terminal_open", "Open an interactive SSH terminal (a real shell: sudo, top, editors, installers). Returns a terminal id and the first output.",

@@ -242,12 +242,30 @@ public sealed class ProxmoxClient : IDisposable
 
     // ---------------------------------------------------------------------------------------------------- HTTP
 
-    private async Task<JsonNode?> GetAsync(string path, CancellationToken ct)
+    /// <summary>
+    /// Changes the power state of a VM or container. action: start, shutdown (graceful), stop (forced), reboot, reset (forced),
+    /// suspend, resume. The token needs the permission VM.PowerMgmt (role PVEVMAdmin).
+    /// </summary>
+    public async Task PowerAsync(string node, string type, long vmId, string action, CancellationToken ct = default)
+    {
+        if (action is not ("start" or "shutdown" or "stop" or "reboot" or "reset" or "suspend" or "resume"))
+            throw new ArgumentException("Unknown power action: " + action);
+        if (type is not ("qemu" or "lxc")) throw new ArgumentException("Unknown VM type: " + type);
+        if (node.Length == 0 || node.IndexOfAny(new[] { '/', '\\', '?', '#', ' ' }) >= 0) throw new ArgumentException("Invalid node name.");
+        if (type == "lxc" && action is "reset" or "resume") throw new ArgumentException("Containers do not support \"" + action + "\".");
+        await SendAsync(HttpMethod.Post, $"/nodes/{node}/{type}/{vmId}/status/{action}", ct);
+    }
+
+    private Task<JsonNode?> GetAsync(string path, CancellationToken ct) => SendAsync(HttpMethod.Get, path, ct);
+
+    private async Task<JsonNode?> SendAsync(HttpMethod method, string path, CancellationToken ct)
     {
         HttpResponseMessage response;
         try
         {
-            response = await _http.GetAsync(_baseUrl + path, ct);
+            using var request = new HttpRequestMessage(method, _baseUrl + path);
+            if (method == HttpMethod.Post) request.Content = new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>());
+            response = await _http.SendAsync(request, ct);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -259,7 +277,9 @@ public sealed class ProxmoxClient : IDisposable
             if (response.StatusCode == HttpStatusCode.Unauthorized)
                 throw new ProxmoxException("Sign-in refused: the token ID or secret is wrong (format: user@realm!tokenname).");
             if (response.StatusCode == HttpStatusCode.Forbidden)
-                throw new ProxmoxException("No permission. The token lacks a role, e.g. PVEAuditor (Datacenter → Permissions).");
+                throw new ProxmoxException(method == HttpMethod.Get
+                    ? "No permission. The token lacks a role, e.g. PVEAuditor (Datacenter → Permissions)."
+                    : "No permission to change this VM. The token needs the role PVEVMAdmin (Datacenter → Permissions) and must not be \"privilege separated\" without it.");
             if (!response.IsSuccessStatusCode)
             {
                 var reason = response.ReasonPhrase;

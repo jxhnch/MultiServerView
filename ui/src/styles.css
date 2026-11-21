@@ -2898,3 +2898,23 @@ label {
   font-size: 13px;
   z-index: 5;
 }
+
+/* power state of imported VMs: a small dot on the logo and a quiet power button next to the pencil */
+.tile-wrap {
+  position: relative;
+  display: inline-grid;
+}
+.vm-dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--surface, #fff);
+  background: var(--muted, #8a8f98);
+}
+.vm-dot.running { background: #22c55e; }
+.vm-dot.stopped { background: #9ca3af; }
+.vm-dot.paused { background: #f59e0b; }
+.hcard .power-btn { right: 40px; }

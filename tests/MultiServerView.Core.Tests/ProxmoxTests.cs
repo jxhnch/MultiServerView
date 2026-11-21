@@ -12,12 +12,14 @@ internal sealed class FakeProxmox : HttpMessageHandler
 {
     public readonly Dictionary<string, string> Routes = new();
     public readonly List<string> Requests = new();
+    public readonly List<string> Methods = new();
     public string? LastAuthorization;
     public HttpStatusCode? Force;
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         Requests.Add(request.RequestUri!.PathAndQuery);
+        Methods.Add(request.Method.Method);
         LastAuthorization = request.Headers.TryGetValues("Authorization", out var v) ? v.Single() : null;
         if (Force is { } status) return Task.FromResult(new HttpResponseMessage(status));
 
@@ -409,5 +411,56 @@ public class ProxmoxTests
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    [Fact]
+    public async Task Power_actions_post_to_the_status_endpoint_of_the_vm()
+    {
+        var (client, fake) = NewClient();
+        fake.Routes["/nodes/pve/qemu/100/status/start"] = """{"data":"UPID:pve:0001"}""";
+        fake.Routes["/nodes/pve/lxc/200/status/shutdown"] = """{"data":"UPID:pve:0002"}""";
+        await client.PowerAsync("pve", "qemu", 100, "start");
+        await client.PowerAsync("pve", "lxc", 200, "shutdown");
+        Assert.Equal(new[] { "POST", "POST" }, fake.Methods);
+        Assert.Equal(new[] { "/api2/json/nodes/pve/qemu/100/status/start", "/api2/json/nodes/pve/lxc/200/status/shutdown" }, fake.Requests);
+        Assert.StartsWith("PVEAPIToken=root@pam!msv=", fake.LastAuthorization);
+    }
+
+    [Theory]
+    [InlineData("pve", "qemu", "format")]
+    [InlineData("pve", "vm", "start")]
+    [InlineData("pve/../x", "qemu", "start")]
+    [InlineData("pve", "lxc", "reset")]
+    public async Task Power_rejects_unknown_actions_types_nodes_and_container_resets(string node, string type, string action)
+    {
+        var (client, fake) = NewClient();
+        await Assert.ThrowsAsync<ArgumentException>(() => client.PowerAsync(node, type, 100, action));
+        Assert.Empty(fake.Requests);
+    }
+
+    [Fact]
+    public async Task Power_without_permission_explains_which_role_is_missing()
+    {
+        var (client, fake) = NewClient();
+        fake.Force = HttpStatusCode.Forbidden;
+        var ex = await Assert.ThrowsAsync<ProxmoxException>(() => client.PowerAsync("pve", "qemu", 100, "stop"));
+        Assert.Contains("PVEVMAdmin", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("running", "running")]
+    [InlineData("stopped", "stopped")]
+    [InlineData("paused", "paused")]
+    [InlineData("suspended", "paused")]
+    [InlineData("weird", "unknown")]
+    public void Vm_status_is_normalised(string status, string expected) => Assert.Equal(expected, VmPower.FromProxmox(status));
+
+    [Fact]
+    public void Proxmox_reference_is_parsed()
+    {
+        Assert.True(VmPower.TryParseProxmoxRef("abc123:pve2:102", out var c, out var n, out var id));
+        Assert.Equal(("abc123", "pve2", 102L), (c, n, id));
+        Assert.False(VmPower.TryParseProxmoxRef("broken", out _, out _, out _));
+        Assert.False(VmPower.TryParseProxmoxRef("a:b:notanumber", out _, out _, out _));
     }
 }

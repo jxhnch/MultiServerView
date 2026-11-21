@@ -794,6 +794,65 @@ public sealed class Bridge : IDisposable
                     imported = have.Contains(ProxmoxImporter.Ref(entry.Id, v.Node, v.VmId))
                 }).ToList();
             }
+            case "vms.status":
+            {
+                // Power state of all hosts that were imported from Proxmox or VMware: host id -> running | stopped | paused | unknown
+                var states = new Dictionary<string, string>();
+                var all = _vault.List();
+                foreach (var group in all.Where(h => h.ProxmoxRef.Length > 0).GroupBy(h => h.ProxmoxRef.Split(':')[0]))
+                {
+                    var connection = _vault.FindProxmox(group.Key);
+                    if (connection == null) continue;
+                    IReadOnlyList<ProxmoxVm>? vms = null;
+                    try
+                    {
+                        using var client = ProxmoxClient.Create(connection);
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                        vms = await client.ListVmsAsync(cts.Token);
+                    }
+                    catch (Exception ex) when (ex is ProxmoxException or OperationCanceledException or HttpRequestException) { /* not reachable: unknown */ }
+                    foreach (var h in group)
+                    {
+                        var vm = vms != null && VmPower.TryParseProxmoxRef(h.ProxmoxRef, out _, out var vmNode, out var vmId)
+                            ? vms.FirstOrDefault(v => v.Node == vmNode && v.VmId == vmId)
+                            : null;
+                        states[h.Id] = vm == null ? VmPower.Unknown : VmPower.FromProxmox(vm.Status);
+                    }
+                }
+                var vmwareHosts = all.Where(h => h.VmwareRef.Length > 0).ToList();
+                if (vmwareHosts.Count > 0)
+                {
+                    var vmrun = Vmrun.Find();
+                    var running = vmrun == null ? null : (await vmrun.ListRunningAsync()).Select(x => x.ToLowerInvariant()).ToHashSet();
+                    foreach (var h in vmwareHosts)
+                        states[h.Id] = running == null ? VmPower.Unknown : running.Contains(h.VmwareRef.ToLowerInvariant()) ? VmPower.Running : VmPower.Stopped;
+                }
+                return states;
+            }
+            case "vms.power":
+            {
+                var target = _vault.Find(Str(p, "hostId")) ?? throw new KeyNotFoundException("Host not found.");
+                var action = Str(p, "action");
+                if (target.ProxmoxRef.Length > 0)
+                {
+                    if (!VmPower.TryParseProxmoxRef(target.ProxmoxRef, out var connectionId, out var node, out var vmId))
+                        throw new InvalidOperationException("The Proxmox reference of this host is damaged. Import the VM again.");
+                    var connection = _vault.FindProxmox(connectionId) ?? throw new KeyNotFoundException("The Proxmox connection of this host no longer exists.");
+                    using var client = ProxmoxClient.Create(connection);
+                    var vm = (await client.ListVmsAsync()).FirstOrDefault(v => v.Node == node && v.VmId == vmId)
+                             ?? throw new KeyNotFoundException("This VM does not exist on the Proxmox server any more.");
+                    await client.PowerAsync(vm.Node, vm.Type, vm.VmId, action);
+                    return new { ok = true };
+                }
+                if (target.VmwareRef.Length > 0)
+                {
+                    var vmrun = Vmrun.Find() ?? throw new InvalidOperationException("VMware Workstation (vmrun) was not found on this PC.");
+                    var error = await vmrun.PowerAsync(target.VmwareRef, action);
+                    if (error != null) throw new InvalidOperationException(error);
+                    return new { ok = true };
+                }
+                throw new InvalidOperationException("This host was not imported from Proxmox or VMware.");
+            }
             case "proxmox.removeImported":
             {
                 var id = Str(p, "id");
