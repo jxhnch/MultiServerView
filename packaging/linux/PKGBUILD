@@ -4,7 +4,7 @@
 # Before publishing to AUR, run `updpkgsums` to pin real SHA-256 checksums.
 
 pkgname=multiserverview-bin
-pkgver=1.8.0
+pkgver=1.8.1
 pkgrel=1
 pkgdesc='SSH, SFTP, RDP and VNC in one window with an end-to-end encrypted vault'
 arch=('x86_64')
