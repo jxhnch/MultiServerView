@@ -49,8 +49,16 @@ Bring your servers with you. Duplicates are skipped, existing hosts stay untouch
 - **VMware Workstation** – reads your VM library, including addresses from running VMs and the VMware DHCP leases.
 - **mRemoteNG**, **OpenSSH config** (`~/.ssh/config`), **PuTTY** (directly from Windows or a `.reg` file) and **CSV**.
 
-### Let AI work on your servers
-An optional **MCP server** (off by default) lets AI tools list your hosts, run commands and read, write and list files over SSH/SFTP. Open **AI tools** in the left menu, switch it on and pick your tool (**Claude Code, Codex, Cursor, VS Code Copilot, Antigravity, Claude Desktop** or any MCP client): the page shows the exact command or config text to paste. It listens on `127.0.0.1` only and needs the token shown there; anything that has the token can act on your hosts while the vault is unlocked, so only enable it when you want that.
+### Let AI work in MultiServerView like you do
+An optional **MCP server** (off by default) lets AI tools use the app the way you do. Open **AI tools** in the left menu, switch it on and pick your tool (**Claude Code, Codex, Cursor, VS Code Copilot, Antigravity, Claude Desktop** or any MCP client): the page shows the exact command or config text, and can write it into the tool's config file with one click.
+
+What the AI can do:
+- **Servers:** run commands, read, write, upload, download, rename, delete and change permissions of files over SSH/SFTP, and work in **interactive terminals** (sudo, top, editors, installers).
+- **Remote desktops:** see and operate **VNC** screens (and **RDP** screens in the Linux app): screenshots, clicks, drag, scroll, typing and shortcuts.
+- **Management:** add, change and delete hosts, generate and install SSH keys, manage snippets, identities and port forwards.
+- **This PC:** list, read, write and move files (deleting goes to the recycle bin).
+
+It listens on `127.0.0.1` only and needs the token shown on the page. Anything that has the token can do all of this while the vault is unlocked, so only enable it when you want that. Saved passwords and private keys are never shown to the AI, and every connection it makes appears under **Logs**. If you want less: **read-only mode** offers only tools that look, and you can limit it to some workspaces.
 
 ### Protect your data
 - **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
