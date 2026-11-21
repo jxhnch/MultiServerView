@@ -502,7 +502,7 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
                     Only tools that look, nothing is changed: <code>list_hosts</code>, <code>get_host</code>, <code>read_file</code>, <code>list_directory</code>,{' '}
                     <code>file_info</code>, <code>file_checksum</code>, <code>list_keys</code>, <code>list_snippets</code>, <code>list_identities</code>,{' '}
                     <code>list_forwards</code>, <code>connection_history</code>, <code>local_list</code>, <code>local_read_file</code>, <code>list_proxmox</code>,{' '}
-                    <code>list_vmware_vms</code>, <code>screen_list</code>, <code>screen_screenshot</code>.
+                    <code>list_vmware_vms</code>, <code>vm_status</code>, <code>screen_list</code>, <code>screen_screenshot</code>.
                   </p>
                 ) : (
                   <ul className="muted small" style={{ margin: '6px 0 0 18px' }}>
@@ -512,7 +512,7 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
                       <code>delete_file</code>, <code>chmod_file</code>, <code>file_info</code>, <code>file_checksum</code>
                     </li>
                     <li>
-                      <strong>Terminals:</strong> <code>terminal_open</code>, <code>terminal_send</code>, <code>terminal_key</code>, <code>terminal_read</code>,{' '}
+                      <strong>Terminals (SSH, Telnet, serial, WinRM):</strong> <code>terminal_open</code>, <code>terminal_send</code>, <code>terminal_key</code>, <code>terminal_read</code>,{' '}
                       <code>terminal_close</code>, <code>list_terminals</code>
                     </li>
                     <li>
@@ -535,7 +535,7 @@ export function McpPage({ toast, workspaces = [] }: { toast: (msg: string, kind?
                     </li>
                     <li>
                       <strong>Other:</strong> <code>connection_history</code>, <code>list_known_hosts</code>, <code>remove_known_host</code>, <code>list_proxmox</code>,{' '}
-                      <code>list_proxmox_vms</code>, <code>list_vmware_vms</code>
+                      <code>list_proxmox_vms</code>, <code>list_vmware_vms</code>, <code>vm_status</code>, <code>vm_power</code> (start, shut down, restart, suspend, force stop)
                     </li>
                   </ul>
                 )}

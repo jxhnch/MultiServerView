@@ -2927,3 +2927,12 @@ label {
 .vm-dot.stopped { background: #9ca3af; }
 .vm-dot.paused { background: #f59e0b; }
 .hcard .power-btn { right: 40px; }
+
+/* seven host types do not fit in one row of the side panel */
+.panel .seg:not(.slim) {
+  flex-wrap: wrap;
+}
+.panel .seg:not(.slim) button {
+  flex: 1 1 auto;
+  padding: 6px 8px;
+}

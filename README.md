@@ -32,6 +32,9 @@
 - **SFTP like WinSCP** – two panes with drag & drop, folders with progress, speed and cancel; **F-keys** (F2 rename, F4 edit, F5 copy, F6 move, F7 new folder, Del delete, Alt+Enter properties), multi-select with masks, sortable columns, filter, hidden-files switch, editable path bar with back/forward history and bookmarks, right-click menus, move by dragging onto a folder, **overwrite choices** (all / only older / skip), **permissions (chmod)** with recursion, folder sizes, SHA-256 checksums, **open remote files in your own editor** and upload again on every save, built-in text editor, and **compare folders** to see what is new or different. The left pane works on your PC too (recycle bin, Show in Explorer).
 - **RDP** – the native Windows RDP control (the same as mstsc / mRemoteNG) right inside a tab.
 - **VNC** – noVNC in a tab, including Ctrl+Alt+Del and clipboard.
+- **Telnet and serial** – the same terminal for network devices (switches, routers): Telnet with proper option negotiation, and serial consoles (COM ports, `/dev/ttyUSB0`, any baud rate).
+- **WinRM (PowerShell)** – a PowerShell prompt on a Windows server without SSH (experimental, HTTPS recommended).
+- **Virtual machine control** – hosts imported from Proxmox or VMware show a status dot, and a small power button starts, shuts down, restarts, suspends or force-stops the VM.
 - **TeamViewer** – save a partner ID (and password) as a host and start the installed TeamViewer client with one click.
 - **Jump hosts** – chain one or more SSH hosts for SSH, SFTP, tunnels, VNC and RDP.
 - **Port forwarding** – local (-L), remote (-R) and SOCKS5 (-D), start/stop with one click.
@@ -53,7 +56,8 @@ Bring your servers with you. Duplicates are skipped, existing hosts stay untouch
 An optional **MCP server** (off by default) lets AI tools use the app the way you do. Open **AI tools** in the left menu, switch it on and pick your tool (**Claude Code, Codex, Cursor, VS Code Copilot, Antigravity, Claude Desktop** or any MCP client): the page shows the exact command or config text, and can write it into the tool's config file with one click.
 
 What the AI can do:
-- **Servers:** run commands, read, write, upload, download, rename, delete and change permissions of files over SSH/SFTP, and work in **interactive terminals** (sudo, top, editors, installers).
+- **Servers:** run commands, read, write, upload, download, rename, delete and change permissions of files over SSH/SFTP, and work in **interactive terminals** (sudo, top, editors, installers). Also on **Telnet** and **serial** consoles (switches, routers) and PowerShell on Windows servers through **WinRM**, without SSH.
+- **Virtual machines:** see the power state of Proxmox and VMware hosts and start, shut down, restart, suspend or force-stop them.
 - **Remote desktops:** see and operate **VNC** screens (and **RDP** screens in the Linux app): screenshots, clicks, drag, scroll, typing and shortcuts.
 - **Management:** add, change and delete hosts, generate and install SSH keys, manage snippets, identities and port forwards.
 - **This PC:** list, read, write and move files (deleting goes to the recycle bin).
