@@ -496,6 +496,11 @@ async function callMock(method: string, params: any): Promise<unknown> {
       if (devUrl) return { url: devUrl, username: '', password: '' };
       return onlyNative('VNC');
     }
+    case 'web.open':
+      return onlyNative('The integrated browser');
+    case 'web.openExternal':
+    case 'web.close':
+      return null;
     case 'rdp.open':
       return onlyNative('RDP');
     case 'rdp.layout':
@@ -978,6 +983,9 @@ export const api = {
 
   vncOpen: (serverId: string, sessionId: string) => call<{ url: string; username: string; password: string }>('vnc.open', { serverId, sessionId }),
   vncClose: (sessionId: string) => call<void>('vnc.close', { sessionId }),
+  webOpen: (serverId: string, sessionId: string) => call<{ url: string; hasLogin: boolean }>('web.open', { serverId, sessionId }),
+  webOpenExternal: (sessionId: string) => call<void>('web.openExternal', { sessionId }),
+  webClose: (sessionId: string) => call<void>('web.close', { sessionId }),
 
   rdpOpen: (sessionId: string, serverId: string, r: Rect) => call<void>('rdp.open', { sessionId, serverId, ...r }),
   rdpLayout: (sessionId: string, r: Rect, visible: boolean) => call<void>('rdp.layout', { sessionId, ...r, visible }),

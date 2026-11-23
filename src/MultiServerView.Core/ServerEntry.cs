@@ -16,7 +16,13 @@ public enum Protocol
     Serial,
 
     /// <summary>PowerShell on a Windows server through WinRM (no SSH needed); Port 5986 = HTTPS, 5985 = HTTP.</summary>
-    Winrm
+    Winrm,
+
+    /// <summary>
+    /// A web page of a device (firewall, router, Proxmox ...) in a tab, with the saved login filled in.
+    /// Host = name or full address (https://fw.lan:8443/login), Port = 443 unless the address says otherwise.
+    /// </summary>
+    Web
 }
 
 public enum AuthMethod
@@ -90,6 +96,7 @@ public sealed class ServerEntry : IVaultItem
         Protocol.Telnet => 23,
         Protocol.Serial => 9600,
         Protocol.Winrm => 5986,
+        Protocol.Web => 443,
         _ => 0
     };
 }

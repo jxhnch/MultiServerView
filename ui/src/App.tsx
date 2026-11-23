@@ -18,6 +18,7 @@ import { ImportPage, type ImportKind } from './ImportPage';
 import { VmwareImportDialog } from './VmwareImport';
 import { TerminalView } from './TerminalView';
 import { VncView } from './VncView';
+import { WebView } from './WebView';
 import { RdpView } from './RdpView';
 import { SftpView } from './SftpView';
 import { SnippetsPage } from './SnippetsPage';
@@ -1055,6 +1056,7 @@ export function App() {
               )}
               {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
               {t.kind === 'session' && s.protocol === 'rdp' && <RdpView {...common} />}
+              {t.kind === 'session' && s.protocol === 'web' && <WebView {...common} />}
               </SessionCloseContext.Provider>
             </div>
           );

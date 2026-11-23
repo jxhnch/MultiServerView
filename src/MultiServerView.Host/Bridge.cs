@@ -12,6 +12,7 @@ using MultiServerView.Core.Sftp;
 using MultiServerView.Core.Ssh;
 using MultiServerView.Core.Sync;
 using MultiServerView.Core.Vnc;
+using MultiServerView.Core.Web;
 
 namespace MultiServerView.Host;
 
@@ -39,6 +40,8 @@ public sealed class Bridge : IDisposable
     private readonly ConcurrentDictionary<string, string> _sshHistory = new(); // SSH session id -> history entry
     private readonly PortForwardManager _forwards = new();
     private readonly WebSocketTcpProxy _vncProxy = new();
+    private readonly WebProxyHub _web;
+    private readonly ConcurrentDictionary<string, string> _webExternal = new();
     private readonly McpService _mcp;
     private readonly List<Action<object>> _eventTaps = new();
     private readonly ScreenHub _screens;
@@ -62,6 +65,7 @@ public sealed class Bridge : IDisposable
             foreach (var tap in taps) { try { tap(e); } catch (Exception) { /* a tap must never break the UI */ } }
             emit(e);
         };
+        _web = new WebProxyHub(CheckHost);
         _auto = new AutoSync(vault, source, emit, CloseEverythingForReplacedVault);
         _screens = new ScreenHub(emit);
         // Changes made by AI tools must show up in the window right away.
@@ -326,6 +330,41 @@ public sealed class Bridge : IDisposable
             }
 
             case "vnc.close":
+                CloseTunnel(Str(p, "sessionId"));
+                return null;
+
+            // ---------------------------------------------------------- Web (integrated browser)
+            case "web.open":
+            {
+                var server = _vault.FindResolved(Str(p, "serverId")) ?? throw new KeyNotFoundException("Server not found.");
+                var sessionId = Opt(p, "sessionId").Length > 0 ? Opt(p, "sessionId") : server.Id;
+                var target = WebTarget.Parse(server);
+                var hid = _history.Begin(server, "web");
+                try
+                {
+                    var effective = await TunnelFor(sessionId, server);
+                    // behind a jump host the tunnel's local port replaces the real port
+                    var (frameUrl, externalUrl) = _web.Open(sessionId, target, effective == server ? target.Host : effective.Host, effective == server ? target.Port : effective.Port, server.Username, server.Password);
+                    _webExternal[sessionId] = externalUrl;
+                    _history.End(hid, true);
+                    return new { url = frameUrl, hasLogin = server.Username.Length > 0 || server.Password.Length > 0 };
+                }
+                catch (Exception ex)
+                {
+                    _history.End(hid, false, Friendly(ex));
+                    throw;
+                }
+            }
+            case "web.openExternal":
+            {
+                // Only the local address of this very tab is opened (the web page itself is never handed to the system).
+                if (!_webExternal.TryGetValue(Str(p, "sessionId"), out var external)) throw new KeyNotFoundException("The web page is not open.");
+                using var launched = Process.Start(new ProcessStartInfo(external) { UseShellExecute = true });
+                return null;
+            }
+            case "web.close":
+                _web.Close(Str(p, "sessionId"));
+                _webExternal.TryRemove(Str(p, "sessionId"), out _);
                 CloseTunnel(Str(p, "sessionId"));
                 return null;
 
@@ -1410,6 +1449,7 @@ public sealed class Bridge : IDisposable
         foreach (var id in _sftp.Keys.ToList()) CloseSftp(id);
         CloseAllSessions();
         _vncProxy.Dispose();
+        _web.Dispose();
         _rdpWeb?.Dispose();
     }
 }

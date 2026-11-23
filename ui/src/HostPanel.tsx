@@ -5,7 +5,7 @@ import { HostTile } from './HostTile';
 import { DEFAULT_PORT, PROTOCOL_LABEL, type Identity, type KeyInfo, type Protocol, type Server } from './types';
 import { askConfirm } from './Confirm';
 
-const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'winrm', 'telnet', 'serial', 'teamviewer'];
+const PROTOCOLS: Protocol[] = ['ssh', 'rdp', 'vnc', 'web', 'winrm', 'telnet', 'serial', 'teamviewer'];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -164,7 +164,7 @@ export function HostPanel({
               onChange={(e) => set('host', e.target.value)}
               list={s.protocol === 'serial' ? 'serial-ports' : undefined}
               placeholder={
-                s.protocol === 'teamviewer' ? 'TeamViewer ID, e.g. 123 456 789' : s.protocol === 'serial' ? 'COM3 or /dev/ttyUSB0' : '192.168.1.10 or server.example.com'
+                s.protocol === 'teamviewer' ? 'TeamViewer ID, e.g. 123 456 789' : s.protocol === 'web' ? 'firewall.lan or https://192.168.1.1:8443' : s.protocol === 'serial' ? 'COM3 or /dev/ttyUSB0' : '192.168.1.10 or server.example.com'
               }
             />
             <datalist id="serial-ports">
@@ -217,11 +217,16 @@ export function HostPanel({
               PowerShell on a Windows server without SSH. Port 5986 = HTTPS (recommended), 5985 = HTTP (needs basic authentication on the server). On the server, as administrator: <code>winrm quickconfig</code>. Needs a user name and a saved password. Experimental: not yet tested against a real Windows server.
             </p>
           )}
+          {s.protocol === 'web' && (
+            <p className="hint">
+              Opens the web page of a device (firewall, router, Proxmox, printer …) in a tab and fills in the user name and password above when the login page appears. Self-signed certificates are accepted the first time and remembered like an SSH host key; a changed certificate is refused. Port 443 and https are used unless the address says otherwise (ports 80, 8080 and 8000 use http).
+            </p>
+          )}
           {s.protocol === 'telnet' && <p className="hint">Telnet is not encrypted: everything you type, including passwords, travels in clear text. Use it only in trusted networks.</p>}
         </div>
         )}
 
-        {(s.protocol === 'ssh' || s.protocol === 'rdp' || s.protocol === 'vnc') && (
+        {(s.protocol === 'ssh' || s.protocol === 'rdp' || s.protocol === 'vnc' || s.protocol === 'web') && (
         <div className="group-card">
           <h3>Connection</h3>
           <Field label="Via jump host">

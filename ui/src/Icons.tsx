@@ -229,11 +229,19 @@ export const IconDuplicate = (p: IconProps) => (
   </Svg>
 );
 
+export const IconGlobe = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18M12 3c2.6 2.6 4 5.8 4 9s-1.4 6.4-4 9c-2.6-2.6-4-5.8-4-9s1.4-6.4 4-9z" />
+  </Svg>
+);
+
 /** Matching icon for the protocol. */
 export function ProtocolIcon({ protocol, size = 16 }: { protocol: Protocol; size?: number }) {
   if (protocol === 'rdp') return <IconMonitor size={size} />;
   if (protocol === 'vnc' || protocol === 'teamviewer') return <IconScreen size={size} />;
   if (protocol === 'winrm') return <IconTerminal size={size} />;
+  if (protocol === 'web') return <IconGlobe size={size} />;
   return <IconTerminal size={size} />;
 }
 
