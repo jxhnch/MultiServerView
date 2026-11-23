@@ -49,6 +49,8 @@ internal sealed class ConsoleRaw : IDisposable
             Stty("raw -echo");
         }
         _active = true;
+        // if the program is ended in another way, the terminal must not stay in raw mode
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Dispose();
     }
 
     private static string? Stty(string arguments)
@@ -56,7 +58,9 @@ internal sealed class ConsoleRaw : IDisposable
         try
         {
             // stty works on the terminal it inherits: stdin stays attached, only the answer is captured
-            var info = new ProcessStartInfo("stty", arguments) { RedirectStandardOutput = true, UseShellExecute = false };
+            // an absolute path: a program of the same name somewhere in the PATH must not be started instead
+            var exe = File.Exists("/usr/bin/stty") ? "/usr/bin/stty" : "/bin/stty";
+            var info = new ProcessStartInfo(exe, arguments) { RedirectStandardOutput = true, UseShellExecute = false };
             using var process = Process.Start(info);
             var text = process?.StandardOutput.ReadToEnd();
             process?.WaitForExit(2000);

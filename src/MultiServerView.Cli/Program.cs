@@ -15,6 +15,9 @@ internal static class Program
 {
     private const string Esc = "\u001b";
 
+    /// <summary>Text that is shown to the user may come from other people (imports, servers): no control characters.</summary>
+    private static string Safe(string? text) => TerminalText.Sanitize(text);
+
     private static int Main(string[] args)
     {
         try
@@ -48,7 +51,7 @@ internal static class Program
         var vaultPath = Path.Combine(dataDir, "vault.msv");
         if (!File.Exists(vaultPath))
         {
-            Console.Error.WriteLine($"No vault found at {vaultPath}. Start MultiServerView once and create your vault, or use --data <folder>.");
+            Console.Error.WriteLine($"No vault found at {Safe(vaultPath)}. Start MultiServerView once and create your vault, or use --data <folder>.");
             return 2;
         }
 
@@ -65,7 +68,7 @@ internal static class Program
         var command = rest.Count > 0 ? rest[0] : "";
         if (command is "list" or "ls")
         {
-            foreach (var s in servers) Console.WriteLine($"{s.Name,-28} {Describe(s)}{(s.Workspace.Length > 0 ? "  [" + s.Workspace + "]" : "")}");
+            foreach (var s in servers) Console.WriteLine($"{Safe(s.Name),-28} {Describe(s)}{(s.Workspace.Length > 0 ? "  [" + Safe(s.Workspace) + "]" : "")}");
             return 0;
         }
 
@@ -77,7 +80,7 @@ internal static class Program
             var matches = exact.Count == 1 ? exact : Filter(servers, query);
             if (matches.Count == 0)
             {
-                Console.Error.WriteLine($"No server matches \"{query}\". Use \"msv list\" to see all servers.");
+                Console.Error.WriteLine($"No server matches \"{Safe(query)}\". Use \"msv list\" to see all servers.");
                 return 4;
             }
             chosen = matches.Count == 1 ? matches[0] : Pick(matches, query);
@@ -108,9 +111,9 @@ internal static class Program
 
     private static string Describe(ServerEntry s) => s.Protocol switch
     {
-        Protocol.Serial => $"serial {s.Host} @ {s.Port} baud",
-        Protocol.Telnet => $"telnet {s.Host}:{s.Port}",
-        _ => $"{(s.Username.Length > 0 ? s.Username + "@" : "")}{s.Host}{(s.Port is not 22 and > 0 ? ":" + s.Port : "")}"
+        Protocol.Serial => $"serial {Safe(s.Host)} @ {s.Port} baud",
+        Protocol.Telnet => $"telnet {Safe(s.Host)}:{s.Port}",
+        _ => $"{(s.Username.Length > 0 ? Safe(s.Username) + "@" : "")}{Safe(s.Host)}{(s.Port is not 22 and > 0 ? ":" + s.Port : "")}"
     };
 
     private static List<ServerEntry> Filter(IReadOnlyList<ServerEntry> servers, string query)
@@ -127,10 +130,11 @@ internal static class Program
 
     private static bool Unlock(VaultStore vault)
     {
-        var fromEnvironment = Environment.GetEnvironmentVariable("MSV_MASTER_PASSWORD");
+        // The master password is only ever typed (or, for scripts, read from the first line of the input). It is not taken from
+        // the environment or from arguments, so nothing can skip the question.
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            var password = attempt == 0 && !string.IsNullOrEmpty(fromEnvironment) ? fromEnvironment : ReadSecret("Master password: ");
+            var password = ReadSecret("Master password: ");
             if (password == null) return false;
             try
             {
@@ -239,12 +243,13 @@ internal static class Program
         var sb = new StringBuilder();
         sb.Append($"{Esc}[H{Esc}[2J");
         sb.Append($"{Esc}[1mMultiServerView{Esc}[0m  {Esc}[2m{matches.Count} server(s) · type to filter · ↑↓ · Enter connects · Esc cancels{Esc}[0m\r\n");
-        sb.Append($"{Esc}[36m>{Esc}[0m {query}{Esc}[7m {Esc}[0m\r\n\r\n");
+        sb.Append($"{Esc}[36m>{Esc}[0m {Safe(query)}{Esc}[7m {Esc}[0m\r\n\r\n");
         for (var i = top; i < Math.Min(matches.Count, top + rows); i++)
         {
             var s = matches[i];
-            var name = s.Name.Length > 26 ? s.Name[..25] + "…" : s.Name;
-            var line = $"{name,-27} {Describe(s)}{(s.Workspace.Length > 0 ? "  [" + s.Workspace + "]" : "")}";
+            var shownName = Safe(s.Name);
+            var name = shownName.Length > 26 ? shownName[..25] + "…" : shownName;
+            var line = $"{name,-27} {Describe(s)}{(s.Workspace.Length > 0 ? "  [" + Safe(s.Workspace) + "]" : "")}";
             if (line.Length > width - 3) line = line[..(width - 4)] + "…";
             sb.Append(i == selected ? $"{Esc}[7m ▸ {line}{Esc}[0m\r\n" : $"   {line}\r\n");
         }
@@ -257,7 +262,7 @@ internal static class Program
 
     private static int Connect(VaultStore vault, ServerEntry server)
     {
-        Console.Error.WriteLine($"{Esc}[2mConnecting to {server.Name} ({Describe(server)}) …{Esc}[0m");
+        Console.Error.WriteLine($"{Esc}[2mConnecting to {Safe(server.Name)} ({Describe(server)}) …{Esc}[0m");
         var declinedHostKey = false;
         var known = vault.ListKnownHosts().ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
 
@@ -265,11 +270,18 @@ internal static class Program
         {
             if (known.TryGetValue(VaultStore.HostKeyId(host, port), out var stored))
                 return stored == fingerprint ? HostKeyTrust.Trusted : HostKeyTrust.Mismatch;
-            Console.Error.WriteLine($"The authenticity of {host}:{port} is not known yet.\r\nFingerprint: {fingerprint}");
+            Console.Error.WriteLine($"The authenticity of {Safe(host)}:{port} is not known yet.\r\nFingerprint: {Safe(fingerprint)}");
+            if (Console.IsInputRedirected)
+            {
+                // A script or a pipe must never decide to trust a new server: the answer has to come from a person at the keyboard.
+                Console.Error.WriteLine("Not trusted: connect once with MultiServerView or run msv in a terminal to confirm this host key.");
+                declinedHostKey = true;
+                return HostKeyTrust.Mismatch;
+            }
             Console.Error.Write("Trust this host for this session? (Connect once in MultiServerView to remember it.) [y/N] ");
-            var answer = Console.IsInputRedirected ? Console.In.ReadLine() : Console.ReadKey(intercept: false).KeyChar.ToString();
+            var answer = Console.ReadKey(intercept: false).KeyChar;
             Console.Error.WriteLine();
-            if (answer is { Length: > 0 } && char.ToLowerInvariant(answer[0]) == 'y') return HostKeyTrust.Trusted;
+            if (answer is 'y' or 'Y') return HostKeyTrust.Trusted;
             declinedHostKey = true;
             return HostKeyTrust.Mismatch;
         }
@@ -282,7 +294,7 @@ internal static class Program
 
         if (server.Protocol == Protocol.Ssh && server.Auth == AuthMethod.Password && server.Password.Length == 0)
         {
-            var typed = ReadSecret($"Password for {server.Username}@{server.Host}: ");
+            var typed = ReadSecret($"Password for {Safe(server.Username)}@{Safe(server.Host)}: ");
             if (typed == null) return 130;
             server = server.Clone();
             server.Password = typed;
@@ -298,7 +310,7 @@ internal static class Program
         var closed = new ManualResetEventSlim();
         string? closedReason = null;
         session.Closed += reason => { closedReason = reason; closed.Set(); };
-        session.Info += message => Console.Error.WriteLine($"{Esc}[2m{message}{Esc}[0m");
+        session.Info += message => Console.Error.WriteLine($"{Esc}[2m{Safe(message)}{Esc}[0m");
 
         var output = Console.OpenStandardOutput();
         session.Data += data =>
@@ -320,7 +332,7 @@ internal static class Program
         catch (Exception ex)
         {
             session.Dispose();
-            Console.Error.WriteLine(declinedHostKey ? "Cancelled: the host key was not trusted." : $"{Esc}[31m{ex.Message}{Esc}[0m");
+            Console.Error.WriteLine(declinedHostKey ? "Cancelled: the host key was not trusted." : $"{Esc}[31m{Safe(ex.Message)}{Esc}[0m");
             return 1;
         }
 
@@ -370,7 +382,7 @@ internal static class Program
         closed.Wait();
         raw.Dispose();
         session.Dispose();
-        Console.Error.WriteLine($"\r\n{Esc}[2mConnection to {server.Name} closed{(closedReason != null ? ": " + closedReason : ".")}{Esc}[0m");
+        Console.Error.WriteLine($"\r\n{Esc}[2mConnection to {Safe(server.Name)} closed{(closedReason != null ? ": " + Safe(closedReason) : ".")}{Esc}[0m");
         return closedReason == null ? 0 : 1;
     }
 }
