@@ -197,7 +197,7 @@ internal static class Program
             {
                 var matches = query.Length == 0 ? servers.ToList() : Filter(servers, query.ToString());
                 selected = Math.Clamp(selected, 0, Math.Max(0, matches.Count - 1));
-                var rows = Math.Max(3, Console.WindowHeight - 4);
+                var rows = Math.Max(3, Console.WindowHeight - 8);
                 if (selected < top) top = selected;
                 if (selected >= top + rows) top = selected - rows + 1;
                 Draw(matches, query.ToString(), selected, top, rows);
@@ -237,23 +237,58 @@ internal static class Program
         }
     }
 
+    // Colours (true colour): a warm accent like Claude Code, soft greys for the rest.
+    private const string Accent = "\u001b[38;2;217;119;87m";
+    private const string Dim = "\u001b[38;2;140;140;150m";
+    private const string Reset = "\u001b[0m";
+
+    private static string Badge(Protocol p) => p switch
+    {
+        Protocol.Telnet => "\u001b[38;2;230;180;80m● telnet" + Reset,
+        Protocol.Serial => "\u001b[38;2;120;200;200m● serial" + Reset,
+        _ => "\u001b[38;2;110;200;130m● ssh   " + Reset
+    };
+
     private static void Draw(IReadOnlyList<ServerEntry> matches, string query, int selected, int top, int rows)
     {
-        var width = Math.Max(40, Console.WindowWidth - 1);
+        var width = Math.Clamp(Console.WindowWidth - 1, 40, 110);
+        var inner = width - 2;
         var sb = new StringBuilder();
         sb.Append($"{Esc}[H{Esc}[2J");
-        sb.Append($"{Esc}[1mMultiServerView{Esc}[0m  {Esc}[2m{matches.Count} server(s) · type to filter · ↑↓ · Enter connects · Esc cancels{Esc}[0m\r\n");
-        sb.Append($"{Esc}[36m>{Esc}[0m {Safe(query)}{Esc}[7m {Esc}[0m\r\n\r\n");
+
+        // header box
+        var title = " ✻ MultiServerView ";
+        sb.Append($"{Accent}╭─{title}{new string('─', Math.Max(0, inner - title.Length - 1))}╮{Reset}\r\n");
+        var hint = "Pick a server and press Enter";
+        sb.Append($"{Accent}│{Reset} {hint}{new string(' ', Math.Max(0, inner - hint.Length - 1))}{Accent}│{Reset}\r\n");
+        sb.Append($"{Accent}╰{new string('─', inner)}╯{Reset}\r\n");
+
+        // search box
+        var shownQuery = Safe(query);
+        if (shownQuery.Length > inner - 6) shownQuery = shownQuery[^(inner - 6)..];
+        var pad = Math.Max(0, inner - 4 - shownQuery.Length - 1);
+        sb.Append($"{Dim}╭{new string('─', inner)}╮{Reset}\r\n");
+        sb.Append($"{Dim}│{Reset} {Accent}>{Reset} {shownQuery}{Esc}[7m {Reset}{new string(' ', pad)}{Dim}│{Reset}\r\n");
+        sb.Append($"{Dim}╰{new string('─', inner)}╯{Reset}\r\n");
+
         for (var i = top; i < Math.Min(matches.Count, top + rows); i++)
         {
             var s = matches[i];
             var shownName = Safe(s.Name);
-            var name = shownName.Length > 26 ? shownName[..25] + "…" : shownName;
-            var line = $"{name,-27} {Describe(s)}{(s.Workspace.Length > 0 ? "  [" + Safe(s.Workspace) + "]" : "")}";
-            if (line.Length > width - 3) line = line[..(width - 4)] + "…";
-            sb.Append(i == selected ? $"{Esc}[7m ▸ {line}{Esc}[0m\r\n" : $"   {line}\r\n");
+            var name = shownName.Length > 24 ? shownName[..23] + "…" : shownName;
+            var detail = Describe(s) + (s.Workspace.Length > 0 ? "  [" + Safe(s.Workspace) + "]" : "");
+            var room = width - 4 - 25 - 9;
+            if (detail.Length > room) detail = detail[..Math.Max(0, room - 1)] + "…";
+            if (i == selected)
+                sb.Append($" {Accent}❯{Reset} {Esc}[1m{name,-24}{Reset} {Badge(s.Protocol)} {Accent}{detail}{Reset}\r\n");
+            else
+                sb.Append($"   {name,-24} {Badge(s.Protocol)} {Dim}{detail}{Reset}\r\n");
         }
-        if (matches.Count == 0) sb.Append($"{Esc}[2m   nothing matches{Esc}[0m\r\n");
+        if (matches.Count == 0) sb.Append($"{Dim}   nothing matches{Reset}\r\n");
+
+        // footer on the last line
+        var count = matches.Count == 0 ? "0" : $"{selected + 1}/{matches.Count}";
+        sb.Append($"{Esc}[{Math.Max(1, Console.WindowHeight)};1H{Dim}  ↑↓ move · type to filter · Enter connect · Esc cancel · {count}{Reset}");
         Console.Out.Write(sb.ToString());
         Console.Out.Flush();
     }
@@ -262,7 +297,7 @@ internal static class Program
 
     private static int Connect(VaultStore vault, ServerEntry server)
     {
-        Console.Error.WriteLine($"{Esc}[2mConnecting to {Safe(server.Name)} ({Describe(server)}) …{Esc}[0m");
+        Console.Error.WriteLine($"{Accent}\u273b{Reset} Connecting to {Esc}[1m{Safe(server.Name)}{Reset} {Dim}({Describe(server)}){Reset}");
         var declinedHostKey = false;
         var known = vault.ListKnownHosts().ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
 
