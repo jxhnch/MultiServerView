@@ -14,6 +14,7 @@ mkdir -p "$D/DEBIAN" "$D/opt/multiserverview" "$D/usr/bin" "$D/usr/share/applica
 cp -r "$PUB"/. "$D/opt/multiserverview/"
 chmod 755 "$D/opt/multiserverview/multiserverview"
 ln -s /opt/multiserverview/multiserverview "$D/usr/bin/multiserverview"
+ln -s /opt/multiserverview/msv "$D/usr/bin/msv"
 cp "$HERE/multiserverview.desktop" "$D/usr/share/applications/"
 cp "$ICON" "$D/usr/share/icons/hicolor/512x512/apps/multiserverview.png"
 cat > "$D/DEBIAN/control" <<EOF
@@ -62,6 +63,7 @@ mkdir -p %{buildroot}/usr/share/icons/hicolor/512x512/apps
 cp -r %{pub_dir}/. %{buildroot}/opt/multiserverview/
 chmod 755 %{buildroot}/opt/multiserverview/multiserverview
 ln -s /opt/multiserverview/multiserverview %{buildroot}/usr/bin/multiserverview
+ln -s /opt/multiserverview/msv %{buildroot}/usr/bin/msv
 cp %{here_dir}/multiserverview.desktop %{buildroot}/usr/share/applications/multiserverview.desktop
 cp %{icon_file} %{buildroot}/usr/share/icons/hicolor/512x512/apps/multiserverview.png
 
@@ -69,6 +71,7 @@ cp %{icon_file} %{buildroot}/usr/share/icons/hicolor/512x512/apps/multiservervie
 %defattr(-,root,root,0755)
 /opt/multiserverview
 /usr/bin/multiserverview
+/usr/bin/msv
 /usr/share/applications/multiserverview.desktop
 /usr/share/icons/hicolor/512x512/apps/multiserverview.png
 EOF

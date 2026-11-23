@@ -36,6 +36,7 @@
 - **WinRM (PowerShell)** – a PowerShell prompt on a Windows server without SSH (experimental, HTTPS recommended).
 - **Virtual machine control** – hosts imported from Proxmox or VMware show a status dot, and a small power button starts, shuts down, restarts, suspends or force-stops the VM.
 - **TeamViewer** – save a partner ID (and password) as a host and start the installed TeamViewer client with one click.
+- **`msv` in any terminal** – type `msv` in PowerShell, cmd or bash and pick a server from a list (type to filter, Enter connects); `msv web` connects to "web" right away, `msv list` prints the servers. Works for SSH, Telnet and serial hosts, in the same window. It asks for your master password and only reads the vault, so it also works while the app is open. The Windows installer can add it to your PATH (a checkbox); with the ZIP, add the folder to your PATH yourself. The Linux packages install `msv` in `/usr/bin`.
 - **Jump hosts** – chain one or more SSH hosts for SSH, SFTP, tunnels, VNC and RDP.
 - **Port forwarding** – local (-L), remote (-R) and SOCKS5 (-D), start/stop with one click.
 - **Split view** – several terminals side by side in one tab, with broadcast (type once, send to all).

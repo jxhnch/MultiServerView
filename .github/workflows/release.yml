@@ -53,6 +53,12 @@ jobs:
           dotnet publish src/MultiServerView.App -c Release -r win-x64 --self-contained true
           -p:PublishReadyToRun=false -p:Version=${{ steps.ver.outputs.v }} -o publish
 
+      # The command line tool "msv" goes into the same folder (it shares the runtime), so the installer and the ZIP contain it.
+      - name: Publish msv (command line tool, win-x64)
+        run: >
+          dotnet publish src/MultiServerView.Cli -c Release -r win-x64 --self-contained true
+          -p:PublishReadyToRun=false -p:Version=${{ steps.ver.outputs.v }} -o publish
+
       # Start the finished app once on the real runner (window, vault, DPAPI, MCP); a failure stops the release.
       - name: App self-test on Windows
         shell: pwsh
@@ -118,8 +124,13 @@ jobs:
       - name: Publish app (linux-x64, self-contained)
         run: dotnet publish src/MultiServerView.Linux -c Release -r linux-x64 --self-contained true -p:Version=${{ steps.ver.outputs.v }} -o out/msv
 
+      - name: Publish msv (command line tool, linux-x64)
+        run: dotnet publish src/MultiServerView.Cli -c Release -r linux-x64 --self-contained true -p:Version=${{ steps.ver.outputs.v }} -o out/msv
+
       - name: Self-test (no window)
-        run: ./out/msv/multiserverview --selftest "$RUNNER_TEMP/selftest"
+        run: |
+          ./out/msv/multiserverview --selftest "$RUNNER_TEMP/selftest"
+          ./out/msv/msv --version
 
       - name: Tools for Linux packages
         run: sudo apt-get install -y desktop-file-utils rpm

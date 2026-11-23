@@ -31,6 +31,7 @@ package() {
   cp -a "${srcdir}/multiserverview/." "${pkgdir}/opt/multiserverview/"
   chmod 755 "${pkgdir}/opt/multiserverview/multiserverview"
   ln -s /opt/multiserverview/multiserverview "${pkgdir}/usr/bin/multiserverview"
+  ln -s /opt/multiserverview/msv "${pkgdir}/usr/bin/msv"
 
   install -Dm644 "${srcdir}/multiserverview-${pkgver}.desktop" \
     "${pkgdir}/usr/share/applications/multiserverview.desktop"

@@ -25,6 +25,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
+ChangesEnvironment=yes
 SetupIconFile=..\src\MultiServerView.App\Assets\app.ico
 UninstallDisplayIcon={app}\MultiServerView.exe
 
@@ -33,6 +34,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "addtopath"; Description: "Add the command &msv to the PATH (open your servers from any terminal: msv)"; GroupDescription: "Command line:"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -40,6 +42,9 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\MultiServerView"; Filename: "{app}\MultiServerView.exe"
 Name: "{autodesktop}\MultiServerView"; Filename: "{app}\MultiServerView.exe"; Tasks: desktopicon
+
+[Registry]
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}')); Tasks: addtopath
 
 [Run]
 Filename: "{app}\MultiServerView.exe"; Description: "Start MultiServerView"; Flags: nowait postinstall skipifsilent
@@ -49,4 +54,35 @@ Filename: "{app}\MultiServerView.exe"; Flags: nowait skipifnotsilent; Check: Sho
 function ShouldRelaunch: Boolean;
 begin
   Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
+{ true = the folder is not in the PATH of the user yet }
+function NeedsAddPath(Dir: string): Boolean;
+var
+  Existing: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Existing) then
+  begin
+    Result := True;
+    exit;
+  end;
+  Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Existing) + ';') = 0;
+end;
+
+{ takes the folder out of the PATH again when the program is removed }
+procedure RemoveFromPath(Dir: string);
+var
+  Existing: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Existing) then exit;
+  P := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Existing) + ';');
+  if P = 0 then exit;
+  Delete(Existing, P, Length(Dir) + 1);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Existing);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then RemoveFromPath(ExpandConstant('{app}'));
 end;

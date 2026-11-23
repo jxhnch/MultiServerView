@@ -74,5 +74,9 @@ jobs:
           npm run build
       - name: Publish Linux app
         run: dotnet publish src/MultiServerView.Linux -c Release -r linux-x64 --self-contained true -o out/msv
+      - name: Publish msv (command line tool)
+        run: dotnet publish src/MultiServerView.Cli -c Release -r linux-x64 --self-contained true -o out/msv
       - name: Self-test (no window)
-        run: ./out/msv/multiserverview --selftest "$RUNNER_TEMP/selftest"
+        run: |
+          ./out/msv/multiserverview --selftest "$RUNNER_TEMP/selftest"
+          ./out/msv/msv --version
