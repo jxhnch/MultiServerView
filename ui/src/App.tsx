@@ -1,7 +1,7 @@
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { allScreens, getScreen, sleep, type ScreenHandle } from './mcpScreens';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, getPlatform, isNative, onEvent, type VmAction, type VmState } from './bridge';
+import { api, getPlatform, isNative, onEvent, type VmAction, type VmState, type BulkLogin } from './bridge';
 import { emptyServer, isTerminalProtocol, type Identity, type KeyInfo, type Server, type SessionStatus, type SourceInfo, type SourceStatus } from './types';
 import { Unlock } from './Unlock';
 import { CommandPalette, type PaletteAction } from './CommandPalette';
@@ -669,6 +669,41 @@ export function App() {
     }
   }
 
+  async function reorderHosts(ids: string[], reset = false) {
+    try {
+      await api.serversReorder(ids, reset);
+      await refresh();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  async function bulkLogin(list: Server[], login: BulkLogin) {
+    try {
+      const r = await api.serversBulkLogin(
+        list.map((s) => s.id),
+        login,
+      );
+      await refresh();
+      toast(`Login set for ${r.changed} host${r.changed === 1 ? '' : 's'}${r.skipped ? `, ${r.skipped} skipped` : ''}`);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
+  async function deleteHosts(list: Server[]): Promise<boolean> {
+    const names = list.slice(0, 8).map((s) => s.name).join(', ') + (list.length > 8 ? ', …' : '');
+    if (!(await askConfirm(`Really delete ${list.length} host${list.length === 1 ? '' : 's'}?\n${names}`, { title: 'Delete hosts', confirmLabel: 'Delete', danger: true }))) return false;
+    try {
+      await api.serversDeleteMany(list.map((s) => s.id));
+      dropHosts(new Set(list.map((s) => s.id)));
+      return true;
+    } catch (e) {
+      toast((e as Error).message, 'error');
+      return false;
+    }
+  }
+
   async function renameWorkspace(from: string, to: string) {
     const n = to.trim();
     if (!n || n === from) return;
@@ -983,6 +1018,11 @@ export function App() {
                   onRenameWorkspace={(from, to) => void renameWorkspace(from, to)}
                   onDissolveWorkspace={(name) => void dissolveWorkspace(name)}
                   onMove={(list, target) => void moveToWorkspace(list, target)}
+                  keys={keys}
+                  identities={identities}
+                  onReorder={(ids, reset) => void reorderHosts(ids, reset)}
+                  onBulkLogin={(list, login) => void bulkLogin(list, login)}
+                  onDeleteMany={deleteHosts}
                 />
               )}
               {section === 'keys' && <Keychain keys={keys} identities={identities} servers={servers} onChanged={refresh} toast={toast} />}

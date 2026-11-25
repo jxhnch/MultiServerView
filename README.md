@@ -71,6 +71,7 @@ MultiServerView is a desktop app for people who jump between many machines: home
 
 - **Workspaces** per customer, project or lab, so you never scroll through hundreds of hosts
 - **Quick switcher** on `Ctrl+K`, which also understands `ssh user@host`
+- Drag hosts into your own order, and select several to set their SSH key or login, move or delete them
 - Favorites, groups, OS logos, light and dark theme, known hosts and connection history
 
 ### Bring your hosts with you

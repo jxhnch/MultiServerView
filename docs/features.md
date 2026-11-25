@@ -23,9 +23,8 @@
 
 **Web hosts (integrated browser).** Open the web page of a firewall, router, Proxmox or printer in a tab.
 
-- The saved user name and password are filled in and sent when the login page appears. HTTP basic authentication works too.
-- Pages that refuse to be shown in a frame work.
-- WebSockets (for example the Proxmox console) are passed on.
+- On Windows it is a real browser (WebView2 with a private profile): pages look as usual, with back, forward, reload and an address bar. On Linux the page is shown through a local proxy.
+- The saved user name and password are filled in on the device's own pages only, and sent once per tab. HTTP basic authentication works too.
 - Jump hosts can be used.
 - A self-signed certificate is accepted the first time and remembered like an SSH host key (see *Known Hosts*). A changed certificate is refused.
 - The page can also be opened in the system browser.
@@ -58,6 +57,9 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 - **Workspaces:** one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
 - **Quick switcher:** `Ctrl+K`, a search bar that also understands `ssh user@host`. Plus tabs, favorites, groups, OS logos, and a light and dark theme.
 - **Identities, keys and snippets:** reuse credentials across hosts, generate SSH keys and install the public key on a server with one click. Snippets can contain `{{variables}}` that ask for values when you run them.
+- **Your own order:** drag a host to a new place in its section. Right-click and choose *Sort these hosts by name again* to undo it.
+- **Several hosts at once:** Ctrl+click or *Select*, then give them the same SSH key, identity or user name and password, move them to a workspace or delete them.
+- **Signing in:** when a login is missing or fails, you can enter a password or pick an SSH key, and save it for the host.
 - **Known hosts and history:** review and reset stored host keys, and see your connection history (local only, no passwords).
 
 ## Import

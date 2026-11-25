@@ -29,11 +29,20 @@ import {
 
 // ---------------------------------------------------------------- Events from the host
 
+export interface BulkLogin {
+  mode: 'identity' | 'key' | 'password';
+  identityId?: string;
+  keyId?: string;
+  username?: string;
+  password?: string;
+}
+
 export type HostEvent =
   | { event: 'ssh.data'; sessionId: string; data: string }
   | { event: 'ssh.closed'; sessionId: string; reason: string | null }
   | { event: 'ssh.info'; sessionId: string; message: string }
   | { event: 'rdp.status'; sessionId: string; state: 'connecting' | 'connected' | 'disconnected'; message: string }
+  | { event: 'web.status'; sessionId: string; state: '' | 'connecting' | 'connected' | 'error'; message: string; url: string; canGoBack: boolean; canGoForward: boolean }
   | { event: 'source.status'; kind: string; state: 'local' | 'ready' | 'pending' | 'conflict' | 'error'; message: string; lastSaved?: string | null }
   | { event: 'vault.replaced' }
   | { event: 'forward.status'; ruleId: string; running: boolean; error: string | null }
@@ -490,6 +499,12 @@ async function callMock(method: string, params: any): Promise<unknown> {
       mockShells.delete(params.sessionId);
       return null;
 
+    case 'servers.reorder':
+    case 'servers.deleteMany':
+      return 0;
+    case 'servers.bulkLogin':
+      return onlyNative('Changing several hosts');
+
     case 'vnc.open': {
       // For development/tests only: localStorage.setItem('msv-dev-vnc-url', 'ws://127.0.0.1:PORT/TOKEN')
       const devUrl = localStorage.getItem('msv-dev-vnc-url');
@@ -499,6 +514,8 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'web.open':
       return onlyNative('The integrated browser');
     case 'web.openExternal':
+    case 'web.layout':
+    case 'web.command':
     case 'web.close':
       return null;
     case 'rdp.open':
@@ -975,6 +992,10 @@ export const api = {
   keysGenerate: (k: { name: string; type: 'ed25519' | 'rsa'; bits?: number; comment?: string }) => call<KeyInfo>('keys.generate', k),
   keysInstall: (k: { keyId: string; serverId: string; switchHost?: boolean } & Credentials) => call<void>('keys.install', k),
 
+  serversReorder: (ids: string[], reset = false) => call<number>('servers.reorder', { ids, reset }),
+  serversBulkLogin: (ids: string[], login: BulkLogin) => call<{ changed: number; skipped: number }>('servers.bulkLogin', { ids, ...login }),
+  serversDeleteMany: (ids: string[]) => call<number>('servers.deleteMany', { ids }),
+
   sshOpen: (sessionId: string, serverId: string, cols: number, rows: number, cred?: Credentials) =>
     call<void>('ssh.open', { sessionId, serverId, cols, rows, ...cred }),
   sshInput: (sessionId: string, data: string) => call<void>('ssh.input', { sessionId, data }),
@@ -983,7 +1004,10 @@ export const api = {
 
   vncOpen: (serverId: string, sessionId: string) => call<{ url: string; username: string; password: string }>('vnc.open', { serverId, sessionId }),
   vncClose: (sessionId: string) => call<void>('vnc.close', { sessionId }),
-  webOpen: (serverId: string, sessionId: string) => call<{ url: string; hasLogin: boolean }>('web.open', { serverId, sessionId }),
+  webOpen: (serverId: string, sessionId: string, bounds: Rect) => call<{ native: boolean; url: string }>('web.open', { serverId, sessionId, ...bounds }),
+  webLayout: (sessionId: string, bounds: Rect, visible: boolean) => call<void>('web.layout', { sessionId, ...bounds, visible }),
+  webCommand: (sessionId: string, command: 'back' | 'forward' | 'reload' | 'home' | 'go' | 'external', url = '') =>
+    call<void>('web.command', { sessionId, command, url }),
   webOpenExternal: (sessionId: string) => call<void>('web.openExternal', { sessionId }),
   webClose: (sessionId: string) => call<void>('web.close', { sessionId }),
 

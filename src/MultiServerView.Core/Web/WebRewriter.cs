@@ -65,15 +65,23 @@ public static class WebRewriter
     /// </summary>
     public static string BuildAutoLoginScript(string username, string password)
     {
+        var js = BuildAutoLoginJs(username, password);
+        return js.Length == 0 ? "" : "<script>" + js + "</script>";
+    }
+
+    /// <summary>The same as plain JavaScript. With <paramref name="onlyOrigin"/> it does nothing on pages of any other origin.</summary>
+    public static string BuildAutoLoginJs(string username, string password, string onlyOrigin = "")
+    {
         if (username.Length == 0 && password.Length == 0) return "";
-        return "<script>(function(){var U=" + ScriptString(username) + ",P=" + ScriptString(password) + AutoLoginBody + "})();</script>";
+        var guard = onlyOrigin.Length == 0 ? "" : "if(location.origin!==" + ScriptString(onlyOrigin) + ")return;if(window.__msvLogin)return;window.__msvLogin=1;";
+        return "(function(){" + guard + "var U=" + ScriptString(username) + ",P=" + ScriptString(password) + AutoLoginBody + "})();";
     }
 
     private const string AutoLoginBody = """
 ,K='msv-autologin';
 function vis(e){if(!e||e.disabled)return false;var r=e.getBoundingClientRect();if(r.width<2||r.height<2)return false;var s=getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none';}
 function put(e,v){try{var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');d.set.call(e,v);}catch(x){e.value=v;}e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}
-function submitted(){try{var t=+sessionStorage.getItem(K)||0;return Date.now()-t<20000;}catch(x){return false;}}
+function submitted(){try{return !!sessionStorage.getItem(K);}catch(x){return false;}}
 function mark(){try{sessionStorage.setItem(K,String(Date.now()));}catch(x){}}
 function fill(){
  var pws=[].slice.call(document.querySelectorAll('input[type=password]')).filter(vis);

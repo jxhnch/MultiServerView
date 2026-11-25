@@ -301,6 +301,95 @@ public sealed class VaultStore
         return count;
     }
 
+    /// <summary>
+    /// Saves the order the user gave to a list of hosts (positions 1, 2, 3, ...). With <paramref name="reset"/> the positions are
+    /// removed and the hosts are listed by name again. Only hosts whose position changes count as changed (sync).
+    /// </summary>
+    public int Reorder(IReadOnlyList<string> ids, bool reset = false)
+    {
+        var count = 0;
+        lock (_gate)
+        {
+            var data = Data();
+            var now = DateTimeOffset.UtcNow;
+            for (var i = 0; i < ids.Count; i++)
+            {
+                var server = data.Servers.FirstOrDefault(s => s.Id == ids[i]);
+                var position = reset ? 0 : i + 1;
+                if (server == null || server.SortOrder == position) continue;
+                server.SortOrder = position;
+                server.UpdatedAt = now;
+                count++;
+            }
+            if (count > 0) Save();
+        }
+        if (count > 0) Changed?.Invoke();
+        return count;
+    }
+
+    /// <summary>
+    /// Gives several hosts the same login at once. Hosts that cannot use it (an SSH key on an RDP host, anything on a serial
+    /// port) are left alone and counted as skipped.
+    /// </summary>
+    public (int Changed, int Skipped) ApplyLogin(IReadOnlyCollection<string> ids, BulkLogin login)
+    {
+        int changed = 0, skipped = 0;
+        lock (_gate)
+        {
+            var data = Data();
+            switch (login.Mode)
+            {
+                case BulkLogin.ByIdentity when data.Identities.All(i => i.Id != login.IdentityId):
+                    throw new KeyNotFoundException("The identity does not exist anymore.");
+                case BulkLogin.ByKey when data.Keys.All(k => k.Id != login.KeyId):
+                    throw new KeyNotFoundException("The SSH key does not exist anymore.");
+                case BulkLogin.ByPassword when login.Username.Length == 0 && login.Password.Length == 0:
+                    throw new ArgumentException("Enter a user name or a password.");
+                case BulkLogin.ByIdentity or BulkLogin.ByKey or BulkLogin.ByPassword:
+                    break;
+                default:
+                    throw new ArgumentException("Unknown kind of login.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var wanted = ids.ToHashSet();
+            foreach (var s in data.Servers.Where(s => wanted.Contains(s.Id)))
+            {
+                var fits = login.Mode == BulkLogin.ByKey ? s.Protocol == Protocol.Ssh : s.Protocol != Protocol.Serial;
+                if (!fits)
+                {
+                    skipped++;
+                    continue;
+                }
+                if (login.Mode == BulkLogin.ByIdentity) s.IdentityId = login.IdentityId;
+                else
+                {
+                    // an identity would override what is set here, so it is removed; its user name is kept if none was typed
+                    if (s.IdentityId.Length > 0 && login.Username.Length == 0)
+                        s.Username = data.Identities.FirstOrDefault(i => i.Id == s.IdentityId)?.Username ?? s.Username;
+                    s.IdentityId = "";
+                    if (login.Username.Length > 0) s.Username = login.Username;
+                    if (login.Mode == BulkLogin.ByKey)
+                    {
+                        s.Auth = AuthMethod.Key;
+                        s.KeyId = login.KeyId;
+                    }
+                    else if (login.Password.Length > 0)
+                    {
+                        s.Auth = AuthMethod.Password;
+                        s.KeyId = "";
+                        s.Password = login.Password;
+                    }
+                }
+                s.UpdatedAt = now;
+                changed++;
+            }
+            if (changed > 0) Save();
+        }
+        if (changed > 0) Changed?.Invoke();
+        return (changed, skipped);
+    }
+
     /// <summary>Deletes several hosts at once (one save, one sync trigger). Returns the number.</summary>
     public int DeleteMany(IEnumerable<string> ids)
     {

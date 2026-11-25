@@ -23,6 +23,7 @@ internal sealed class WindowsPlatform : IHostPlatform
     }
 
     public string Name => "windows";
+    public IBrowserController? Browser { get; set; }
     public bool CustomTitleBar => true;
     public ISecretProtector Secrets { get; } = new DpapiProtector();
 

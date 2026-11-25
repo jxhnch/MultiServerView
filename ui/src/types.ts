@@ -24,6 +24,8 @@ export interface Server {
   /** Origin if the host was imported from VMware Workstation (path of the .vmx, lowercase). */
   vmwareRef: string;
   group: string;
+  /** Position chosen by drag and drop; 0 or missing = by name. */
+  sortOrder?: number;
   tags: string[];
   favorite: boolean;
   lastUsed: string | null;

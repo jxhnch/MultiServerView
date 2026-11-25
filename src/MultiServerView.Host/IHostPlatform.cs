@@ -1,6 +1,7 @@
 using System.Drawing;
 using MultiServerView.Core;
 using MultiServerView.Core.Import;
+using MultiServerView.Core.Ssh;
 using MultiServerView.Core.Sync;
 
 namespace MultiServerView.Host;
@@ -13,6 +14,26 @@ public interface IRdpController
     void Close(string sessionId);
 
     /// <summary>true = hide all RDP windows (a UI overlay is on top), false = show them again.</summary>
+    void SetSuspended(bool suspended);
+}
+
+/// <summary>What the integrated browser needs to know about a "Web" host.</summary>
+/// <param name="Url">The first page.</param>
+/// <param name="Origin">scheme://host[:port] of the device; only there the saved login and certificate are used.</param>
+/// <param name="CheckCertificate">Checks the fingerprint of a certificate the system does not trust (like an SSH host key).</param>
+public sealed record BrowserPage(string Url, string Origin, string ProfileKey, string Username, string Password,
+    Func<string, HostKeyTrust> CheckCertificate, string MismatchMessage);
+
+/// <summary>A real browser inside a tab (Windows: WebView2). Platforms without one use the local web proxy.</summary>
+public interface IBrowserController
+{
+    void Open(string sessionId, BrowserPage page, Rectangle bounds);
+    void Layout(string sessionId, Rectangle bounds, bool visible);
+
+    /// <summary>"back", "forward", "reload", "home", "go" (with an address) or "external".</summary>
+    void Command(string sessionId, string command, string url);
+    void Close(string sessionId);
+    void CloseAll();
     void SetSuspended(bool suspended);
 }
 
@@ -53,6 +74,9 @@ public interface IHostPlatform
 
     /// <summary>Saved PuTTY sessions of this PC, or null if the platform has none (Linux).</summary>
     IReadOnlyList<PuttySession>? ReadPuttySessions();
+
+    /// <summary>The integrated browser of the platform, or null.</summary>
+    IBrowserController? Browser => null;
 
     /// <summary>Downloads and starts the installer of a new version and closes the app.</summary>
     Task InstallUpdateAsync(string setupUrl, string version, string? expectedSha256 = null);

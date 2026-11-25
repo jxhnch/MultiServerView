@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using MultiServerView.App.Rdp;
+using MultiServerView.App.Web;
 using MultiServerView.Core;
 using MultiServerView.Host;
 using MultiServerView.Core.Sync;
@@ -38,6 +39,10 @@ public sealed partial class MainForm : Form
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MultiServerView");
         Controls.Add(_web);
         var platform = new WindowsPlatform(PickSavePath, PickFolder, WindowCommand);
+        var browserData = !string.IsNullOrWhiteSpace(dataOverride)
+            ? Path.Combine(dataOverride, "webview-hosts")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MultiServerView", "webview-hosts");
+        platform.Browser = new BrowserManager(this, Emit, browserData);
         _bridge = HostBootstrap.Create(roaming, platform, Emit, settings =>
         {
             _rdp = new RdpManager(this, Emit, settings);

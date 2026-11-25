@@ -159,7 +159,10 @@ public sealed class Bridge : IDisposable
                 _vault.VerifyPassword(Str(p, "password"));
                 CloseAllSessions();
                 foreach (var sid in _sftp.Keys.ToList()) CloseSftp(sid);
-                foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
+                _platform.Browser?.CloseAll();
+        _web.Dispose();
+        _webExternal.Clear();
+        foreach (var tid in _tunnels.Keys.ToList()) CloseTunnel(tid);
                 _forwards.StopAll();
                 _mcp.InvalidateConnections();
                 return _vault.Clear(Str(p, "password"));
@@ -187,6 +190,21 @@ public sealed class Bridge : IDisposable
                 _vault.Delete(Str(p, "id"));
                 _mcp.InvalidateConnections();
                 return null;
+            case "servers.reorder":
+                return _vault.Reorder(Strings(p, "ids").ToList(), Bool(p, "reset"));
+            case "servers.bulkLogin":
+            {
+                var login = new BulkLogin(Str(p, "mode"), Opt(p, "identityId"), Opt(p, "keyId"), Opt(p, "username").Trim(), Opt(p, "password"));
+                var (changed, skipped) = _vault.ApplyLogin(Strings(p, "ids").ToList(), login);
+                _mcp.InvalidateConnections();
+                return new { changed, skipped };
+            }
+            case "servers.deleteMany":
+            {
+                var removed = _vault.DeleteMany(Strings(p, "ids").ToList());
+                _mcp.InvalidateConnections();
+                return removed;
+            }
             case "servers.touch":
                 return _vault.Touch(Str(p, "id"));
             case "serial.ports":
@@ -343,11 +361,22 @@ public sealed class Bridge : IDisposable
                 try
                 {
                     var effective = await TunnelFor(sessionId, server);
+                    if (_platform.Browser is { } browser)
+                    {
+                        // A real browser: the page is opened as it is. Behind a jump host its address is the local end of the tunnel.
+                        var place = effective == server ? target : target with { Host = effective.Host, Port = effective.Port };
+                        var page = new BrowserPage(place.Origin + place.StartPath, place.Origin, server.Id, server.Username, server.Password,
+                            fingerprint => CheckHost("web/" + target.Host, target.Port, fingerprint),
+                            $"The certificate of {target.Host} is different from the one saved earlier. This can mean that someone sits between you and the device. If you changed the certificate on purpose, remove the entry \"web/{target.Host}:{target.Port}\" on the Known hosts page and open the page again.");
+                        browser.Open(sessionId, page, Bounds(p));
+                        _history.End(hid, true);
+                        return new { native = true, url = page.Url };
+                    }
                     // behind a jump host the tunnel's local port replaces the real port
                     var (frameUrl, externalUrl) = _web.Open(sessionId, target, effective == server ? target.Host : effective.Host, effective == server ? target.Port : effective.Port, server.Username, server.Password);
                     _webExternal[sessionId] = externalUrl;
                     _history.End(hid, true);
-                    return new { url = frameUrl, hasLogin = server.Username.Length > 0 || server.Password.Length > 0 };
+                    return new { native = false, url = frameUrl };
                 }
                 catch (Exception ex)
                 {
@@ -355,6 +384,12 @@ public sealed class Bridge : IDisposable
                     throw;
                 }
             }
+            case "web.layout":
+                _platform.Browser?.Layout(Str(p, "sessionId"), Bounds(p), Bool(p, "visible"));
+                return null;
+            case "web.command":
+                _platform.Browser?.Command(Str(p, "sessionId"), Str(p, "command"), Opt(p, "url"));
+                return null;
             case "web.openExternal":
             {
                 // Only the local address of this very tab is opened (the web page itself is never handed to the system).
@@ -363,6 +398,7 @@ public sealed class Bridge : IDisposable
                 return null;
             }
             case "web.close":
+                _platform.Browser?.Close(Str(p, "sessionId"));
                 _web.Close(Str(p, "sessionId"));
                 _webExternal.TryRemove(Str(p, "sessionId"), out _);
                 CloseTunnel(Str(p, "sessionId"));
@@ -422,6 +458,7 @@ public sealed class Bridge : IDisposable
                 return null;
             case "rdp.suspend":
                 _rdp.SetSuspended(Bool(p, "suspended"));
+                _platform.Browser?.SetSuspended(Bool(p, "suspended"));
                 return null;
             case "rdp.external":
             {
@@ -1265,11 +1302,18 @@ public sealed class Bridge : IDisposable
         saveAfterSuccess = null;
         var password = Opt(p, "password");
         var user = Opt(p, "username").Trim();
-        if (password.Length == 0 && user.Length == 0) return server;
+        var keyId = Opt(p, "keyId");
+        if (password.Length == 0 && user.Length == 0 && keyId.Length == 0) return server;
 
         var typed = server.Clone();
         if (user.Length > 0) typed.Username = user;
-        if (password.Length > 0)
+        if (keyId.Length > 0)
+        {
+            if (_vault.FindKey(keyId) == null) throw new KeyNotFoundException("The SSH key does not exist anymore.");
+            typed.Auth = AuthMethod.Key;
+            typed.KeyId = keyId;
+        }
+        else if (password.Length > 0)
         {
             typed.Password = password;
             typed.Auth = AuthMethod.Password;
@@ -1284,7 +1328,12 @@ public sealed class Bridge : IDisposable
                 if (stored == null || !string.IsNullOrEmpty(stored.IdentityId)) return;
                 var updated = stored.Clone();
                 if (user.Length > 0) updated.Username = user;
-                if (password.Length > 0 && stored.Auth == AuthMethod.Password) updated.Password = password;
+                if (keyId.Length > 0)
+                {
+                    updated.Auth = AuthMethod.Key;
+                    updated.KeyId = keyId;
+                }
+                else if (password.Length > 0 && stored.Auth == AuthMethod.Password) updated.Password = password;
                 _vault.Upsert(updated);
             };
         }

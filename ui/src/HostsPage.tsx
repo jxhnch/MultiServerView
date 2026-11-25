@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
 import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay } from './Icons';
-import { api, type VmAction } from './bridge';
+import { api, type BulkLogin, type VmAction } from './bridge';
+import { BulkLoginDialog } from './BulkLoginDialog';
 import { HostTile } from './HostTile';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { PromptDialog } from './Prompt';
 import { filterServers, parseTarget } from './search';
-import type { Server } from './types';
+import type { Identity, KeyInfo, Server } from './types';
+
+/** The user's own order first (drag and drop), everything not placed yet by name. */
+const byPlace = (a: Server, b: Server) => (a.sortOrder || 1e9) - (b.sortOrder || 1e9) || a.name.localeCompare(b.name);
 
 /** Termius style: search bar on top, plain cards below ("ssh, root"). */
 export function HostsPage({
@@ -32,7 +36,17 @@ export function HostsPage({
   onMove,
   vmStates,
   onVmPower,
+  keys,
+  identities,
+  onReorder,
+  onBulkLogin,
+  onDeleteMany,
 }: {
+  keys: KeyInfo[];
+  identities: Identity[];
+  onReorder: (ids: string[], reset?: boolean) => void;
+  onBulkLogin: (list: Server[], login: BulkLogin) => void;
+  onDeleteMany: (list: Server[]) => Promise<boolean>;
   servers: Server[];
   /** Power state of VMs imported from Proxmox or VMware (host id -> state). */
   vmStates: Record<string, string>;
@@ -65,13 +79,35 @@ export function HostsPage({
   const [wsMenu, setWsMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | null>(null);
   const [dropWs, setDropWs] = useState<string | null>(null);
+  // Several hosts at once: Ctrl+click, or the "Select" button and then plain clicks.
+  const [selecting, setSelecting] = useState(false);
+  const [marked, setMarked] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<'login' | 'move' | null>(null);
+  const markedHosts = servers.filter((s) => marked.has(s.id));
+  const toggleMark = (id: string) =>
+    setMarked((old) => {
+      const next = new Set(old);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const stopSelecting = () => {
+    setSelecting(false);
+    setMarked(new Set());
+  };
+  // Drag and drop inside a section changes the order.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const endDrag = () => {
+    setDragId(null);
+    setDropAt(null);
+  };
   const q = query.trim();
 
   // With search text, all workspaces are searched; otherwise only the selected one is shown.
   const filtered = useMemo(() => {
     if (q) return filterServers(servers, q);
     const scope = workspace ? servers.filter((s) => s.workspace === workspace) : servers;
-    return [...scope].sort((a, b) => a.name.localeCompare(b.name));
+    return [...scope].sort(byPlace);
   }, [servers, q, workspace]);
   const showWorkspace = !workspace || q.length > 0;
   const countOf = (w: string) => servers.filter((s) => s.workspace === w).length;
@@ -182,7 +218,32 @@ export function HostsPage({
         <button className="tool" title="Several SSH hosts side by side in one tab" onClick={onSplit}>
           <IconGrid size={15} /> Split view
         </button>
+        <button className={'tool' + (selecting ? ' on' : '')} title="Select several hosts (or Ctrl+click on them)" onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+          Select
+        </button>
       </div>
+
+      {(selecting || markedHosts.length > 0) && (
+        <div className="bulk-bar">
+          <strong>{markedHosts.length} selected</strong>
+          <button onClick={() => setMarked(new Set(filtered.map((s) => s.id)))}>Select all shown</button>
+          <span className="grow" />
+          <button className="primary" disabled={!markedHosts.length} onClick={() => setBulk('login')}>
+            Set login…
+          </button>
+          <button disabled={!markedHosts.length} onClick={() => setBulk('move')}>
+            Move to workspace…
+          </button>
+          <button
+            className="danger"
+            disabled={!markedHosts.length}
+            onClick={() => void onDeleteMany(markedHosts).then((deleted) => deleted && stopSelecting())}
+          >
+            Delete…
+          </button>
+          <button onClick={stopSelecting}>Done</button>
+        </div>
+      )}
 
       {servers.length === 0 ? (
         <div className="empty-card">
@@ -210,19 +271,60 @@ export function HostsPage({
                 {list.map((s) => (
                   <div
                     key={s.id}
-                    className={'hcard' + (selectedId === s.id ? ' sel' : '') + (picked === s.id ? ' picked' : '')}
+                    className={
+                      'hcard' +
+                      (selectedId === s.id ? ' sel' : '') +
+                      (picked === s.id ? ' picked' : '') +
+                      (marked.has(s.id) ? ' marked' : '') +
+                      (dragId === s.id ? ' dragging' : '') +
+                      (dropAt?.id === s.id ? (dropAt.after ? ' drop-after' : ' drop-before') : '')
+                    }
+                    aria-selected={marked.has(s.id)}
                     tabIndex={0}
                     draggable
-                    onDragStart={(e) => e.dataTransfer.setData('text/msv-host', s.id)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/msv-host', s.id);
+                      setDragId(s.id);
+                    }}
+                    onDragEnd={endDrag}
+                    onDragOver={(e) => {
+                      // only inside the same section, and not while searching (the list is sorted by relevance then)
+                      if (q || !dragId || dragId === s.id || !list.some((x) => x.id === dragId)) return;
+                      e.preventDefault();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      const after = e.clientX > r.left + r.width / 2;
+                      if (dropAt?.id !== s.id || dropAt.after !== after) setDropAt({ id: s.id, after });
+                    }}
+                    onDragLeave={() => setDropAt((d) => (d?.id === s.id ? null : d))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const at = dropAt;
+                      const from = dragId;
+                      endDrag();
+                      if (!from || !at || at.id !== s.id) return;
+                      const order = list.map((x) => x.id).filter((id) => id !== from);
+                      order.splice(order.indexOf(s.id) + (at.after ? 1 : 0), 0, from);
+                      onReorder(order);
+                    }}
                     title={`${s.name} – ${s.host}:${s.port}`}
-                    onClick={() => setPicked(s.id)}
+                    onClick={(e) => {
+                      if (selecting || e.ctrlKey || e.metaKey) toggleMark(s.id);
+                      else setPicked(s.id);
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setMenu({ x: e.clientX, y: e.clientY, server: s });
                     }}
-                    onDoubleClick={(e) => onConnect(s, e.shiftKey)}
-                    onKeyDown={(e) => e.key === 'Enter' && onConnect(s, e.shiftKey)}
+                    onDoubleClick={(e) => !selecting && !e.ctrlKey && !e.metaKey && onConnect(s, e.shiftKey)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === ' ') {
+                        e.preventDefault();
+                        toggleMark(s.id);
+                      } else if (e.key === 'Enter') onConnect(s, e.shiftKey);
+                    }}
                   >
+                    {(selecting || marked.size > 0) && <input type="checkbox" className="hcard-check" tabIndex={-1} readOnly checked={marked.has(s.id)} />}
                     <HostTile server={s} vmState={vmStates[s.id]} />
                     <span className="hcard-text">
                       <span className="hcard-name">{s.name}</span>
@@ -269,7 +371,7 @@ export function HostsPage({
               </div>
             </section>
           ))}
-          <p className="muted small">Double-click or Enter connects · click selects · pencil edits · right-click for more · Shift opens an additional session</p>
+          <p className="muted small">Double-click or Enter connects · drag to arrange · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session</p>
         </>
       )}
 
@@ -312,13 +414,41 @@ export function HostsPage({
       )}
       {wsDialog?.kind === 'move' && (
         <MoveDialog
-          server={wsDialog.server}
+          title={`Move "${wsDialog.server.name}"`}
+          current={wsDialog.server.workspace}
           workspaces={workspaces}
           onClose={() => setWsDialog(null)}
           onPick={(target) => {
             const server = wsDialog.server;
             setWsDialog(null);
             onMove([server], target);
+          }}
+        />
+      )}
+
+      {bulk === 'login' && (
+        <BulkLoginDialog
+          hosts={markedHosts}
+          keys={keys}
+          identities={identities}
+          onClose={() => setBulk(null)}
+          onApply={(login) => {
+            setBulk(null);
+            onBulkLogin(markedHosts, login);
+            stopSelecting();
+          }}
+        />
+      )}
+      {bulk === 'move' && (
+        <MoveDialog
+          title={`Move ${markedHosts.length} host${markedHosts.length === 1 ? '' : 's'}`}
+          current={null}
+          workspaces={workspaces}
+          onClose={() => setBulk(null)}
+          onPick={(target) => {
+            setBulk(null);
+            onMove(markedHosts, target);
+            stopSelecting();
           }}
         />
       )}
@@ -368,6 +498,9 @@ export function HostsPage({
                 ]
               : []),
             { label: 'Duplicate', icon: <IconDuplicate size={14} />, onClick: () => onDuplicateHost(menu.server) },
+            ...(filtered.some((x) => x.sortOrder)
+              ? [{ label: 'Sort these hosts by name again', icon: <IconRefresh size={14} />, onClick: () => onReorder(filtered.map((x) => x.id), true) }]
+              : []),
             { label: 'Delete', icon: <IconTrash size={14} />, danger: true, separator: true, onClick: () => onDelete(menu.server) },
           ]}
         />
@@ -378,12 +511,15 @@ export function HostsPage({
 
 /** Picker for "Move to workspace…": existing workspaces, a new one or none. */
 function MoveDialog({
-  server,
+  title,
+  current,
   workspaces,
   onPick,
   onClose,
 }: {
-  server: Server;
+  title: string;
+  /** Workspace the hosts are in now; null = several different hosts. */
+  current: string | null;
   workspaces: string[];
   onPick: (target: string) => void;
   onClose: () => void;
@@ -401,16 +537,16 @@ function MoveDialog({
         }}
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
       >
-        <h2>Move "{server.name}"</h2>
+        <h2>{title}</h2>
         <div className="pop-list" style={{ width: '100%' }}>
           {workspaces
-            .filter((w) => w !== server.workspace)
+            .filter((w) => w !== current)
             .map((w) => (
               <button type="button" key={w} className="pop-item" onClick={() => onPick(w)}>
                 <span className="pop-name">{w}</span>
               </button>
             ))}
-          {server.workspace && (
+          {current !== '' && (
             <button type="button" className="pop-item" onClick={() => onPick('')}>
               <span className="pop-name">No workspace</span>
             </button>

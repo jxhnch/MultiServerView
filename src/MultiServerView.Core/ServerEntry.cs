@@ -78,6 +78,9 @@ public sealed class ServerEntry : IVaultItem
     public string VmwareRef { get; set; } = "";
 
     public string Group { get; set; } = "";
+
+    /// <summary>Position chosen by the user (drag and drop); 0 = not placed, such hosts come after the placed ones, by name.</summary>
+    public int SortOrder { get; set; }
     public List<string> Tags { get; set; } = new();
     public bool Favorite { get; set; }
     public DateTimeOffset? LastUsed { get; set; }
