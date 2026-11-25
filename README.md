@@ -161,7 +161,7 @@ SSH host keys are trusted on first use. If a known key changes, the connection i
 
 ## How this project is built
 
-MultiServerView is **vibe-coded**: I built it together with an AI coding assistant (Claude Code). I steer the design and test the result, the assistant writes most of the code. The code has tests and the builds run a self-test, but **please review it yourself before trusting it with production credentials**, and report anything that looks wrong.
+MultiServerView is **vibe-coded**: I built it together with an AI coding assistant. I steer the design and test the result, the assistant writes most of the code. The code has tests and the builds run a self-test, but **please review it yourself before trusting it with production credentials**, and report anything that looks wrong.
 
 It is inspired by [Termius](https://termius.com): one place for hosts, terminal, SFTP and a vault that is available everywhere. I wanted that workflow on Windows, with RDP and VNC included and under my own control. This is an independent project and not affiliated with Termius.
 
