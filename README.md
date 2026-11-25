@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/jxhnch/MultiServerView/releases/latest"><img src="https://img.shields.io/github/v/release/jxhnch/MultiServerView?style=flat-square&label=release&color=3b9bff" alt="Latest release"></a>
+  <a href="https://github.com/jxhnch/MultiServerView/releases"><img src="https://img.shields.io/github/downloads/jxhnch/MultiServerView/total?style=flat-square&label=downloads&color=3b9bff" alt="Total downloads"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3b9bff?style=flat-square" alt="Platforms: Windows and Linux">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-source--available-1a2133?style=flat-square" alt="License: source-available"></a>
 </p>
