@@ -1,237 +1,169 @@
-# MultiServerView
+<p align="center">
+  <img src="docs/screenshots/icon.png" alt="" width="96">
+</p>
 
-**One window for all your servers.** SSH, SFTP, RDP and VNC in tabs, a fast host switcher, workspaces to keep hundreds of hosts tidy, and an end-to-end encrypted vault that you can keep on your PC, in a folder, on GitHub or in Supabase. For Windows and Linux. Free to use, source-available, not open source.
+<h1 align="center">MultiServerView</h1>
+
+<p align="center">
+  <strong>One window for all your servers.</strong><br>
+  SSH, SFTP, RDP, VNC and more in tabs, with an encrypted vault that you decide where to keep.
+</p>
+
+<p align="center">
+  <a href="https://github.com/jxhnch/MultiServerView/releases/latest"><img src="https://img.shields.io/github/v/release/jxhnch/MultiServerView?style=flat-square&label=release&color=3b9bff" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3b9bff?style=flat-square" alt="Platforms: Windows and Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-source--available-1a2133?style=flat-square" alt="License: source-available"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/jxhnch/MultiServerView/releases/latest"><b>Download</b></a> ·
+  <a href="#features">Features</a> ·
+  <a href="#your-servers-in-any-terminal">msv</a> ·
+  <a href="#ai-tools-optional">AI tools</a> ·
+  <a href="#vault-and-security">Security</a> ·
+  <a href="#documentation">Docs</a>
+</p>
+
+<p align="center">
+  <a href="docs/screenshots/hosts.png"><img src="docs/screenshots/hosts.png" alt="Host overview, grouped into Homelab, Production and Staging" width="900"></a>
+</p>
 
 <table>
   <tr>
-    <td><a href="docs/screenshots/hosts.png"><img src="docs/screenshots/hosts.png" alt="Hosts" width="300"></a></td>
-    <td><a href="docs/screenshots/terminal.png"><img src="docs/screenshots/terminal.png" alt="Terminal" width="300"></a></td>
-    <td><a href="docs/screenshots/sftp.png"><img src="docs/screenshots/sftp.png" alt="SFTP" width="300"></a></td>
+    <td width="33%"><a href="docs/screenshots/sftp.png"><img src="docs/screenshots/sftp.png" alt="Two-pane SFTP browser"></a></td>
+    <td width="33%"><a href="docs/screenshots/import.png"><img src="docs/screenshots/import.png" alt="Import page"></a></td>
+    <td width="33%"><a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Terminal settings"></a></td>
   </tr>
   <tr>
-    <td align="center">Hosts and workspaces</td>
-    <td align="center">SSH terminal</td>
-    <td align="center">SFTP</td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/import.png"><img src="docs/screenshots/import.png" alt="Import" width="300"></a></td>
-    <td><a href="docs/screenshots/forwards.png"><img src="docs/screenshots/forwards.png" alt="Port forwarding" width="300"></a></td>
-    <td><a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Settings" width="300"></a></td>
-  </tr>
-  <tr>
+    <td align="center">Two-pane SFTP</td>
     <td align="center">Import</td>
-    <td align="center">Port forwarding</td>
-    <td align="center">Settings</td>
+    <td align="center">Terminal themes</td>
   </tr>
 </table>
+
+MultiServerView is a desktop app for people who jump between many machines: homelab, customers, school, work. Hosts are sorted into workspaces, every connection opens in a tab, and your logins stay in an encrypted vault. It is free to use and source-available (not open source).
 
 ## Features
 
 ### Connect
-- **SSH terminal** – real terminal (xterm.js), password or key login, host key verification (trust on first use), 10 color schemes, fonts, a password prompt on failed logins just like PuTTY.
-- **SFTP like WinSCP** – two panes with drag & drop, folders with progress, speed and cancel; **F-keys** (F2 rename, F4 edit, F5 copy, F6 move, F7 new folder, Del delete, Alt+Enter properties), multi-select with masks, sortable columns, filter, hidden-files switch, editable path bar with back/forward history and bookmarks, right-click menus, move by dragging onto a folder, **overwrite choices** (all / only older / skip), **permissions (chmod)** with recursion, folder sizes, SHA-256 checksums, **open remote files in your own editor** and upload again on every save, built-in text editor, and **compare folders** to see what is new or different. The left pane works on your PC too (recycle bin, Show in Explorer).
-- **RDP** – the native Windows RDP control (the same as mstsc / mRemoteNG) right inside a tab.
-- **VNC** – noVNC in a tab, including Ctrl+Alt+Del and clipboard.
-- **Telnet and serial** – the same terminal for network devices (switches, routers): Telnet with proper option negotiation, and serial consoles (COM ports, `/dev/ttyUSB0`, any baud rate).
-- **WinRM (PowerShell)** – a PowerShell prompt on a Windows server without SSH (experimental, HTTPS recommended).
-- **Virtual machine control** – hosts imported from Proxmox or VMware show a status dot, and a small power button starts, shuts down, restarts, suspends or force-stops the VM.
-- **TeamViewer** – save a partner ID (and password) as a host and start the installed TeamViewer client with one click.
-- **`msv` in any terminal** – type `msv` in PowerShell, cmd or bash and pick a server from a list (type to filter, Enter connects); `msv web` connects to "web" right away, `msv list` prints the servers. Works for SSH, Telnet and serial hosts, in the same window. It asks for your master password and only reads the vault, so it also works while the app is open. The Windows installer can add it to your PATH (a checkbox); with the ZIP, add the folder to your PATH yourself. The Linux packages install `msv` in `/usr/bin`.
-- **Integrated browser (Web hosts)** – open the web page of a firewall, router, Proxmox or printer in a tab. The saved user name and password are filled in and sent when the login page appears (HTTP basic authentication works too), pages that refuse to be shown in a frame work, WebSockets (e.g. the Proxmox console) are passed on, and jump hosts can be used. Self-signed certificates are accepted the first time and remembered like an SSH host key (Known hosts); a changed certificate is refused. The page can also be opened in the system browser.
-- **Jump hosts** – chain one or more SSH hosts for SSH, SFTP, tunnels, VNC and RDP.
-- **Port forwarding** – local (-L), remote (-R) and SOCKS5 (-D), start/stop with one click.
-- **Split view** – several terminals side by side in one tab, with broadcast (type once, send to all).
+
+| | |
+|---|---|
+| **SSH** | xterm.js terminal, password or key login, host key check, 10 color schemes |
+| **SFTP** | Two panes, drag & drop, WinSCP-style F-keys, folder compare, edit remote files in your own editor |
+| **RDP** | Inside a tab. Windows uses the same native control as `mstsc` |
+| **VNC** | noVNC with clipboard and Ctrl+Alt+Del |
+| **Telnet and serial** | For switches, routers and consoles (`COM3`, `/dev/ttyUSB0`) |
+| **Web** | Open firewall, router, Proxmox or printer pages in a tab, with the saved login filled in |
+| **WinRM** | PowerShell on Windows servers without SSH *(experimental)* |
+| **TeamViewer** | Save partner IDs as hosts and start the installed client |
+
+### Work
+
+- **Jump hosts**, chained if needed, for SSH, SFTP, tunnels, VNC, RDP and web pages
+- **Port forwarding**: local (`-L`), remote (`-R`) and SOCKS5 (`-D`)
+- **Split view** with several terminals in one tab, plus broadcast to type into all of them
+- **VM power control** for hosts imported from Proxmox or VMware, with a status dot
+- **Snippets** with `{{variables}}`, reusable identities, SSH key generator and one-click key install
 
 ### Organize
-- **Workspaces** – one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
-- **Quick switcher** – `Ctrl+K`, a search bar that also understands `ssh user@host`, tabs, favorites, groups, OS logos, light and dark theme.
-- **Identities, keys and snippets** – reuse credentials across hosts, generate SSH keys and install the public key on a server with one click, snippets with `{{variables}}` that ask for values when you run them.
-- **Known hosts and history** – review and reset stored host keys, see your connection history (local only, no passwords).
 
-### Import
-Bring your servers with you. Duplicates are skipped, existing hosts stay untouched.
-- **Proxmox VE** – connect with a read-only API token (certificate pinning included) and add VMs and containers as hosts, with their IPs and operating systems. Choose whether Proxmox pools become workspaces or groups. Delete everything an import added again with one click.
-- **VMware Workstation** – reads your VM library, including addresses from running VMs and the VMware DHCP leases.
-- **mRemoteNG**, **OpenSSH config** (`~/.ssh/config`), **PuTTY** (directly from Windows or a `.reg` file) and **CSV**.
+- **Workspaces** per customer, project or lab, so you never scroll through hundreds of hosts
+- **Quick switcher** on `Ctrl+K`, which also understands `ssh user@host`
+- Favorites, groups, OS logos, light and dark theme, known hosts and connection history
 
-### Let AI work in MultiServerView like you do
-An optional **MCP server** (off by default) lets AI tools use the app the way you do. Open **AI tools** in the left menu, switch it on and pick your tool (**Claude Code, Codex, Cursor, VS Code Copilot, Antigravity, Claude Desktop** or any MCP client): the page shows the exact command or config text, and can write it into the tool's config file with one click.
+### Bring your hosts with you
 
-What the AI can do:
-- **Servers:** run commands, read, write, upload, download, rename, delete and change permissions of files over SSH/SFTP, and work in **interactive terminals** (sudo, top, editors, installers). Also on **Telnet** and **serial** consoles (switches, routers) and PowerShell on Windows servers through **WinRM**, without SSH.
-- **Virtual machines:** see the power state of Proxmox and VMware hosts and start, shut down, restart, suspend or force-stop them.
-- **Remote desktops:** see and operate **VNC** screens (and **RDP** screens in the Linux app): screenshots, clicks, drag, scroll, typing and shortcuts.
-- **Management:** add, change and delete hosts, generate and install SSH keys, manage snippets, identities and port forwards.
-- **This PC:** list, read, write and move files (deleting goes to the recycle bin).
+Import from **Proxmox VE**, **VMware Workstation**, **mRemoteNG**, **OpenSSH config**, **PuTTY** and **CSV**. Duplicates are skipped and existing hosts are not changed.
 
-It listens on `127.0.0.1` only and needs the token shown on the page. Anything that has the token can do all of this while the vault is unlocked, so only enable it when you want that. Saved passwords and private keys are never shown to the AI, and every connection it makes appears under **Logs**. If you want less: **read-only mode** offers only tools that look, and you can limit it to some workspaces.
+Everything in detail: **[Features](docs/features.md)** · **[Keyboard shortcuts](docs/shortcuts.md)**
 
-### Protect your data
-- **Encrypted vault** – PBKDF2-SHA256 (600,000 iterations) → AES-256-GCM. Passwords and private keys are never stored in plain text.
-- **One vault, one place** – store it on **this PC**, in a **folder** (OneDrive, iCloud, Dropbox, Nextcloud …), in a private **GitHub gist** (you only need a token) or in your own free **Supabase** project. Every change is saved there right away, other devices pick it up within a minute. No merging: if two devices change it at the same time, you are asked which version to keep and the other one is saved as a backup file. The data is encrypted before it leaves your PC.
-- **Clear vault** – wipe everything with three confirmation steps. Change the master password, set an auto-lock, back up the vault.
+## Your servers in any terminal
 
-## Download and install
+`msv` reads the same vault from PowerShell, cmd or bash, for SSH, Telnet and serial hosts.
 
-Get the latest version from the **[Releases page](https://github.com/jxhnch/MultiServerView/releases)**:
+```bash
+msv          # pick a server from a list, type to filter
+msv web      # connect to "web" right away, or pick from the matches
+msv list     # print all servers
+```
 
-| File | For |
+It asks for your master password and never writes to the vault, so you can use it while the app is open. [Setup](docs/features.md#msv-command-line)
+
+## AI tools (optional)
+
+A built-in **MCP server** lets Claude Code, Codex, Cursor, VS Code Copilot, Antigravity, Claude Desktop and other MCP clients work with your servers: run commands, manage files, use interactive terminals, control VMs and more.
+
+- **Off by default**, listens on `127.0.0.1` only and requires a token
+- Saved passwords and private keys are never shown to the AI
+- **Read-only mode** and a limit to selected workspaces are available
+
+> [!WARNING]
+> Without those limits, anything that has the token has wide access to your servers, and to files on this PC, while the vault is unlocked. Read [what the AI can do](docs/ai-tools.md) before you switch it on.
+
+## Download
+
+Get the latest build from the **[Releases page](https://github.com/jxhnch/MultiServerView/releases/latest)**.
+
+| System | File |
 |---|---|
-| `MultiServerView-Setup-x.y.z.exe` | Installer wizard (no admin rights needed, Start menu entry, uninstaller). Updates itself: the app checks GitHub for a newer release at startup and installs it on request (switch off in *Settings → About*) |
-| `MultiServerView-x.y.z-portable-win-x64.zip` | Portable: unpack anywhere and run `MultiServerView.exe` |
+| **Windows**, installer | `MultiServerView-Setup-<version>.exe` (no admin rights needed, updates itself on request) |
+| **Windows**, portable | `MultiServerView-<version>-portable-win-x64.zip` |
+| **Debian / Ubuntu** | `.deb` |
+| **Fedora / RHEL-based** | `.rpm` |
+| **Other Linux** | `.AppImage` or `.tar.gz` |
+| **Arch-based** | [`PKGBUILD`](packaging/linux/PKGBUILD) |
 
-Nothing else has to be installed: .NET is bundled and the WebView2 runtime is part of Windows 10/11.
+On first start you create a master password.
 
-> **"Windows protected your PC" (SmartScreen)?** The downloads are not code-signed yet. Code-signing certificates cost money and are tied to a verified identity, and SmartScreen also distrusts every new, little-downloaded program. It does not mean the file is malware. Click **More info → Run anyway**. To be sure you have the original, download only from this repository's Releases page; the whole source and the build workflow (`.github/workflows/release.yml`) are public, so you can build it yourself as well.
+> [!IMPORTANT]
+> **There is no password recovery.** If you forget the master password, nobody can open your vault.
 
-On first start you create a **master password** (at least 8 characters). There is no recovery: if you forget it, nobody can open your vault.
+> [!NOTE]
+> **Windows shows "Windows protected your PC"?** The files are not code-signed yet. Download only from this repository, then click **More info → Run anyway**. [Why this happens](docs/install.md#smartscreen-warning)
 
-## Where your data lives and how to start from zero
+Linux packages, dependencies and uninstalling: **[Installation guide](docs/install.md)**
 
-Uninstalling the app does **not** delete your data (so updates and reinstalls never lose your vault):
+## Vault and security
 
-| What | Location |
+Your vault is encrypted with **AES-256-GCM**, using a key derived from your master password (**PBKDF2-SHA256, 600,000 iterations**). It is encrypted before it leaves your PC.
+
+You choose where it lives:
+
+| Place | What you need |
 |---|---|
-| Vault (local copy), source settings, connection history, settings | `%APPDATA%\MultiServerView` (`vault.msv`, `sync.json`, `history.json`, ...) |
-| Interface settings (theme, terminal look) | `%LOCALAPPDATA%\MultiServerView\webview` |
-| Your vault at a folder, GitHub or Supabase | wherever you chose it, never touched by the app's uninstaller |
+| **This PC** | Nothing, this is the default |
+| **A folder** | A folder synced by OneDrive, iCloud, Dropbox or Nextcloud |
+| **GitHub** | A private gist and a token with the `gist` permission |
+| **Supabase** | Your own free project |
 
-To start completely from scratch (**this permanently deletes your vault, there is no recovery**):
+SSH host keys are trusted on first use. If a known key changes, the connection is refused. More in **[Vault and security](docs/vault.md)**.
 
-1. Optional: make a backup in *Settings* first.
-2. Close MultiServerView and uninstall it (or just close it if you keep it).
-3. Delete both folders:
+## Documentation
 
-```bash
-rmdir /s /q "%APPDATA%\MultiServerView"
-rmdir /s /q "%LOCALAPPDATA%\MultiServerView"
-```
-
-4. Delete the vault at its source as well (the file `MultiServerView-Vault.msv` in your folder, the gist at GitHub or the row in Supabase), otherwise you can load it again. Then reinstall and create a new master password.
-
-Portable ZIP: the same applies. If you only want to wipe the vault, use *Settings → Clear vault* inside the app (it empties the vault but keeps your master password).
-
-## Keyboard shortcuts
-
-In a terminal, plain Ctrl combinations belong to the shell, so app commands use `Ctrl+Shift`:
-
-| Key | Action |
+| Page | Contents |
 |---|---|
-| `Ctrl+K` | Quick connect (outside the terminal) |
-| `Ctrl+Shift+K` | Quick connect (**everywhere**, also inside a terminal) |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
-| `Ctrl+1 … 9` | Jump to a tab (1 = Hosts) |
-| `Ctrl+Shift+PageUp` / `PageDown` | Move the current tab left / right (you can also drag tabs) |
-| `Ctrl+Shift+W` | Close tab (middle click works too) |
-| `Ctrl+Shift+N` | New host |
-| `Ctrl+Shift+D` | Second session to the same host |
-| `Shift+Enter` / `Shift+click` | Always open a new session when connecting |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Terminal: copy / paste (right click works too) |
-
-When the focus is inside an **RDP session**, all keys go to the remote PC (as in every RDP client). Click another tab with the mouse to leave it.
-
-## Choose where your vault lives
-
-Open **Vault source** in the left menu and pick one of four places:
-
-| Source | What you need |
-|---|---|
-| **This PC** | Nothing. This is the default. |
-| **A folder** | A folder that OneDrive, iCloud, Dropbox or Nextcloud already keeps in step. Choose it, done. |
-| **GitHub** | A token with the `gist` permission ([create one here](https://github.com/settings/tokens/new?scopes=gist&description=MultiServerView), the link preselects it). Paste it, done. |
-| **Supabase** | A free project, one SQL snippet ([`docs/supabase.sql`](docs/supabase.sql)) and an account. The page guides you through it. |
-
-When you choose a place that is still empty, your vault moves there. When it already contains a vault (for example from your other PC), the app asks you: **use the vault that is there** (your current one is kept as a backup file) or **replace it with mine**. So a second device simply picks the same place and takes the vault that is already there.
-
-Without a connection you can keep working: changes wait on this PC and are saved as soon as the place is reachable again. The master password never leaves your PC. Change it on one device and the others ask for the new one the next time they open the vault.
-
-## Security in short
-
-- Vault file: `%APPDATA%\MultiServerView\vault.msv`, encrypted with a key derived from your master password.
-- Private SSH keys are never sent back to the UI after import; connections run entirely in the host process.
-- SSH host keys use trust on first use. If the key of a known host changes, the connection is **refused** (you can reset the key in the host dialog).
-- VNC runs through a local bridge that only listens on `127.0.0.1` and protects every connection with a one-time token.
-- The browser development mode (`npm run dev`) stores demo data unencrypted and is only meant for UI development.
-
-## Build from source
-
-Requirements: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and [Node.js 20+](https://nodejs.org).
-
-```bash
-scripts\publish.cmd          # runs tests, builds the UI, publishes to publish\MultiServerView.exe
-```
-
-For quick experiments:
-
-```bash
-cd ui && npm install && npm run build
-dotnet run --project src/MultiServerView.App
-```
-
-> `dotnet publish` does not rebuild the UI. Always run `npm run build` in `ui/` first.
-
-Develop the UI in the browser with demo data and a demo shell:
-
-```bash
-cd ui && npm install && npm run dev
-```
-
-Or against the real window with hot reload:
-
-```bash
-set MSV_DEV_URL=http://localhost:5173
-dotnet run --project src/MultiServerView.App
-```
-
-Run the tests (also works on Linux/macOS):
-
-```bash
-dotnet test tests/MultiServerView.Core.Tests
-```
-
-SSH/SFTP/tunnel integration tests only run when `MSV_SSH_TEST_DIR` points to a folder with test keys and a local sshd listens on `127.0.0.1:2222` (user `msvtest`); otherwise they do nothing.
-
-### Project layout
-
-| Folder | Contents |
-|---|---|
-| `src/MultiServerView.Core` | Vault + crypto, vault sources (folder, GitHub, Supabase), SSH/SFTP/tunnels (SSH.NET), VNC bridge, importers (net8.0, platform independent) |
-| `src/MultiServerView.App` | WinForms window with WebView2, bridge to the UI, RDP hosting, DPAPI, auto-save to the source, self-test |
-| `ui/` | React + TypeScript (Vite): interface, xterm.js, noVNC |
-| `tests/` | xUnit tests (crypto, vault, sources against a simulated Supabase API, GitHub and folders, VNC bridge, importers, SSH against a real sshd) |
-| `installer/` | Inno Setup script for the installer wizard |
-| `docs/` | Supabase SQL, comparison with Termius, first-run checklist, screenshots |
-
-## Linux
-
-Download from the [Releases](https://github.com/jxhnch/MultiServerView/releases) page (`linux-x64`):
-
-- **Debian / Ubuntu (`.deb`)**: `sudo apt install ./MultiServerView-<version>-linux-x64.deb` - installs the needed libraries automatically.
-- **Fedora / RHEL-based (`.rpm`)**: `sudo dnf install ./MultiServerView-<version>-linux-x64.rpm` - installs the needed libraries automatically.
-- **Arch-based (Arch, Manjaro, EndeavourOS, CachyOS)**: install via the provided [`packaging/linux/PKGBUILD`](packaging/linux/PKGBUILD):
-  ```bash
-  cd packaging/linux && makepkg -si
-  ```
-- **Generic (`.AppImage` / `.tar.gz`)**: `chmod +x MultiServerView-*.AppImage && ./MultiServerView-*.AppImage`, or unpack the `.tar.gz` and run `multiserverview`. Requires WebKitGTK 4.1, GTK 3, libnotify and xdg-utils from your distribution:
-  - Debian / Ubuntu: `libwebkit2gtk-4.1-0 libgtk-3-0 libnotify4 xdg-utils`
-  - Fedora / RHEL: `webkit2gtk4.1 gtk3 libnotify xdg-utils`
-  - Arch: `webkit2gtk-4.1 gtk3 libnotify xdg-utils` (and `fuse2` for AppImages, or run with `--appimage-extract-and-run`)
-
-Same vault and UI as on Windows, RDP is drawn inside the app. Differences: system title bar, secrets protected by a key file (mode 600) instead of DPAPI, no in-app self-update (download the new version from the releases page). `multiserverview --selftest <folder>` checks vault, sources, MCP and (with `MSV_SMOKE_SSH=host:port:user:password`) SSH/SFTP without a window.
+| [Features](docs/features.md) | Every feature in detail, import limits, `msv` |
+| [AI tools](docs/ai-tools.md) | MCP setup, permissions and limits |
+| [Vault and security](docs/vault.md) | Vault sources, conflicts, data locations, full reset |
+| [Installation](docs/install.md) | Windows and Linux |
+| [Keyboard shortcuts](docs/shortcuts.md) | All shortcuts |
+| [Development](docs/development.md) | Build, test, project layout |
+| [Comparison with Termius](docs/comparison-with-termius.md) | What is there and what is missing |
 
 ## Known limitations
 
-- While a palette or dialog is open, a running RDP window is hidden briefly (the native window would otherwise cover the UI). The session keeps running.
-- Convert PuTTY keys (`.ppk`) to OpenSSH format in PuTTYgen first.
-- Import of saved passwords: mRemoteNG (decrypted with its master password, default or custom) and CSV; keys via `IdentityFile` of an OpenSSH config. PuTTY sessions and Proxmox/VMware have no readable passwords, and PuTTY `.ppk` keys must be converted to OpenSSH format first. There is no Termius import.
-- No Telnet/Serial/Mosh, no AI autocomplete, no teams. See the [comparison with Termius](docs/comparison-with-termius.md).
+- No Mosh, no local terminal tab, no AI autocomplete, no team features
+- PuTTY keys (`.ppk`) must first be converted to OpenSSH format in PuTTYgen
+- There is no Termius import
+- Windows: a running RDP window is briefly hidden while a menu, palette or dialog is open. The session keeps running
+
+## How this project is built
+
+MultiServerView is **vibe-coded**: I built it together with an AI coding assistant (Claude Code). I steer the design and test the result, the assistant writes most of the code. The code has tests and the builds run a self-test, but **please review it yourself before trusting it with production credentials**, and report anything that looks wrong.
+
+It is inspired by [Termius](https://termius.com): one place for hosts, terminal, SFTP and a vault that is available everywhere. I wanted that workflow on Windows, with RDP and VNC included and under my own control. This is an independent project and not affiliated with Termius.
 
 ## License
 
-[MultiServerView Source-Available License](LICENSE): free to use, but no redistribution or forks of your own. Contributions are welcome: open an issue or a pull request.
-
-## Inspiration and vibe coding
-
-MultiServerView is inspired by [Termius](https://termius.com), whose workflow (one place for hosts, terminal, SFTP and a vault that is available everywhere) I wanted on Windows with RDP and VNC included and under my own control. It is an independent project and not affiliated with Termius.
-
-This project is **vibe-coded**: it was built together with an AI coding assistant (Claude Code). I steer the design and test the result, the assistant writes most of the code. The code is tested and the self-test runs on every build, but please review it yourself before trusting it with production credentials, and report anything that looks wrong.
+[MultiServerView Source-Available License](LICENSE): free to use, including commercial use inside your own organization. Redistribution and independent forks are not allowed. Contributions are welcome through issues and pull requests.

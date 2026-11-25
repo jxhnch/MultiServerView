@@ -16,7 +16,7 @@ Windows paths, **jump host**, **port forwarding**, terminal and SFTP in the real
 - [ ] **Your real servers**: create a first SSH host (try password **and** key), connect, type commands, resize the window.
 - [ ] **RDP to your Windows PC/server**: save the password, connect, resize the window, test the clipboard.
 - [ ] **VNC** (if you have one).
-- [ ] **Sync**: choose a sync folder (or set up Supabase, see README), then use "Load vault" on a second PC.
+- [ ] **Vault source**: pick a folder, GitHub or Supabase (see [Vault and security](vault.md)), then pick the same place on a second PC and use the vault that is there.
 - [ ] **Import**: your mRemoteNG file (`confCons.xml`), PuTTY sessions, a Proxmox server or VMware Workstation VMs.
 - [ ] **Feel**: does hosts → connect → switch feel smooth? What annoys you?
 
