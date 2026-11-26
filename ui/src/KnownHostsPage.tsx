@@ -19,6 +19,21 @@ export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | '
     }
   }
 
+  async function clearAll() {
+    const sure = await askConfirm(
+      `Forget all ${items.length} saved host keys and certificates?\nThe next connection to each server trusts whatever it shows then, so only do this in a network you trust.`,
+      { title: 'Clear all known hosts', confirmLabel: 'Clear all', danger: true },
+    );
+    if (!sure) return;
+    try {
+      const { removed } = await api.knownHostsClear();
+      await load();
+      toast(`${removed} known host${removed === 1 ? '' : 's'} forgotten`);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-head">
@@ -29,6 +44,11 @@ export function KnownHostsPage({ toast }: { toast: (msg: string, kind?: 'ok' | '
             refused – this protects against man-in-the-middle attacks. The list is stored together with the rest of the vault.
           </p>
         </div>
+        {items.length > 0 && (
+          <button className="ghost danger" onClick={() => void clearAll()}>
+            <IconTrash size={15} /> Clear all
+          </button>
+        )}
       </div>
       {items.length === 0 ? (
         <div className="empty-card">

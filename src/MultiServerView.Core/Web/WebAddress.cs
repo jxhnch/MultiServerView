@@ -7,7 +7,7 @@ public static class WebAddress
     public static bool TryNormalize(string? typed, out string address)
     {
         address = "";
-        var text = (typed ?? "").Trim();
+        var text = UrlResolver.Repair(typed);
         if (text.Length == 0 || text.Any(char.IsWhiteSpace)) return false;
         if (!text.Contains("://", StringComparison.Ordinal)) text = "https://" + text;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || uri.Host.Length == 0) return false;

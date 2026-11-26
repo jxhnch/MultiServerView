@@ -145,9 +145,32 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  arch:
+    # The ready-made Arch package: built, installed and self-tested on a real Arch system.
+    needs: [linux]
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-files
+          path: linux-files
+
+      - name: Build, install and test the Arch package
+        run: bash packaging/linux/build-arch.sh "linux-files/MultiServerView-${GITHUB_REF_NAME#v}-linux-x64.tar.gz" "${GITHUB_REF_NAME#v}" arch-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-files
+          path: arch-out/*
+          if-no-files-found: error
+          retention-days: 3
+
   release:
-    # Only runs when both builds succeeded, so a release is never half finished.
-    needs: [windows, linux]
+    # Only runs when all builds succeeded, so a release is never half finished.
+    needs: [windows, linux, arch]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -165,4 +188,4 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -la dist
           gh release create '${{ github.ref_name }}' dist/* --title '${{ github.ref_name }}' --generate-notes \
-            --notes 'Windows: the installer needs no admin rights, the ZIP is portable. SmartScreen may warn on first start because the files are not code-signed yet (More info, then Run anyway). Linux: .deb (Debian/Ubuntu), .rpm (Fedora/RHEL), .AppImage or .tar.gz (plus PKGBUILD for Arch), see the README.'
+            --notes 'Windows: the installer needs no admin rights, the ZIP is portable. SmartScreen may warn on first start because the files are not code-signed yet (More info, then Run anyway). Linux: .deb (Debian/Ubuntu), .rpm (Fedora/RHEL), .AppImage or .tar.gz, and multiserverview-bin-x86_64.pkg.tar.zst for Arch (install: pacman -U), see the README.'

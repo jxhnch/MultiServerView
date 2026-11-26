@@ -208,6 +208,8 @@ export interface ProxmoxInfo {
 }
 
 export interface ProxmoxCert {
+  /** The address that answered, with https and port filled in. */
+  url: string;
   fingerprint: string;
   subject: string;
   notAfter: string;

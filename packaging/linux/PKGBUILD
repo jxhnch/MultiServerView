@@ -1,16 +1,18 @@
 # Maintainer: jxhnch <123569094+jxhnch@users.noreply.github.com>
-# Build and install on Arch-based distributions:
+# Most people do not need this file: every release has a ready-made package (see docs/install.md).
+# To build it yourself on an Arch-based distribution:
 #   cd packaging/linux && makepkg -si
+# The release workflow fills in the version and checksums of the package it publishes (packaging/linux/build-arch.sh).
 # Before publishing to AUR, run `updpkgsums` to pin real SHA-256 checksums.
 
 pkgname=multiserverview-bin
-pkgver=1.8.1
+pkgver=1.11.0
 pkgrel=1
 pkgdesc='SSH, SFTP, RDP and VNC in one window with an end-to-end encrypted vault'
 arch=('x86_64')
 url='https://github.com/jxhnch/MultiServerView'
 license=('LicenseRef-MultiServerView')
-depends=('webkit2gtk-4.1' 'gtk3' 'libnotify' 'xdg-utils')
+depends=('webkit2gtk-4.1' 'gtk3' 'libnotify' 'xdg-utils' 'icu' 'openssl')
 optdepends=(
   'freerdp: external RDP client support (xfreerdp)'
   'remmina: alternative external RDP client'

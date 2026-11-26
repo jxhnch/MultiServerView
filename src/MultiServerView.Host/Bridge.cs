@@ -30,6 +30,8 @@ public sealed class Bridge : IDisposable
     private readonly AutoSync _auto;
     private readonly IRdpController _rdp;
     private readonly Action<object> _emit;
+    /// <summary>Web tabs that are being opened right now (session id -> this attempt).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> _webOpening = new();
     private readonly HistoryStore _history;
     private readonly AppSettingsStore _settings;
     private readonly IHostPlatform _platform;
@@ -376,6 +378,11 @@ public sealed class Bridge : IDisposable
             {
                 var server = _vault.FindResolved(Str(p, "serverId")) ?? throw new KeyNotFoundException("Server not found.");
                 var sessionId = Opt(p, "sessionId").Length > 0 ? Opt(p, "sessionId") : server.Id;
+                // Trying the address takes a moment. If the tab is closed or reloaded meanwhile, this attempt must not open anything.
+                var attempt = new object();
+                _webOpening[sessionId] = attempt;
+                var correction = await CorrectWebAddress(server);
+                if (!_webOpening.TryGetValue(sessionId, out var current) || current != attempt) return new { native = false, url = "", correction };
                 var target = WebTarget.Parse(server);
                 var hid = _history.Begin(server, "web");
                 try
@@ -390,13 +397,13 @@ public sealed class Bridge : IDisposable
                             $"The certificate of {target.Host} is different from the one saved earlier. This can mean that someone sits between you and the device. If you changed the certificate on purpose, remove the entry \"web/{target.Host}:{target.Port}\" on the Known hosts page and open the page again.");
                         browser.Open(sessionId, page, Bounds(p));
                         _history.End(hid, true);
-                        return new { native = true, url = page.Url };
+                        return new { native = true, url = page.Url, correction };
                     }
                     // behind a jump host the tunnel's local port replaces the real port
                     var (frameUrl, externalUrl) = _web.Open(sessionId, target, effective == server ? target.Host : effective.Host, effective == server ? target.Port : effective.Port, server.Username, server.Password);
                     _webExternal[sessionId] = externalUrl;
                     _history.End(hid, true);
-                    return new { native = false, url = frameUrl };
+                    return new { native = false, url = frameUrl, correction };
                 }
                 catch (Exception ex)
                 {
@@ -408,8 +415,13 @@ public sealed class Bridge : IDisposable
                 _platform.Browser?.Layout(Str(p, "sessionId"), Bounds(p), Bool(p, "visible"));
                 return null;
             case "web.command":
-                _platform.Browser?.Command(Str(p, "sessionId"), Str(p, "command"), Opt(p, "url"));
+            {
+                var command = Str(p, "command");
+                var url = Opt(p, "url");
+                if (command == "go") url = await UrlResolver.FindAsync(url) ?? url;
+                _platform.Browser?.Command(Str(p, "sessionId"), command, url);
                 return null;
+            }
             case "web.openExternal":
             {
                 // Only the local address of this very tab is opened (the web page itself is never handed to the system).
@@ -418,6 +430,7 @@ public sealed class Bridge : IDisposable
                 return null;
             }
             case "web.close":
+                _webOpening.TryRemove(Str(p, "sessionId"), out _);
                 _platform.Browser?.Close(Str(p, "sessionId"));
                 _web.Close(Str(p, "sessionId"));
                 _webExternal.TryRemove(Str(p, "sessionId"), out _);
@@ -607,6 +620,8 @@ public sealed class Bridge : IDisposable
             // ---------------------------------------------------------- Known hosts, history
             case "knownhosts.list":
                 return _vault.ListKnownHosts().Select(kv => new { id = kv.Key, fingerprint = kv.Value }).ToList();
+            case "knownhosts.clear":
+                return new { removed = _vault.ClearKnownHosts() };
             case "knownhosts.remove":
                 _vault.RemoveKnownHost(Str(p, "id"));
                 _mcp.InvalidateConnections();
@@ -892,8 +907,9 @@ public sealed class Bridge : IDisposable
                 return _vault.ListProxmox().Select(ProxmoxDto).ToList();
             case "proxmox.probe":
             {
-                var cert = await ProxmoxClient.ProbeAsync(Str(p, "url"));
-                return new { fingerprint = cert.Fingerprint, subject = cert.Subject, notAfter = cert.NotAfter, trusted = cert.TrustedBySystem };
+                var address = await ProxmoxClient.FindAddressAsync(Str(p, "url"));
+                var cert = await ProxmoxClient.ProbeAsync(address);
+                return new { url = address, fingerprint = cert.Fingerprint, subject = cert.Subject, notAfter = cert.NotAfter, trusted = cert.TrustedBySystem };
             }
             case "proxmox.test":
             {
@@ -927,7 +943,7 @@ public sealed class Bridge : IDisposable
                 // Power state of all hosts that were imported from Proxmox or VMware: host id -> running | stopped | paused | unknown
                 var states = new Dictionary<string, string>();
                 var all = _vault.List();
-                foreach (var group in all.Where(h => h.ProxmoxRef.Length > 0).GroupBy(h => h.ProxmoxRef.Split(':')[0]))
+                foreach (var group in all.Where(h => VmPower.TryParseProxmoxRef(h.ProxmoxRef, out _, out _, out _)).GroupBy(h => h.ProxmoxRef.Split(':')[0]))
                 {
                     var connection = _vault.FindProxmox(group.Key);
                     if (connection == null) continue;
@@ -995,14 +1011,21 @@ public sealed class Bridge : IDisposable
                 var picked = p.TryGetProperty("vms", out var arr) && arr.ValueKind == JsonValueKind.Array
                     ? arr.EnumerateArray().Select(e => (Node: Str(e, "node"), VmId: Long(e, "vmid"))).ToHashSet()
                     : new HashSet<(string, long)>();
-                if (picked.Count == 0) throw new ArgumentException("Please choose at least one VM.");
+                var wantsWeb = Bool(p, "addWeb");
+                if (picked.Count == 0 && !wantsWeb) throw new ArgumentException("Please choose at least one VM.");
+                var keyId = Opt(p, "keyId");
+                if (keyId.Length > 0 && _vault.ListKeys().All(k => k.Id != keyId)) throw new KeyNotFoundException("The SSH key does not exist anymore.");
 
                 using var client = ProxmoxClient.Create(entry);
                 var vms = (await client.ListVmsAsync()).Where(v => picked.Contains((v.Node, v.VmId))).ToList();
                 var groupBy = Opt(p, "groupBy") switch { "pool" => ProxmoxGroupBy.Pool, "node" => ProxmoxGroupBy.Node, _ => ProxmoxGroupBy.None };
-                var options = new ProxmoxImportOptions(Opt(p, "workspace"), Bool(p, "workspaceFromPool"), Opt(p, "identityId"), groupBy);
-                var result = await ProxmoxImporter.BuildAsync(client, entry.Id, vms, options, ImportedRefs());
-                var imported = _vault.UpsertMany(result.Servers);
+                var options = new ProxmoxImportOptions(Opt(p, "workspace"), Bool(p, "workspaceFromPool"), keyId.Length > 0 ? "" : Opt(p, "identityId"), groupBy,
+                    keyId, Opt(p, "username"));
+                var existing = ImportedRefs();
+                var result = await ProxmoxImporter.BuildAsync(client, entry.Id, vms, options, existing);
+                var hosts = result.Servers.ToList();
+                if (wantsWeb && !existing.Contains(ProxmoxImporter.WebRef(entry.Id))) hosts.Add(ProxmoxImporter.WebInterface(entry, options.Workspace));
+                var imported = _vault.UpsertMany(hosts);
                 return new { imported, noIp = result.NoIp, skipped = result.Skipped };
             }
 
@@ -1437,6 +1460,47 @@ public sealed class Bridge : IDisposable
             }
         }
         return list;
+    }
+
+    /// <summary>
+    /// The address of a web host does not need to be exact: the app tries which scheme and port really answer, and saves that.
+    /// Hosts behind a jump host cannot be tried from here. Changes <paramref name="server"/> and returns the new address for a
+    /// message, or "" when nothing was changed.
+    /// </summary>
+    private async Task<string> CorrectWebAddress(ServerEntry server)
+    {
+        if (server.JumpHostId.Length > 0) return "";
+        // the usual port in the port field means "nothing chosen"
+        var chosenPort = server.Port == ServerEntry.DefaultPort(Protocol.Web) ? 0 : server.Port;
+        var found = await UrlResolver.FindAsync(server.Host, chosenPort);
+        if (found == null) return "";
+        var target = WebTarget.Parse(found, 0);
+        string before;
+        try
+        {
+            var old = WebTarget.Parse(server);
+            before = old.Origin + old.StartPath;
+        }
+        catch (ArgumentException) { before = ""; }
+
+        var changed = before != target.Origin + target.StartPath;
+        // Also a right guess is saved, always with scheme AND port: from then on only the scheme on that port can be corrected,
+        // so a device that is down for a moment never makes the host jump to another port (and https never becomes http).
+        var exact = UrlResolver.Exact(found);
+        if (exact != server.Host)
+        {
+            var stored = _vault.Find(server.Id);
+            if (stored != null)
+            {
+                stored.Host = exact;
+                stored.Port = target.Port;
+                _vault.Upsert(stored);
+                _emit(new { @event = "vault.changed" });
+            }
+            server.Host = exact;
+            server.Port = target.Port;
+        }
+        return changed ? target.Origin : "";
     }
 
     private static object ProxmoxDto(ProxmoxEntry e) => new

@@ -31,7 +31,7 @@ import { WindowControls } from './WindowControls';
 import { SplitView, type SplitPane } from './SplitView';
 import { SplitPicker } from './SplitPicker';
 import { HostsPage } from './HostsPage';
-import { getUiSettings, onUiSettings, setUiSettings } from './uiSettings';
+import { effectiveTheme, getUiSettings, onTheme, setUiSettings } from './uiSettings';
 import { readTextAuto } from './files';
 import { IconClock, IconClose, IconCloud, IconCode, IconDuplicate, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconRefresh, IconServer, IconSettings, IconShield, IconSparkle, IconSun, IconUpload } from './Icons';
 import { askConfirm, ConfirmHost } from './Confirm';
@@ -89,7 +89,7 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [theme, setThemeState] = useState<Theme>(getUiSettings().theme);
+  const [theme, setThemeState] = useState<Theme>(effectiveTheme);
   const [splitPicker, setSplitPicker] = useState(false);
   const [mcpRunning, setMcpRunning] = useState(false);
 
@@ -123,8 +123,8 @@ export function App() {
   const openServerIds = useMemo(() => new Set(tabs.map((t) => t.serverId)), [tabs]);
   const themeClass = theme === 'light' ? 'theme-light' : 'theme-dark';
 
-  const toggleTheme = () => setUiSettings({ theme: theme === 'light' ? 'dark' : 'light' });
-  useEffect(() => onUiSettings((u) => setThemeState(u.theme)), []);
+  const toggleTheme = () => setUiSettings({ themeMode: theme === 'light' ? 'dark' : 'light' });
+  useEffect(() => onTheme(setThemeState), []);
 
   // ---------------------------------------------------------------- Toasts
   const toast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
@@ -1059,6 +1059,7 @@ export function App() {
                   onVmware={() => setVmwareOpen(true)}
                   onImport={importFile}
                   identities={identities}
+                  keys={keys}
                   workspaces={workspaces}
                   activeWorkspace={activeWorkspace}
                   onProxmoxImported={async () => {
@@ -1118,7 +1119,18 @@ export function App() {
               )}
               {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
               {t.kind === 'session' && s.protocol === 'rdp' && <RdpView {...common} />}
-              {t.kind === 'session' && s.protocol === 'web' && <WebView {...common} />}
+              {t.kind === 'session' && s.protocol === 'web' && (
+                <WebView
+                  {...common}
+                  onCorrected={(host, address) =>
+                    toast(
+                      `${host.name}: address corrected to ${address}` +
+                        (address.startsWith('http://') ? ' (not encrypted: the password travels in clear text)' : ''),
+                      address.startsWith('http://') ? 'error' : 'ok',
+                    )
+                  }
+                />
+              )}
               </SessionCloseContext.Provider>
             </div>
           );

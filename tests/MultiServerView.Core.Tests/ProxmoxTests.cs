@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using MultiServerView.Core;
 using MultiServerView.Core.Proxmox;
+using Web = MultiServerView.Core.Web;
 using Xunit;
 
 namespace MultiServerView.Core.Tests;
@@ -232,6 +233,30 @@ public class ProxmoxTests
         Assert.Equal("Smith", byName["ubuntu-off"].Workspace);
         Assert.Equal("pve2", byName["ubuntu-off"].Group);
         Assert.Equal(2, result.NoIp);
+    }
+
+    [Fact]
+    public async Task Import_gives_the_ssh_key_to_the_ssh_hosts_only()
+    {
+        var (result, _) = await ImportAsync(new ProxmoxImportOptions("", true, "", ProxmoxGroupBy.None, KeyId: "key-1", Username: " root "));
+        var byName = result.Servers.ToDictionary(s => s.Name);
+        var ssh = byName["debian-miller"];
+        Assert.Equal((AuthMethod.Key, "key-1", "root"), (ssh.Auth, ssh.KeyId, ssh.Username));
+        var rdp = byName["win11-miller"];
+        Assert.Equal((AuthMethod.Password, "", ""), (rdp.Auth, rdp.KeyId, rdp.Username));
+    }
+
+    [Fact]
+    public void The_web_interface_becomes_a_web_host_that_is_not_taken_for_a_vm()
+    {
+        var host = ProxmoxImporter.WebInterface(new ProxmoxEntry { Id = "conn1", Name = "Homelab", Url = "pve.example.com" }, " Lab ");
+        Assert.Equal(Protocol.Web, host.Protocol);
+        Assert.Equal("https://pve.example.com:8006", host.Host);
+        Assert.Equal(8006, host.Port);
+        Assert.Equal("Lab", host.Workspace);
+        Assert.Equal("conn1:web", host.ProxmoxRef);
+        Assert.False(VmPower.TryParseProxmoxRef(host.ProxmoxRef, out _, out _, out _));
+        Assert.Equal("https://pve.example.com:8006", Web.WebTarget.Parse(host).Origin);
     }
 
     [Fact]

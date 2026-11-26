@@ -150,8 +150,8 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
       </div>
 
       <Card title="Appearance">
-        <Row title="Design" hint="Applies to the whole app except the terminal (it has its own color scheme).">
-          <Seg value={ui.theme} onChange={(v) => setUiSettings({ theme: v })} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
+        <Row title="Design" hint="System follows your operating system. Applies to the whole app except the terminal (it has its own color scheme).">
+          <Seg value={ui.themeMode} onChange={(v) => setUiSettings({ themeMode: v })} options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
         </Row>
       </Card>
 

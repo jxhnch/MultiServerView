@@ -2343,6 +2343,8 @@ label {
 
 /* Proxmox-Import: Liste mit Häkchen */
 .pve-list {
+  flex-shrink: 0; /* the dialog scrolls instead of squeezing the list away */
+  min-height: min(180px, 30vh);
   max-height: 40vh;
   overflow: auto;
 }

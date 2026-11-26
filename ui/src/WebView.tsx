@@ -18,7 +18,10 @@ export function WebView({
   onReconnect,
   onDuplicate,
   onEdit,
+  onCorrected,
 }: {
+  /** The app found that another address works and saved it. */
+  onCorrected: (server: Server, address: string) => void;
   tabId: string;
   server: Server;
   active: boolean;
@@ -83,7 +86,8 @@ export function WebView({
     const raf = requestAnimationFrame(() => {
       api
         .webOpen(server.id, tabId, rect() ?? { x: 0, y: 0, w: 1024, h: 768 })
-        .then(({ native, url }) => {
+        .then(({ native, url, correction }) => {
+          if (correction) onCorrected(server, correction);
           if (cancelled) return;
           setMode(native ? 'native' : 'frame');
           if (native) setAddress(url);

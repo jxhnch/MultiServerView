@@ -95,15 +95,30 @@ public sealed class ProxmoxClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// The address with the port that really answers: a typed port is kept, without one 8006 is tried first and then 443 (reverse
+    /// proxy). A typed "http" becomes https. If nothing answers, the usual form is returned so the error message names it.
+    /// </summary>
+    public static async Task<string> FindAddressAsync(string url,
+        Func<string, string, int, CancellationToken, Task<Web.ProbeAnswer>>? probe = null, CancellationToken ct = default)
+    {
+        if (!Web.UrlResolver.TrySplit(url, out var typed)) return NormalizeUrl(url);
+        var ports = typed.Port > 0 ? new[] { typed.Port } : new[] { 8006, 443 };
+        var found = await Web.UrlResolver.ResolveAsync(typed.Host, ports.Select(port => ("https", port)).ToList(), probe ?? Web.UrlResolver.ProbeAsync, ct);
+        // the port is always written out: without one, 8006 is meant
+        return $"https://{typed.Host}:{found?.Port ?? ports[0]}";
+    }
+
     public static string NormalizeUrl(string url)
     {
-        var u = url.Trim().TrimEnd('/');
+        var u = Web.UrlResolver.Repair(url).TrimEnd('/');
         if (u.Length == 0) throw new ProxmoxException("Please enter the address of the Proxmox server, e.g. https://pve.example.com:8006");
         if (!u.Contains("://", StringComparison.Ordinal)) u = "https://" + u;
         if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             throw new ProxmoxException("The address must start with https://.");
-        // Without a port we use the Proxmox default: 8006.
-        return uri.IsDefaultPort ? $"https://{uri.Host}:8006" : $"https://{uri.Host}:{uri.Port}";
+        // Without a typed port we use the Proxmox default: 8006. A typed ":443" stays (Proxmox behind a reverse proxy).
+        var port = Web.UrlResolver.TrySplit(u, out var typed) && typed.Port > 0 ? typed.Port : 8006;
+        return $"https://{uri.Host}:{port}";
     }
 
     // ---------------------------------------------------------------------------------------------------- Queries

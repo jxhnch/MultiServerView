@@ -219,7 +219,7 @@ export function HostPanel({
           )}
           {s.protocol === 'web' && (
             <p className="hint">
-              Opens the web page of a device (firewall, router, Proxmox, printer …) in a tab and fills in the user name and password above when the login page appears. Self-signed certificates are accepted the first time and remembered like an SSH host key; a changed certificate is refused. Port 443 and https are used unless the address says otherwise (ports 80, 8080 and 8000 use http).
+              Opens the web page of a device (firewall, router, Proxmox, printer …) in a tab and fills in the user name and password above when the login page appears. Self-signed certificates are accepted the first time and remembered like an SSH host key; a changed certificate is refused. You do not need to know whether it is http or https, or which port: when you open the host, the app tries it out and saves the address that works. An address you typed with https is never changed to unencrypted http. Behind a jump host nothing is tried: there https and port 443 are used unless you enter something else.
             </p>
           )}
           {s.protocol === 'telnet' && <p className="hint">Telnet is not encrypted: everything you type, including passwords, travels in clear text. Use it only in trusted networks.</p>}

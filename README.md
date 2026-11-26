@@ -73,6 +73,7 @@ MultiServerView is a desktop app for people who jump between many machines: home
 - **Workspaces** per customer, project or lab, so you never scroll through hundreds of hosts
 - **Quick switcher** on `Ctrl+K`, which also understands `ssh user@host`
 - Status dots show which hosts answer, and sleeping machines can be woken with Wake-on-LAN
+- Web addresses need not be exact: the app finds out whether it is http or https, and which port
 - Drag hosts into your own order, and select several to set their SSH key or login, move or delete them
 - Favorites, groups, OS logos, light and dark theme, known hosts and connection history
 
@@ -116,7 +117,7 @@ Get the latest build from the **[Releases page](https://github.com/jxhnch/MultiS
 | **Debian / Ubuntu** | `.deb` |
 | **Fedora / RHEL-based** | `.rpm` |
 | **Other Linux** | `.AppImage` or `.tar.gz` |
-| **Arch-based** | [`PKGBUILD`](packaging/linux/PKGBUILD) |
+| **Arch-based** | `multiserverview-bin-x86_64.pkg.tar.zst` ([two commands](docs/install.md#arch-based)) |
 
 On first start you create a master password.
 

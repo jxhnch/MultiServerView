@@ -29,6 +29,7 @@
 - The saved user name and password are filled in on the device's own pages only, and sent once per tab. HTTP basic authentication works too.
 - Jump hosts can be used.
 - A self-signed certificate is accepted the first time and remembered like an SSH host key (see *Known Hosts*). A changed certificate is refused.
+- The address does not need to be exact. When you open the host, the app tries http and https and the usual ports (443, 8443, 8006, 80, 8080), repairs typing mistakes such as `https//`, and saves the address that answers. An address typed with `https` is never changed to unencrypted `http`, and you get a message when only `http` works. Hosts behind a jump host are not tried.
 - The page can also be opened in the system browser.
 
 **TeamViewer.** Save a partner ID (and password) as a host and start the installed TeamViewer client with one click.
@@ -61,14 +62,14 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 ## Organizing hosts
 
 - **Workspaces:** one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
-- **Quick switcher:** `Ctrl+K`, a search bar that also understands `ssh user@host`. Plus tabs, favorites, groups, OS logos, and a light and dark theme.
+- **Quick switcher:** `Ctrl+K`, a search bar that also understands `ssh user@host`. Plus tabs, favorites, groups, OS logos, and a light and dark theme that follows your system unless you choose one.
 - **Identities, keys and snippets:** reuse credentials across hosts, generate SSH keys and install the public key on a server with one click. Snippets can contain `{{variables}}` that ask for values when you run them.
 - **Your own order:** drag a host to a new place in its section. Right-click and choose *Sort these hosts by name again* to undo it. `msv` lists the hosts in the same order.
 - **Online status:** while the host list is on screen, each listed host gets a short TCP connection to its port once a minute (no login, nothing is sent). Green = it answers, orange = the machine answers but the port is closed, red = no answer. Hosts behind a jump host and serial hosts are not checked. The *Online status* button switches it off.
 - **Wake-on-LAN:** enter a MAC address in the host details, then right-click the host and choose *Wake up*. It works in your own network.
 - **Several hosts at once:** Ctrl+click or *Select*, then give them the same SSH key, identity or user name and password, move them to a workspace or delete them.
 - **Signing in:** when a login is missing or fails, you can enter a password or pick an SSH key, and save it for the host.
-- **Known hosts and history:** review and reset stored host keys, and see your connection history (local only, no passwords).
+- **Known hosts and history:** review and reset stored host keys (one by one or all at once), and see your connection history (local only, no passwords).
 
 ## Import
 
@@ -76,7 +77,7 @@ Duplicates are skipped and existing hosts stay untouched.
 
 | Source | Details | Saved passwords and keys |
 |---|---|---|
-| **Proxmox VE** | Read-only API token with certificate pinning. Adds VMs and containers with their IPs and operating systems. Pools can become workspaces or groups. Everything an import added can be deleted again with one click | Not readable |
+| **Proxmox VE** | Read-only API token with certificate pinning. Adds VMs and containers with their IPs and operating systems, optionally with an SSH key as their login, and the Proxmox web interface as a *Web* host. The address may be typed without `https://` and port. Pools can become workspaces or groups. Everything an import added can be deleted again with one click | Not readable |
 | **VMware Workstation** | Reads your VM library, including addresses from running VMs and the VMware DHCP leases | Not readable |
 | **mRemoteNG** | `confCons.xml` | Passwords, decrypted with its master password (default or custom) |
 | **OpenSSH config** | `~/.ssh/config` | Keys referenced by `IdentityFile` |

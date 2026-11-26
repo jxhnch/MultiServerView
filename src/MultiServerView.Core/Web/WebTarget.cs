@@ -16,7 +16,7 @@ public sealed record WebTarget(string Scheme, string Host, int Port, string Star
     /// </summary>
     public static WebTarget Parse(string host, int port)
     {
-        host = (host ?? "").Trim();
+        host = UrlResolver.Repair(host);
         if (host.Length == 0) throw new ArgumentException("The address of the web host is empty.");
         if (!host.Contains("://", StringComparison.Ordinal))
         {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { api } from './bridge';
 import { askConfirm } from './Confirm';
 import { IconClose, IconCube, IconEdit, IconPlus, IconRefresh, IconTrash } from './Icons';
-import type { Identity, ProxmoxCert, ProxmoxInfo, ProxmoxVmInfo, Server } from './types';
+import type { Identity, KeyInfo, ProxmoxCert, ProxmoxInfo, ProxmoxVmInfo, Server } from './types';
 
 type Toast = (msg: string, kind?: 'ok' | 'error') => void;
 
@@ -10,6 +10,7 @@ type Toast = (msg: string, kind?: 'ok' | 'error') => void;
 export function ProxmoxSection({
   servers,
   identities,
+  keys,
   workspaces,
   activeWorkspace,
   onImported,
@@ -18,6 +19,7 @@ export function ProxmoxSection({
 }: {
   servers: Server[];
   identities: Identity[];
+  keys: KeyInfo[];
   workspaces: string[];
   activeWorkspace: string;
   onImported: () => Promise<void>;
@@ -136,6 +138,8 @@ export function ProxmoxSection({
         <ImportDialog
           connection={importing}
           identities={identities}
+          keys={keys}
+          hasWebHost={servers.some((s) => s.proxmoxRef === `${importing.id}:web`)}
           workspaces={workspaces}
           activeWorkspace={activeWorkspace}
           onClose={() => setImporting(null)}
@@ -169,8 +173,8 @@ function ConnectDialog({ initial, onClose, onSaved }: { initial: ProxmoxInfo | n
   const filled = url.trim() && tokenId.trim() && (secret || initial?.hasSecret);
   const input = (extra: object = {}) => ({ id: initial?.id, name: name.trim(), url: url.trim(), tokenId: tokenId.trim(), tokenSecret: secret, ...extra });
 
-  async function check(fingerprint: string) {
-    const r = await api.proxmoxTest(input({ certFingerprint: fingerprint }));
+  async function check(fingerprint: string, address: string) {
+    const r = await api.proxmoxTest(input({ certFingerprint: fingerprint, url: address }));
     setPin(fingerprint);
     setResult(`Connected · Proxmox VE ${r.version} · ${r.vms} VM${r.vms === 1 ? '' : 's'} and containers visible`);
     setPhase('ok');
@@ -187,16 +191,17 @@ function ConnectDialog({ initial, onClose, onSaved }: { initial: ProxmoxInfo | n
         return;
       }
       if (phase === 'cert' && cert) {
-        await check(cert.fingerprint);
+        await check(cert.fingerprint, cert.url);
         return;
       }
       // phase 'form': look at the certificate first
       const c = await api.proxmoxProbe(url.trim());
+      setUrl(c.url); // the address that really answers (https and port are filled in)
       setCert(c);
       if (c.trusted) {
-        await check(''); // normal, trusted certificate: nothing to pin
+        await check('', c.url); // normal, trusted certificate: nothing to pin
       } else if (initial?.certFingerprint && initial.certFingerprint === c.fingerprint) {
-        await check(c.fingerprint); // same certificate as in the saved connection
+        await check(c.fingerprint, c.url); // same certificate as in the saved connection
       } else {
         setPhase('cert');
       }
@@ -225,7 +230,7 @@ function ConnectDialog({ initial, onClose, onSaved }: { initial: ProxmoxInfo | n
         </label>
         <label>
           Address
-          <input autoFocus value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://pve.example.com:8006" disabled={phase !== 'form'} />
+          <input autoFocus value={url} onChange={(e) => setUrl(e.target.value)} placeholder="pve.example.com (https and port are found automatically)" disabled={phase !== 'form'} />
         </label>
         <label>
           Token-ID
@@ -284,6 +289,8 @@ const key = (v: ProxmoxVmInfo) => `${v.node}:${v.vmid}`;
 function ImportDialog({
   connection,
   identities,
+  keys,
+  hasWebHost,
   workspaces,
   activeWorkspace,
   onClose,
@@ -291,6 +298,9 @@ function ImportDialog({
 }: {
   connection: ProxmoxInfo;
   identities: Identity[];
+  keys: KeyInfo[];
+  /** The web interface of this connection is a host already. */
+  hasWebHost: boolean;
   workspaces: string[];
   activeWorkspace: string;
   onClose: () => void;
@@ -303,7 +313,13 @@ function ImportDialog({
   const [wsMode, setWsMode] = useState<'pool' | 'fixed'>('pool');
   const [workspace, setWorkspace] = useState(activeWorkspace);
   const [groupBy, setGroupBy] = useState<'none' | 'pool' | 'node'>('none');
-  const [identityId, setIdentityId] = useState('');
+  // The login of the imported hosts: '' = none, 'identity:<id>' or 'key:<id>'.
+  const [login, setLogin] = useState('');
+  const [username, setUsername] = useState('root');
+  const [webWanted, setWebWanted] = useState(true);
+  const addWeb = webWanted && !hasWebHost;
+  const keyId = login.startsWith('key:') ? login.slice(4) : '';
+  const identityId = login.startsWith('identity:') ? login.slice(9) : '';
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -348,7 +364,7 @@ function ImportDialog({
     setError('');
     try {
       const chosen = vms.filter((v) => selected.has(key(v))).map((v) => ({ node: v.node, vmid: v.vmid }));
-      const r = await api.proxmoxImport({ id: connection.id, vms: chosen, workspace: workspace.trim(), workspaceFromPool: wsMode === 'pool' && hasPools, identityId, groupBy: wsMode === 'pool' && groupBy === 'pool' ? 'none' : groupBy });
+      const r = await api.proxmoxImport({ id: connection.id, vms: chosen, workspace: workspace.trim(), workspaceFromPool: wsMode === 'pool' && hasPools, identityId, keyId, username: keyId ? username.trim() : '', addWeb, groupBy: wsMode === 'pool' && groupBy === 'pool' ? 'none' : groupBy });
       const parts = [`${r.imported} host${r.imported === 1 ? '' : 's'} imported`];
       if (r.noIp) parts.push(`${r.noIp} without an IP address (VM off or no guest agent) – add the address in the host`);
       await onDone(parts.join(', ') + '.');
@@ -463,18 +479,48 @@ function ImportDialog({
                 </select>
               </label>
               <label>
-                Credentials
-                <select value={identityId} onChange={(e) => setIdentityId(e.target.value)}>
+                Login
+                <select value={login} onChange={(e) => setLogin(e.target.value)}>
                   <option value="">None (enter later in the host)</option>
-                  {identities.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} ({i.username})
-                    </option>
-                  ))}
+                  {keys.length > 0 && (
+                    <optgroup label="SSH key">
+                      {keys.map((k) => (
+                        <option key={k.id} value={'key:' + k.id}>
+                          {k.name} ({k.kind})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {identities.length > 0 && (
+                    <optgroup label="Identity">
+                      {identities.map((i) => (
+                        <option key={i.id} value={'identity:' + i.id}>
+                          {i.name} ({i.username})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </label>
+              {keyId && (
+                <label>
+                  Username for this key (used by the imported SSH hosts)
+                  <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="root" autoComplete="off" spellCheck={false} />
+                </label>
+              )}
+              {keys.length === 0 && <span className="muted small">To sign in with an SSH key, create or import one on the Keychain page first.</span>}
             </div>
           </>
+        )}
+
+        {vms !== null && (
+          <label className="toggle-row" style={{ flexDirection: 'row' }}>
+            <span>
+              Also add the Proxmox web interface
+              <span className="muted small">{hasWebHost ? ' (already added)' : ` (a Web host for ${connection.url})`}</span>
+            </span>
+            <input type="checkbox" disabled={hasWebHost} checked={addWeb} onChange={(e) => setWebWanted(e.target.checked)} />
+          </label>
         )}
 
         {error && <div className="error">{error}</div>}
@@ -483,8 +529,8 @@ function ImportDialog({
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="primary" disabled={busy || selected.size === 0}>
-            {busy ? 'Importing…' : `Import ${selected.size}`}
+          <button className="primary" disabled={busy || !vms || (selected.size === 0 && !addWeb)}>
+            {busy ? 'Importing…' : `Import ${selected.size + (addWeb ? 1 : 0)}`}
           </button>
         </div>
       </form>

@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { isNative } from './bridge';
 import { IconMonitor, IconUpload } from './Icons';
 import { ProxmoxSection } from './ProxmoxPage';
-import type { Identity, Server } from './types';
+import type { Identity, KeyInfo, Server } from './types';
 
 export type ImportKind = 'mremoteng' | 'sshconfig' | 'putty-win' | 'putty-reg' | 'csv';
 
@@ -18,6 +18,7 @@ const FILE_IMPORTS: { kind: ImportKind; label: string; hint: string; accept: str
 export function ImportPage({
   servers,
   identities,
+  keys,
   workspaces,
   activeWorkspace,
   onProxmoxImported,
@@ -28,6 +29,7 @@ export function ImportPage({
 }: {
   servers: Server[];
   identities: Identity[];
+  keys: KeyInfo[];
   workspaces: string[];
   activeWorkspace: string;
   onProxmoxImported: () => Promise<void>;
@@ -62,6 +64,7 @@ export function ImportPage({
       <ProxmoxSection
         servers={servers}
         identities={identities}
+        keys={keys}
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
         onImported={onProxmoxImported}

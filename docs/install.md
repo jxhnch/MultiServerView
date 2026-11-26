@@ -41,7 +41,16 @@ sudo dnf install ./MultiServerView-<version>-linux-x64.rpm
 
 ### Arch-based
 
-For Arch, Manjaro, EndeavourOS and CachyOS, use the [`PKGBUILD`](../packaging/linux/PKGBUILD) from a clone of this repository:
+For Arch, Manjaro, EndeavourOS and CachyOS. Download the ready-made package and install it; pacman installs the needed libraries:
+
+```bash
+curl -LO https://github.com/jxhnch/MultiServerView/releases/latest/download/multiserverview-bin-x86_64.pkg.tar.zst
+sudo pacman -U multiserverview-bin-x86_64.pkg.tar.zst
+```
+
+To update, run both commands again. To remove it: `sudo pacman -R multiserverview-bin`.
+
+The package is not signed, so give pacman the downloaded file as above: with a web address instead of a file, pacman asks for a signature. Releases up to 1.11.0 have no ready-made package. You can also build it yourself with the [`PKGBUILD`](../packaging/linux/PKGBUILD) from a clone of this repository:
 
 ```bash
 cd packaging/linux && makepkg -si

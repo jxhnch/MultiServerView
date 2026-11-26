@@ -674,6 +674,21 @@ public sealed class VaultStore
         Changed?.Invoke();
     }
 
+    /// <summary>Forgets all host keys and certificates. Returns how many there were.</summary>
+    public int ClearKnownHosts()
+    {
+        int count;
+        lock (_gate)
+        {
+            count = Data().KnownHosts.Count;
+            if (count == 0) return 0;
+            Data().KnownHosts.Clear();
+            Save();
+        }
+        Changed?.Invoke();
+        return count;
+    }
+
     public void ForgetHostKey(string host, int port)
     {
         lock (_gate)

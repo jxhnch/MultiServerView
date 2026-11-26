@@ -601,7 +601,7 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'proxmox.list':
       return mockProxmox;
     case 'proxmox.probe':
-      return { fingerprint: 'AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89', subject: 'CN=pve', notAfter: new Date().toISOString(), trusted: false };
+      return { url: /:\d+$/.test(params.url) ? 'https://' + params.url.replace(/^https?:\/\//, '') : `https://${params.url.replace(/^https?:\/\//, '')}:8006`, fingerprint: 'AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89', subject: 'CN=pve', notAfter: new Date().toISOString(), trusted: false };
     case 'proxmox.test':
       return { version: '9.2.3', vms: MOCK_PVE_VMS.length };
     case 'proxmox.save': {
@@ -639,10 +639,17 @@ async function callMock(method: string, params: any): Promise<unknown> {
           group: params.groupBy === 'node' ? v.node : params.groupBy === 'pool' ? v.pool : '',
           workspace: params.workspaceFromPool && v.pool ? v.pool : params.workspace,
           proxmoxRef: `${params.id}:${v.node}:${v.vmid}`,
+          keyId: params.keyId,
+          username: params.username,
           favorite: false,
         });
+      const web = params.addWeb && !mock.servers.some((s) => s.proxmoxRef === `${params.id}:web`);
+      if (web) {
+        const pve = mockProxmox.find((p) => p.id === params.id);
+        mock.servers.push({ ...demoServers()[0], id: crypto.randomUUID(), name: `${pve?.name ?? 'pve'} (web interface)`, host: pve?.url ?? '', port: 8006, protocol: 'web', group: '', workspace: params.workspace, proxmoxRef: `${params.id}:web`, favorite: false });
+      }
       persistMock();
-      return { imported: wanted.length, noIp: wanted.length, skipped: 0 };
+      return { imported: wanted.length + (web ? 1 : 0), noIp: wanted.length, skipped: 0 };
     }
     case 'source.get':
       return { info: mock.source, status: mockSourceStatus() };
@@ -789,6 +796,11 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'knownhosts.list':
       need();
       return mockKnownHosts;
+    case 'knownhosts.clear': {
+      const removed = mockKnownHosts.length;
+      mockKnownHosts = [];
+      return { removed };
+    }
     case 'knownhosts.remove':
       mockKnownHosts = mockKnownHosts.filter((k) => k.id !== params.id);
       return null;
@@ -1024,7 +1036,7 @@ export const api = {
 
   vncOpen: (serverId: string, sessionId: string) => call<{ url: string; username: string; password: string }>('vnc.open', { serverId, sessionId }),
   vncClose: (sessionId: string) => call<void>('vnc.close', { sessionId }),
-  webOpen: (serverId: string, sessionId: string, bounds: Rect) => call<{ native: boolean; url: string }>('web.open', { serverId, sessionId, ...bounds }),
+  webOpen: (serverId: string, sessionId: string, bounds: Rect) => call<{ native: boolean; url: string; correction: string }>('web.open', { serverId, sessionId, ...bounds }),
   webLayout: (sessionId: string, bounds: Rect, visible: boolean) => call<void>('web.layout', { sessionId, ...bounds, visible }),
   webCommand: (sessionId: string, command: 'back' | 'forward' | 'reload' | 'home' | 'go' | 'external', url = '') =>
     call<void>('web.command', { sessionId, command, url }),
@@ -1066,6 +1078,7 @@ export const api = {
   forwardsStop: (id: string) => call<void>('forwards.stop', { id }),
 
   knownHostsList: () => call<KnownHost[]>('knownhosts.list'),
+  knownHostsClear: () => call<{ removed: number }>('knownhosts.clear'),
   knownHostsRemove: (id: string) => call<void>('knownhosts.remove', { id }),
   historyList: () => call<HistoryEntry[]>('history.list'),
   historyClear: () => call<void>('history.clear'),
@@ -1136,7 +1149,19 @@ export const api = {
   proxmoxDelete: (id: string) => call<void>('proxmox.delete', { id }),
   proxmoxRemoveImported: (id: string) => call<{ removed: number }>('proxmox.removeImported', { id }),
   proxmoxVms: (id: string) => call<ProxmoxVmInfo[]>('proxmox.vms', { id }),
-  proxmoxImport: (a: { id: string; vms: { node: string; vmid: number }[]; workspace: string; workspaceFromPool: boolean; identityId: string; groupBy: 'none' | 'pool' | 'node' }) =>
+  proxmoxImport: (a: {
+    id: string;
+    vms: { node: string; vmid: number }[];
+    workspace: string;
+    workspaceFromPool: boolean;
+    identityId: string;
+    /** SSH key for all imported SSH hosts, with the user name that goes with it. */
+    keyId: string;
+    username: string;
+    /** Also add a Web host for the interface of Proxmox. */
+    addWeb: boolean;
+    groupBy: 'none' | 'pool' | 'node';
+  }) =>
     call<{ imported: number; noIp: number; skipped: number }>('proxmox.import', a),
   sourceGet: () => call<{ info: SourceInfo; status: SourceStatus }>('source.get'),
   sourceProbe: (c: SourceConfigInput) => call<{ kind: 'empty' | 'vault' | 'notavault'; sameVault: boolean }>('source.probe', c),
