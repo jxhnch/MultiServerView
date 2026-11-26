@@ -82,7 +82,9 @@ internal sealed class WebProxySession : IDisposable
     private readonly string _token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
     private readonly int _port;
     private readonly string _proxyOrigin;
-    private readonly string _autoLogin;
+    private readonly string _cookiePrefix;
+    /// <summary>Scripts added to every page: the cookie handling, then the automatic login.</summary>
+    private readonly string _pageScripts;
     private volatile bool _basicActive;
     private volatile string _certificateProblem = "";
 
@@ -95,7 +97,8 @@ internal sealed class WebProxySession : IDisposable
         _password = password;
         _checkCertificate = checkCertificate;
         _realUri = new Uri(target.Origin + "/");
-        _autoLogin = WebRewriter.BuildAutoLoginScript(username, password);
+        _cookiePrefix = WebRewriter.CookiePrefix(target.Origin);
+        _pageScripts = WebRewriter.BuildCookieScript(_cookiePrefix) + WebRewriter.BuildAutoLoginScript(username, password);
 
         var handler = new SocketsHttpHandler
         {
@@ -255,8 +258,8 @@ internal sealed class WebProxySession : IDisposable
     private string UpstreamCookies(Dictionary<string, string> fromBrowser)
     {
         var merged = ParseCookies(_jar.GetCookieHeader(_realUri));
-        foreach (var kv in fromBrowser)
-            if (!kv.Key.StartsWith("msvauth", StringComparison.Ordinal) && !merged.ContainsKey(kv.Key)) merged[kv.Key] = kv.Value;
+        foreach (var kv in WebRewriter.OwnCookies(fromBrowser, _cookiePrefix))
+            if (!merged.ContainsKey(kv.Key)) merged[kv.Key] = kv.Value;
         return string.Join("; ", merged.Select(kv => kv.Key + "=" + kv.Value));
     }
 
@@ -330,7 +333,7 @@ internal sealed class WebProxySession : IDisposable
                 foreach (var raw in setCookies)
                 {
                     try { _jar.SetCookies(_realUri, raw); } catch (CookieException) { /* a broken cookie of the device is ignored */ }
-                    output.AppendHeader("Set-Cookie", WebRewriter.RewriteSetCookie(raw));
+                    output.AppendHeader("Set-Cookie", WebRewriter.RewriteSetCookie(raw, _cookiePrefix));
                 }
             }
             if (response.Headers.Location != null)
@@ -362,7 +365,7 @@ internal sealed class WebProxySession : IDisposable
                 try { encoding = string.IsNullOrEmpty(charset) ? Encoding.Latin1 : Encoding.GetEncoding(charset); }
                 catch (ArgumentException) { encoding = Encoding.Latin1; }
                 var text = WebRewriter.ReplaceOrigin(encoding.GetString(bytes), _target.Origin, _proxyOrigin);
-                if (WebRewriter.IsHtml(contentType)) text = WebRewriter.InjectIntoHtml(text, _autoLogin);
+                if (WebRewriter.IsHtml(contentType)) text = WebRewriter.InjectIntoHtml(text, _pageScripts);
                 var result = encoding.GetBytes(text);
                 output.ContentLength64 = result.Length;
                 await output.OutputStream.WriteAsync(result, _cts.Token);

@@ -43,7 +43,29 @@ public class WebTests
 
     [Fact]
     public void Cookies_lose_domain_secure_and_samesite_none()
-        => Assert.Equal("sid=1; Path=/; HttpOnly", WebRewriter.RewriteSetCookie("sid=1; Domain=fw.lan; Path=/; Secure; HttpOnly; SameSite=None"));
+        => Assert.Equal("p_sid=1; Path=/; HttpOnly", WebRewriter.RewriteSetCookie("sid=1; Domain=fw.lan; Path=/; Secure; HttpOnly; SameSite=None", "p_"));
+
+    [Fact]
+    public void A_device_only_gets_its_own_cookies()
+    {
+        var mine = WebRewriter.CookiePrefix("https://pve.lan:8006");
+        var other = WebRewriter.CookiePrefix("https://fw.lan");
+        Assert.NotEqual(mine, other);
+        Assert.Equal(mine, WebRewriter.CookiePrefix("https://PVE.lan:8006"));
+        var browser = new Dictionary<string, string> { [mine + "PVEAuthCookie"] = "t", [other + "session"] = "secret", ["msvauth5000"] = "token", ["loose"] = "x" };
+        var own = WebRewriter.OwnCookies(browser, mine);
+        Assert.Equal(new[] { "PVEAuthCookie" }, own.Keys);
+        Assert.Equal("t", own["PVEAuthCookie"]);
+    }
+
+    [Fact]
+    public void The_cookie_script_carries_the_prefix_and_is_one_script_element()
+    {
+        var script = WebRewriter.BuildCookieScript("msvabc_");
+        Assert.StartsWith("<script>(function(){var P=\"msvabc_\";", script);
+        Assert.EndsWith("</script>", script);
+        Assert.Equal(1, script.Split("</script>").Length - 1);
+    }
 
     [Fact]
     public void Login_script_keeps_the_password_inside_a_string()

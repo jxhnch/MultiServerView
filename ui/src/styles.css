@@ -292,6 +292,12 @@ label {
 .tile.serial {
   background: #4b5563;
 }
+.tile.web {
+  background: #0ea5a4;
+}
+.tile.local {
+  background: #475569;
+}
 .tile.sm {
   width: 22px;
   height: 22px;

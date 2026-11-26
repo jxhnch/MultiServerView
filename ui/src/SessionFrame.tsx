@@ -108,8 +108,7 @@ export function SessionFrame({
         <div className="session-bar">
           <span className="session-title">{server.name}</span>
           <span className="muted">
-            {server.username ? `${server.username}@` : ''}
-            {server.host}:{server.port}
+            {server.host.includes('://') ? server.host : `${server.username ? `${server.username}@` : ''}${server.host}:${server.port}`}
           </span>
           <span className={`pill ${status}`}>
             <span className="dot-sm" />

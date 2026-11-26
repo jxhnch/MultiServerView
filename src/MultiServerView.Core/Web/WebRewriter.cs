@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -37,13 +38,26 @@ public static class WebRewriter
         => location.StartsWith(realOrigin, StringComparison.OrdinalIgnoreCase) ? proxyOrigin + location[realOrigin.Length..] : location;
 
     /// <summary>
-    /// A cookie of the real server is stored by the browser for the proxy address: no Domain (it would not match), no Secure
-    /// (the proxy speaks plain http on the loopback address) and no SameSite=None (it needs Secure).
+    /// All proxies share the host 127.0.0.1, and cookies do not know ports: in the browser every cookie of a device gets a name
+    /// prefix of that device, so one device never receives the cookies of another one.
     /// </summary>
-    public static string RewriteSetCookie(string cookie)
+    public static string CookiePrefix(string realOrigin)
+        => "msv" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(realOrigin.ToLowerInvariant())), 0, 5).ToLowerInvariant() + "_";
+
+    /// <summary>Of the cookies the browser sent, only those of this device, under their real names.</summary>
+    public static Dictionary<string, string> OwnCookies(IReadOnlyDictionary<string, string> fromBrowser, string prefix)
+        => fromBrowser.Where(kv => kv.Key.StartsWith(prefix, StringComparison.Ordinal))
+            .ToDictionary(kv => kv.Key[prefix.Length..], kv => kv.Value, StringComparer.Ordinal);
+
+    /// <summary>
+    /// A cookie of the real server is stored by the browser for the proxy address: under the device's prefix, no Domain (it would
+    /// not match), no Secure (the proxy speaks plain http on the loopback address) and no SameSite=None (it needs Secure).
+    /// </summary>
+    public static string RewriteSetCookie(string cookie, string prefix)
     {
         var parts = cookie.Split(';');
-        var sb = new StringBuilder(parts[0].Trim());
+        var pair = parts[0].Trim();
+        var sb = new StringBuilder(pair.Contains('=') ? prefix + pair : pair);
         for (var i = 1; i < parts.Length; i++)
         {
             var attribute = parts[i].Trim();
@@ -54,6 +68,23 @@ public static class WebRewriter
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Pages also set cookies by script, and some (Proxmox: its login ticket) mark them "Secure". WebKit, the browser engine on
+    /// Linux, silently drops such a cookie on the proxy's plain http address, so signing in never works. This script runs before
+    /// the page's own scripts and makes document.cookie treat cookies like <see cref="RewriteSetCookie"/> does.
+    /// </summary>
+    public static string BuildCookieScript(string prefix)
+        => "<script>(function(){var P=" + ScriptString(prefix) + CookieScriptBody + "})();</script>";
+
+    private const string CookieScriptBody = """
+;var D=Object.getOwnPropertyDescriptor(Document.prototype,'cookie');if(!D||!D.set||window.__msvCookies)return;window.__msvCookies=1;
+Object.defineProperty(document,'cookie',{configurable:true,enumerable:true,
+get:function(){return String(D.get.call(document)).split('; ').filter(function(c){return c.indexOf(P)===0;}).map(function(c){return c.slice(P.length);}).join('; ');},
+set:function(value){var parts=String(value).split(';'),pair=parts.shift().trim();if(pair.indexOf('=')<0)return;
+var kept=parts.filter(function(a){var t=a.trim().toLowerCase(),n=t.split('=')[0].trim();return n!=='secure'&&n!=='domain'&&n!=='partitioned'&&!(n==='samesite'&&/none$/.test(t));});
+D.set.call(document,[P+pair].concat(kept).join(';'));}});
+""";
 
     /// <summary>JSON string literal that is safe inside an inline script element.</summary>
     public static string ScriptString(string value)
