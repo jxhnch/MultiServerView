@@ -57,7 +57,10 @@ function scrollParent(el: Element): Element {
 
 /** Call on pointerdown. A drag only starts after a few pixels of movement, so clicks keep working. */
 export function pointerDrag(down: ReactPointerEvent, source: HTMLElement, handlers: DragHandlers) {
-  if (down.button !== 0 || down.pointerType === 'touch' || (down.target as Element).closest('button, input, select, textarea')) return;
+  if (down.button !== 0 || down.pointerType === 'touch') return;
+  // a button or field inside the element keeps its own meaning (the element itself may be a button, like a tab)
+  const control = (down.target as Element).closest('button, input, select, textarea, [role="button"]');
+  if (control && control !== source) return;
   const startX = down.clientX;
   const startY = down.clientY;
   const scroller = scrollParent(source);

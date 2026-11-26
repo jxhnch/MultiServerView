@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getUiSettings, onUiSettings } from './uiSettings';
 import { pointerDrag, useFlip } from './dragArrange';
-import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay, IconTerminal } from './Icons';
+import { IconEdit, IconFolder, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay, IconTerminal } from './Icons';
 import { api, type BulkLogin, type VmAction } from './bridge';
 import { BulkLoginDialog } from './BulkLoginDialog';
 import { HostTile } from './HostTile';
@@ -43,7 +43,6 @@ export function HostsPage({
   onDelete,
   onNew,
   onQuick,
-  onSplit,
   workspace,
   workspaces,
   onWorkspace,
@@ -98,7 +97,6 @@ export function HostsPage({
   onDelete: (s: Server) => void;
   onNew: () => void;
   onQuick: (draft: Partial<Server>) => void;
-  onSplit: () => void;
   /** Selected workspace ('' = all). */
   workspace: string;
   workspaces: string[];
@@ -435,9 +433,6 @@ export function HostsPage({
             <IconTerminal size={15} /> Local terminal
           </button>
         )}
-        <button className="tool" title="Several terminals side by side in one tab" onClick={onSplit}>
-          <IconGrid size={15} /> Split view
-        </button>
         <button className={'tool' + (selecting ? ' on' : '')} title="Select several hosts (or Ctrl+click on them)" onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
           Select
         </button>
@@ -596,7 +591,7 @@ export function HostsPage({
             );
           })}
           </div>
-          <p className="muted small">Double-click or Enter connects · drag hosts or group headings to arrange · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session</p>
+          <p className="muted small">Double-click or Enter connects · drag hosts or group headings to arrange · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session · pull a terminal tab into the window for a split view</p>
         </>
       )}
 

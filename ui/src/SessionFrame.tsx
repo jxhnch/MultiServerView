@@ -74,7 +74,10 @@ export function SessionFrame({
   onDuplicate,
   onEdit,
   children,
+  bare = false,
 }: {
+  /** Only the content (a pane of the split view). The elements stay the same, so nothing inside is rebuilt. */
+  bare?: boolean;
   server: Server;
   status: SessionStatus;
   variant?: 'float' | 'bar';
@@ -100,8 +103,8 @@ export function SessionFrame({
   );
 
   return (
-    <div className="session">
-      {variant === 'bar' && (
+    <div className={'session' + (bare ? ' bare' : '')}>
+      {variant === 'bar' && !bare && (
         <div className="session-bar">
           <span className="session-title">{server.name}</span>
           <span className="muted">
@@ -117,9 +120,9 @@ export function SessionFrame({
         </div>
       )}
       <div className="session-body">
-        {variant === 'float' && <div className="float-tools">{buttons}</div>}
+        {variant === 'float' && !bare && <div className="float-tools">{buttons}</div>}
         {children}
-        {status === 'connecting' && <ConnectingOverlay server={server} />}
+        {status === 'connecting' && !bare && <ConnectingOverlay server={server} />}
       </div>
     </div>
   );

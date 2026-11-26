@@ -56,7 +56,7 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 
 - **Jump hosts:** chain one or more SSH hosts for SSH, SFTP, tunnels, VNC, RDP and web hosts.
 - **Port forwarding:** local (`-L`), remote (`-R`) and SOCKS5 (`-D`), start and stop with one click.
-- **Split view:** several terminals side by side in one tab, with broadcast (type once, send to all).
+- **Split view:** pull a terminal tab down into the window and drop it on the left or right half: it stands beside the terminal on screen (if you pull the tab you are looking at, beside the one you used before). Pull more tabs in to add them. The sessions keep running; nothing reconnects. A button on each pane gives it its own tab again. With broadcast you type once and send to all.
 - **Virtual machine control:** hosts imported from Proxmox or VMware show a status dot. A small power button starts, shuts down, restarts, suspends or force-stops the VM.
 
 ## Organizing hosts

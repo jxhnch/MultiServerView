@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { TerminalView } from './TerminalView';
-import { IconBroadcast, IconClose, IconEdit, IconGrid, IconPlus, IconRefresh } from './Icons';
+import { useEffect, useRef, useState } from 'react';
+import { IconArrowRight, IconBroadcast, IconClose, IconEdit, IconGrid, IconRefresh } from './Icons';
 import { HostTile } from './HostTile';
-import { isTerminalProtocol, type Server, type SessionStatus } from './types';
+import { TerminalSlot } from './TerminalPool';
+import type { Server, SessionStatus } from './types';
 
 export interface SplitPane {
   id: string;
@@ -11,65 +11,47 @@ export interface SplitPane {
 }
 
 /**
- * Split view: several SSH terminals side by side in one tab.
+ * Split view: several terminals side by side in one tab, made by dragging a tab onto another one.
  * With "Broadcast", everything you type into one terminal goes to all others at the same time.
+ * The terminals themselves live in the TerminalPool of the app; here they only get their places.
  */
 export function SplitView({
-  tabId,
   panes,
-  onPanesChange,
-  servers,
   byId,
-  active,
-  onStatus,
+  statuses,
+  nodes,
+  broadcast,
+  onBroadcast,
+  onReconnect,
+  onClosePane,
+  onPopOut,
   onEdit,
-  onOpenSftp,
-  onManageSnippets,
 }: {
-  tabId: string;
   panes: SplitPane[];
-  onPanesChange: (panes: SplitPane[]) => void;
-  servers: Server[];
   byId: Map<string, Server>;
-  active: boolean;
-  onStatus: (tabId: string, status: SessionStatus) => void;
+  statuses: Record<string, SessionStatus>;
+  nodes: Map<string, HTMLDivElement>;
+  broadcast: boolean;
+  onBroadcast: (on: boolean) => void;
+  onReconnect: (paneId: string) => void;
+  onClosePane: (paneId: string) => void;
+  /** Gives this terminal its own tab again. */
+  onPopOut: (paneId: string) => void;
   onEdit: (s: Server) => void;
-  onOpenSftp: (s: Server) => void;
-  onManageSnippets: () => void;
 }) {
-  const [broadcast, setBroadcast] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
-  const [adding, setAdding] = useState(false);
-  const senders = useRef(new Map<string, (text: string) => void>());
-  const addRef = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
 
-  // Overall status for the tab icon
+  // A native listener: the terminal is not a React child of its pane, so React's focus events do not pass through here.
   useEffect(() => {
-    const all = panes.map((p) => statuses[p.id] ?? 'connecting');
-    onStatus(tabId, all.includes('error') ? 'error' : all.includes('connecting') ? 'connecting' : all.length > 0 && all.every((s) => s === 'closed') ? 'closed' : 'connected');
-  }, [statuses, panes, tabId, onStatus]);
-
-  const paneStatus = useCallback((id: string, s: SessionStatus) => setStatuses((p) => (p[id] === s ? p : { ...p, [id]: s })), []);
-
-  const fanOut = useCallback(
-    (fromPane: string, data: string) => {
-      if (!broadcast) return;
-      for (const [id, send] of senders.current) if (id !== fromPane) send(data);
-    },
-    [broadcast],
-  );
-
-  useEffect(() => {
-    if (!adding) return;
-    const onDown = (e: MouseEvent) => !addRef.current?.contains(e.target as Node) && setAdding(false);
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [adding]);
+    const el = grid.current;
+    if (!el) return;
+    const onFocus = (e: FocusEvent) => setFocused((e.target as Element).closest<HTMLElement>('[data-pane]')?.dataset.pane ?? null);
+    el.addEventListener('focusin', onFocus);
+    return () => el.removeEventListener('focusin', onFocus);
+  }, []);
 
   const cols = panes.length <= 1 ? 1 : panes.length <= 4 ? 2 : panes.length <= 9 ? 3 : 4;
-  const sshHosts = useMemo(() => servers.filter((s) => isTerminalProtocol(s.protocol)).sort((a, b) => a.name.localeCompare(b.name)), [servers]);
-  const bump = (id: string) => onPanesChange(panes.map((p) => (p.id === id ? { ...p, reconnectKey: p.reconnectKey + 1 } : p)));
 
   return (
     <div className="split">
@@ -78,99 +60,51 @@ export function SplitView({
           <IconGrid size={13} />
         </span>
         <span className="session-title">Split view</span>
-        <span className="muted small">{panes.length} Terminals</span>
+        <span className="muted small">{panes.length} Terminals · drag another tab in here to add it</span>
         <span className="grow" />
-        <button className={'bc-btn' + (broadcast ? ' on' : '')} onClick={() => setBroadcast((b) => !b)} title="Send input to all terminals at once">
+        <button className={'bc-btn' + (broadcast ? ' on' : '')} onClick={() => onBroadcast(!broadcast)} title="Send input to all terminals at once">
           <IconBroadcast size={15} /> Broadcast {broadcast ? 'on' : 'off'}
         </button>
-        <div className="pop-anchor" ref={addRef}>
-          <button onClick={() => setAdding((a) => !a)}>
-            <IconPlus size={15} /> Host
-          </button>
-          {adding && (
-            <div className="popover" style={{ width: 300 }}>
-              <div className="pop-list" style={{ width: '100%' }}>
-                {sshHosts.map((s) => (
-                  <button
-                    key={s.id}
-                    className="pop-item"
-                    onClick={() => {
-                      setAdding(false);
-                      onPanesChange([...panes, { id: crypto.randomUUID(), serverId: s.id, reconnectKey: 0 }]);
-                    }}
-                  >
-                    <span className="pop-name">{s.name}</span>
-                    <span className="pop-sub">{s.username ? `${s.username}@` : ''}{s.host}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       {broadcast && (
         <div className="bc-banner">
           <IconBroadcast size={15} /> Broadcast active: everything you type goes to all {panes.length} terminals. Be careful with commands that have an effect!
-          <button className="link" onClick={() => setBroadcast(false)}>
+          <button className="link" onClick={() => onBroadcast(false)}>
             Turn off
           </button>
         </div>
       )}
 
-      <div className="split-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+      <div className="split-grid" ref={grid} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {panes.map((p) => {
           const server = byId.get(p.serverId);
-          const st = statuses[p.id] ?? 'connecting';
           return (
-            <div key={p.id} className={'split-pane' + (focused === p.id ? ' focus' : '') + (broadcast ? ' bc' : '')} onFocusCapture={() => setFocused(p.id)}>
+            <div key={p.id} data-pane={p.id} className={'split-pane' + (focused === p.id ? ' focus' : '') + (broadcast ? ' bc' : '')}>
               <div className="pane-head">
                 {server ? <HostTile server={server} size="sm" /> : null}
                 <span className="pane-name">{server?.name ?? '(host deleted)'}</span>
-                <span className={`status-dot ${st}`} />
+                <span className={`status-dot ${statuses[p.id] ?? 'connecting'}`} />
                 <span className="grow" />
                 {server && (
                   <button className="ghost icon-only" title="Host details" onClick={() => onEdit(server)}>
                     <IconEdit size={13} />
                   </button>
                 )}
-                <button className="ghost icon-only" title="Reconnect" onClick={() => bump(p.id)}>
+                <button className="ghost icon-only" title="Reconnect" onClick={() => onReconnect(p.id)}>
                   <IconRefresh size={14} />
                 </button>
-                <button
-                  className="ghost icon-only"
-                  title="Close this terminal"
-                  onClick={() => {
-                    senders.current.delete(p.id);
-                    onPanesChange(panes.filter((x) => x.id !== p.id));
-                  }}
-                >
+                <button className="ghost icon-only" title="Back into its own tab (the session stays)" onClick={() => onPopOut(p.id)}>
+                  <IconArrowRight size={14} />
+                </button>
+                <button className="ghost icon-only" title="Close this terminal" onClick={() => onClosePane(p.id)}>
                   <IconClose size={14} />
                 </button>
               </div>
-              <div className="pane-body">
-                {server && (
-                  <TerminalView
-                    tabId={p.id}
-                    server={server}
-                    active={active}
-                    reconnectKey={p.reconnectKey}
-                    onStatus={paneStatus}
-                    onReconnect={() => bump(p.id)}
-                    onDuplicate={() => undefined}
-                    onEdit={() => onEdit(server)}
-                    onOpenSftp={() => onOpenSftp(server)}
-                    onManageSnippets={onManageSnippets}
-                    bare
-                    registerSender={(fn) => (fn ? senders.current.set(p.id, fn) : senders.current.delete(p.id))}
-                    onUserInput={(d) => fanOut(p.id, d)}
-                  />
-                )}
-              </div>
+              <div className="pane-body">{server && <TerminalSlot nodes={nodes} id={p.id} />}</div>
             </div>
           );
         })}
-        {panes.length === 0 && <div className="muted pad-sm">No terminals left. Add one with "+ Host".</div>}
       </div>
     </div>
   );

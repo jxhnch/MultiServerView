@@ -64,7 +64,7 @@ MultiServerView is a desktop app for people who jump between many machines: home
 
 - **Jump hosts**, chained if needed, for SSH, SFTP, tunnels, VNC, RDP and web pages
 - **Port forwarding**: local (`-L`), remote (`-R`) and SOCKS5 (`-D`)
-- **Split view** with several terminals in one tab, plus broadcast to type into all of them
+- **Split view:** pull a terminal tab into the window to put terminals side by side, plus broadcast to type into all of them
 - **VM power control** for hosts imported from Proxmox or VMware, with a status dot
 - **Snippets** with `{{variables}}`, reusable identities, SSH key generator and one-click key install
 

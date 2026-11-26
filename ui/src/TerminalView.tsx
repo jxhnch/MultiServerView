@@ -27,9 +27,12 @@ export function TerminalView({
   onOpenSftp,
   onManageSnippets,
   bare,
+  place,
   registerSender,
   onUserInput,
 }: {
+  /** Where the terminal is shown (a tab or a split view); changes when it is moved. */
+  place?: string;
   tabId: string;
   server: Server;
   active: boolean;
@@ -323,6 +326,26 @@ export function TerminalView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
+  // ---------------------------------------------------------------- Moved between a tab and a split view
+  const placeRef = useRef(place);
+  useEffect(() => {
+    if (placeRef.current === place) return;
+    placeRef.current = place;
+    const id = requestAnimationFrame(() => {
+      const term = termRef.current;
+      if (!term) return;
+      try {
+        fitRef.current?.fit();
+      } catch {
+        /* no size yet */
+      }
+      term.scrollToBottom(); // moving the element resets its scroll position
+      term.refresh(0, term.rows - 1);
+      if (activeRef.current) term.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [place]);
+
   // ---------------------------------------------------------------- Focus when switching
   useEffect(() => {
     if (!active) return;
@@ -386,19 +409,9 @@ export function TerminalView({
     />
   );
 
-  if (bare)
-    return (
-      <div className="bare-body" style={{ background: bg }}>
-        <div className="term-wrap" style={{ background: bg }}>
-          <div className="term-host" ref={hostRef} />
-          {stuckBanner}
-        </div>
-        {passwordModal}
-      </div>
-    );
-
   return (
     <SessionFrame
+      bare={bare}
       server={server}
       status={status}
       onReconnect={onReconnect}

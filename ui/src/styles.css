@@ -2117,34 +2117,6 @@ label {
 }
 
 /* Host-Auswahl (geteilte Ansicht) */
-.pick-list {
-  max-height: 340px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 2px -6px;
-  padding: 0 6px;
-}
-.pick-row {
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-  color: var(--text);
-  font-size: 14px;
-}
-.pick-row:hover {
-  background: var(--hover);
-}
-.pick-row.on {
-  background: var(--accent-soft);
-}
-.pick-row input {
-  width: auto;
-}
 
 /* Geteilte Ansicht */
 .split {
@@ -2246,14 +2218,6 @@ label {
   flex: 1;
   min-height: 0;
   position: relative;
-}
-.pane-body > .bare-body,
-.bare-body {
-  position: absolute;
-  inset: 0;
-}
-.bare-body .term-wrap {
-  padding: 6px 4px 4px 8px;
 }
 
 .row-actions {
@@ -2878,12 +2842,6 @@ label {
 .tab.dragging {
   opacity: 0.45;
 }
-.tab.drop-before {
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-.tab.drop-after {
-  box-shadow: inset -3px 0 0 var(--accent);
-}
 
 /* Linux: the system draws the title bar, so the tab bar needs no room for window buttons */
 .sys-titlebar .tabbar {
@@ -3008,3 +2966,21 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 .new-group-zone { flex: 1; padding: 20px 12px; text-align: center; font-size: 13px; border: 2px dashed var(--accent); border-radius: 10px; background: var(--surface); box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); transition: scale 0.15s, background-color 0.15s; }
 .new-group-zone.over { background: var(--surface-3); font-weight: 600; scale: 1.02; }
 @media (prefers-reduced-motion: reduce) { .drag-ghost, .drop-zones { animation: none; } }
+
+/* A terminal wherever it is shown: its tab or a pane of the split view */
+.term-slot, .term-node { position: absolute; inset: 0; }
+.view > .term-slot { display: block; }
+.session.bare .session-body { height: 100%; }
+.session.bare .term-wrap { padding: 6px 4px 4px 8px; }
+
+/* Tabs: dragged along the bar to arrange them, or pulled into the window for a split view */
+.tabbar { position: relative; }
+.tabbar .tab { user-select: none; }
+.tabbar .tab.dragging { opacity: 0.35; }
+.drag-ghost.tab { display: flex; flex-direction: row; align-items: center; gap: 8px; border-radius: 8px; background: var(--chrome, #1b2436); color: var(--chrome-text, #e6edf7); border: 1px solid var(--accent); }
+.split-drop { position: absolute; inset: 0; z-index: 40; background: rgb(0 0 0 / 0.12); }
+.split-drop-half { position: absolute; top: 8px; bottom: 8px; width: calc(50% - 12px); display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; background: rgb(59 155 255 / 0.18); transition: left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); animation: rise 0.2s ease-out; }
+.split-drop-half.left { left: 8px; }
+.split-drop-half.right { left: calc(50% + 4px); }
+.split-drop-half span, .split-drop-note { padding: 8px 14px; border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; box-shadow: 0 8px 22px rgb(0 0 0 / 0.3); }
+.split-drop-note { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); white-space: nowrap; }

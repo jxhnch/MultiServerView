@@ -29,7 +29,8 @@ import { HostTile } from './HostTile';
 import { SettingsPage } from './SettingsPage';
 import { WindowControls } from './WindowControls';
 import { SplitView, type SplitPane } from './SplitView';
-import { SplitPicker } from './SplitPicker';
+import { TerminalPool, TerminalSlot } from './TerminalPool';
+import { pointerDrag, useFlip } from './dragArrange';
 import { HostsPage, sectionKey } from './HostsPage';
 import { effectiveTheme, getUiSettings, onTheme, setUiSettings } from './uiSettings';
 import { readTextAuto } from './files';
@@ -59,6 +60,8 @@ interface Tab {
   serverId: string;
   kind: 'session' | 'sftp' | 'split';
   panes?: SplitPane[];
+  /** Split view: typing goes to all panes. */
+  broadcast?: boolean;
   reconnectKey: number;
 }
 interface Toast {
@@ -91,7 +94,6 @@ export function App() {
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setThemeState] = useState<Theme>(effectiveTheme);
-  const [splitPicker, setSplitPicker] = useState(false);
   const [mcpRunning, setMcpRunning] = useState(false);
 
   // Workspaces: top level of the host list (e.g. a teacher). Which one is open and empty, newly created
@@ -244,15 +246,6 @@ export function App() {
     },
     [tabs, toast],
   );
-
-  const openSplit = useCallback((ids: string[]) => {
-    setSplitPicker(false);
-    setPanel(null);
-    const panes: SplitPane[] = ids.map((serverId) => ({ id: crypto.randomUUID(), serverId, reconnectKey: 0 }));
-    const t: Tab = { id: crypto.randomUUID(), serverId: ids[0], kind: 'split', panes, reconnectKey: 0 };
-    setTabs((prev) => [...prev, t]);
-    setActive(t.id);
-  }, []);
 
   const closeTab = useCallback(
     (id: string) => {
@@ -434,7 +427,18 @@ export function App() {
 
   // ---------------------------------------------------------------- Rearranging tabs (drag them, or Ctrl+Shift+PageUp/PageDown)
   const [dragTab, setDragTab] = useState<string | null>(null);
-  const [dropMark, setDropMark] = useState<{ id: string; after: boolean } | null>(null);
+  /** What a release over the window would do right now. */
+  const [splitDrop, setSplitDrop] = useState<{ side: 'left' | 'right'; partner: string } | { problem: string } | null>(null);
+  const tabbarRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useFlip(tabbarRef);
+  const terminals = useRef(new Map<string, HTMLDivElement>());
+  const senders = useRef(new Map<string, (text: string) => void>());
+  /** Tabs in the order they were looked at, the latest last. */
+  const recent = useRef<string[]>([]);
+  useEffect(() => {
+    if (active !== HOME) recent.current = [...recent.current.filter((id) => id !== active), active];
+  }, [active]);
 
   const moveTab = useCallback((id: string, targetId: string, after: boolean) => {
     setTabs((prev) => {
@@ -444,9 +448,121 @@ export function App() {
       const to = rest.findIndex((t) => t.id === targetId);
       if (to < 0) return prev;
       rest.splice(after ? to + 1 : to, 0, item);
-      return rest;
+      return rest.every((t, i) => t === prev[i]) ? prev : rest;
     });
   }, []);
+
+  /** Only terminals can stand side by side. */
+  const isTerminalTab = (t: Tab) => t.kind === 'split' || (t.kind === 'session' && isTerminalProtocol(byId.get(t.serverId)?.protocol ?? 'ssh'));
+  const panesOf = (t: Tab): SplitPane[] => (t.kind === 'split' ? (t.panes ?? []) : [{ id: t.id, serverId: t.serverId, reconnectKey: t.reconnectKey }]);
+
+  /** What the dragged tab would share the window with: the one on screen, or else the terminal looked at last. */
+  function splitPartner(dragged: Tab): Tab | undefined {
+    const candidates = tabs.filter((t) => t.id !== dragged.id && isTerminalTab(t));
+    const shown = candidates.find((t) => t.id === active);
+    if (shown || (active !== dragged.id && active !== HOME)) return shown;
+    const seen = [...recent.current].reverse();
+    for (const id of seen) {
+      const t = candidates.find((c) => c.id === id);
+      if (t) return t;
+    }
+    return candidates[candidates.length - 1];
+  }
+
+  /** Puts two tabs into one split view. The sessions keep running: their terminals only get new places. */
+  function mergeIntoSplit(draggedId: string, partnerId: string, side: 'left' | 'right') {
+    const dragged = tabs.find((t) => t.id === draggedId);
+    const partner = tabs.find((t) => t.id === partnerId);
+    if (!dragged || !partner) return;
+    const panes = side === 'left' ? [...panesOf(dragged), ...panesOf(partner)] : [...panesOf(partner), ...panesOf(dragged)];
+    const split: Tab = { id: partner.kind === 'split' ? partner.id : crypto.randomUUID(), serverId: panes[0].serverId, kind: 'split', panes, reconnectKey: 0, broadcast: false };
+    setTabs((prev) => prev.flatMap((t) => (t.id === partnerId ? [split] : t.id === draggedId ? [] : [t])));
+    setPanel(null);
+    setActive(split.id);
+  }
+
+  /** A pane gets its own tab again, right after the split view. */
+  function popOut(splitId: string, paneId: string) {
+    const pane = tabs.find((t) => t.id === splitId)?.panes?.find((p) => p.id === paneId);
+    if (!pane) return;
+    setTabs((prev) =>
+      prev.flatMap((t) =>
+        t.id === splitId
+          ? [{ ...t, panes: t.panes!.filter((p) => p.id !== paneId) }, { id: pane.id, serverId: pane.serverId, kind: 'session' as const, reconnectKey: pane.reconnectKey }]
+          : [t],
+      ),
+    );
+    setActive(pane.id);
+  }
+
+  // A split view with only one terminal left is an ordinary tab again (same terminal, same session).
+  useEffect(() => {
+    if (!tabs.some((t) => t.kind === 'split' && (t.panes?.length ?? 0) < 2)) return;
+    const gone = tabs.find((t) => t.id === active && t.kind === 'split' && (t.panes?.length ?? 0) < 2);
+    if (gone) setActive(gone.panes?.[0]?.id ?? HOME);
+    setTabs((prev) =>
+      prev.flatMap((t) => {
+        if (t.kind !== 'split' || (t.panes?.length ?? 0) >= 2) return [t];
+        const [last] = t.panes ?? [];
+        return last ? [{ id: last.id, serverId: last.serverId, kind: 'session' as const, reconnectKey: last.reconnectKey }] : [];
+      }),
+    );
+  }, [tabs, active]);
+
+  function startTabDrag(down: React.PointerEvent<HTMLElement>, tab: Tab) {
+    let drop: { side: 'left' | 'right'; partner: string } | null = null;
+    const finish = () => {
+      setDragTab(null);
+      setSplitDrop(null);
+    };
+    pointerDrag(down, down.currentTarget, {
+      onStart: () => setDragTab(tab.id),
+      onOver: (hit, x, y) => {
+        const bar = tabbarRef.current!.getBoundingClientRect();
+        const body = bodyRef.current!.getBoundingClientRect();
+        drop = null;
+        if (y <= bar.bottom + 6) {
+          // in the tab bar: change the order
+          setSplitDrop(null);
+          const over = hit?.closest<HTMLElement>('[data-tab]');
+          if (over && over.dataset.tab !== tab.id) {
+            const r = over.getBoundingClientRect();
+            moveTab(tab.id, over.dataset.tab!, x > r.left + r.width / 2);
+          } else if (hit?.closest('.tab-add')) {
+            const last = [...tabbarRef.current!.querySelectorAll<HTMLElement>('[data-tab]')].pop()?.dataset.tab;
+            if (last && last !== tab.id) moveTab(tab.id, last, true);
+          }
+          return;
+        }
+        // pulled into the window: the right or left half makes a split view
+        if (!isTerminalTab(tab)) return setSplitDrop({ problem: 'Only terminals can be put side by side' });
+        const partner = splitPartner(tab);
+        if (!partner) return setSplitDrop({ problem: tabs.some((t) => t.id !== tab.id && isTerminalTab(t)) ? 'Open the terminal you want beside it first' : 'Open a second terminal for a split view' });
+        const side = x > body.left + body.width / 2 ? 'right' : 'left';
+        drop = { side, partner: partner.id };
+        // show what the tab will stand beside
+        if (active !== partner.id) setActive(partner.id);
+        setSplitDrop(drop);
+      },
+      onDrop: () => {
+        if (drop) mergeIntoSplit(tab.id, drop.partner, drop.side);
+        finish();
+      },
+      onCancel: finish,
+      landing: () => (drop ? null : (tabbarRef.current?.querySelector(`[data-tab="${tab.id}"]`) ?? null)),
+    });
+  }
+
+  const tabName = (id: string) => {
+    const t = tabs.find((x) => x.id === id);
+    return !t ? '' : t.kind === 'split' ? 'the split view' : (byId.get(t.serverId)?.name ?? '');
+  };
+
+  /** The state of a split view: the worst of its terminals. */
+  const splitStatus = (t: Tab): SessionStatus => {
+    const all = (t.panes ?? []).map((p) => statuses[p.id] ?? 'connecting');
+    return all.includes('error') ? 'error' : all.includes('connecting') ? 'connecting' : all.length > 0 && all.every((s) => s === 'closed') ? 'closed' : 'connected';
+  };
 
   const shiftTab = useCallback((id: string, dir: -1 | 1) => {
     setTabs((prev) => {
@@ -458,35 +574,6 @@ export function App() {
       return next;
     });
   }, []);
-
-  /** Props that make a tab draggable and a place to drop another tab on. */
-  const tabDrag = (id: string) => ({
-    draggable: true,
-    onDragStart: (e: React.DragEvent) => {
-      setDragTab(id);
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id);
-    },
-    onDragOver: (e: React.DragEvent) => {
-      if (!dragTab || dragTab === id) return;
-      e.preventDefault();
-      const r = e.currentTarget.getBoundingClientRect();
-      const after = e.clientX > r.left + r.width / 2;
-      setDropMark((m) => (m?.id === id && m.after === after ? m : { id, after }));
-    },
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault();
-      if (dragTab && dropMark) moveTab(dragTab, dropMark.id, dropMark.after);
-      setDragTab(null);
-      setDropMark(null);
-    },
-    onDragEnd: () => {
-      setDragTab(null);
-      setDropMark(null);
-    },
-  });
-  const tabMark = (id: string) =>
-    (dragTab === id ? ' dragging' : '') + (dropMark?.id === id ? (dropMark.after ? ' drop-after' : ' drop-before') : '');
 
   const setStatus = useCallback((id: string, s: SessionStatus) => setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s })), []);
 
@@ -590,7 +677,7 @@ export function App() {
   const drawerOpen = panel !== null && active !== HOME;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [vmwareOpen, setVmwareOpen] = useState(false);
-  const overlayOpen = paletteOpen || drawerOpen || confirmOpen || vmwareOpen || tabMenu !== null; // the tab menu hangs over the RDP area too
+  const overlayOpen = paletteOpen || drawerOpen || confirmOpen || vmwareOpen || tabMenu !== null || splitDrop !== null; // the tab menu hangs over the RDP area too
   useEffect(() => {
     if (isNative && phase === 'ready') void api.rdpSuspend(overlayOpen).catch(() => undefined);
   }, [overlayOpen, phase]);
@@ -820,7 +907,6 @@ export function App() {
   function onPaletteAction(a: PaletteAction) {
     setPaletteOpen(false);
     if (a === 'new') newHost();
-    else if (a === 'split') setSplitPicker(true);
     else if (a === 'settings') goTo('settings');
     else if (a === 'keys') goTo('keys');
     else if (a === 'cloud') goTo('cloud');
@@ -875,18 +961,20 @@ export function App() {
         />
       )}
       <ConfirmHost onOpenChange={setConfirmOpen} />
-      <div className="tabbar chrome">
+      <div className="tabbar chrome" ref={tabbarRef}>
         <button className={'tab home' + (active === HOME ? ' on' : '')} onClick={() => setActive(HOME)}>
           <IconServer size={16} /> Hosts
         </button>
         {tabs.map((t) => {
-          const st = statuses[t.id] ?? 'connecting';
+          const st = t.kind === 'split' ? splitStatus(t) : (statuses[t.id] ?? 'connecting');
           if (t.kind === 'split') {
             return (
               <button
                 key={t.id}
-                className={'tab' + (active === t.id ? ' on' : '') + tabMark(t.id)}
-                {...tabDrag(t.id)}
+                className={'tab' + (active === t.id ? ' on' : '') + (dragTab === t.id ? ' dragging' : '')}
+                data-tab={t.id}
+                data-flip={'t:' + t.id}
+                onPointerDown={(e) => startTabDrag(e, t)}
                 title="Split view"
                 onClick={() => setActive(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
@@ -919,8 +1007,10 @@ export function App() {
           return (
             <button
               key={t.id}
-              className={'tab' + (active === t.id ? ' on' : '') + tabMark(t.id)}
-              {...tabDrag(t.id)}
+              className={'tab' + (active === t.id ? ' on' : '') + (dragTab === t.id ? ' dragging' : '')}
+              data-tab={t.id}
+              data-flip={'t:' + t.id}
+              onPointerDown={(e) => startTabDrag(e, t)}
               title={`${s.name} – ${s.host}`}
               onClick={() => setActive(t.id)}
               onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
@@ -956,19 +1046,6 @@ export function App() {
           className="tab-add"
           title="New connection (Ctrl+K)"
           onClick={() => setPaletteOpen(true)}
-          onDragOver={(e) => {
-            // dropping on the plus puts the tab at the end
-            const last = tabs[tabs.length - 1];
-            if (!dragTab || !last) return;
-            e.preventDefault();
-            setDropMark((m) => (m?.id === last.id && m.after ? m : { id: last.id, after: true }));
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (dragTab && dropMark) moveTab(dragTab, dropMark.id, dropMark.after);
-            setDragTab(null);
-            setDropMark(null);
-          }}
         >
           <IconPlus size={17} />
         </button>
@@ -987,7 +1064,20 @@ export function App() {
         <WindowControls />
       </div>
 
-      <div className="body">
+      <div className="body" ref={bodyRef}>
+        {splitDrop && (
+          <div className="split-drop">
+            {'problem' in splitDrop ? (
+              <div className="split-drop-note">{splitDrop.problem}</div>
+            ) : (
+              <div className={'split-drop-half ' + splitDrop.side}>
+                <span>
+                  Beside {tabName(splitDrop.partner)}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         <div className={'view' + (active === HOME ? ' on' : '')}>
           <div className="home-shell">
             <nav className="nav">
@@ -1057,7 +1147,6 @@ export function App() {
                   onFav={(s) => void toggleFav(s)}
                   onDuplicateHost={(s) => void duplicateHost(s)}
                   onDelete={(s) => void deleteHost(s)}
-                  onSplit={() => setSplitPicker(true)}
                   shells={shellHosts}
                   onShell={(sh) => void open(sh, true)}
                   onNew={newHost}
@@ -1111,21 +1200,21 @@ export function App() {
           </div>
         </div>
 
-        {tabs.map((t) => {
+        {[...tabs].sort((a, b) => a.id.localeCompare(b.id)).map((t) => {
           if (t.kind === 'split') {
             return (
               <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
                 <SplitView
-                  tabId={t.id}
                   panes={t.panes ?? []}
-                  onPanesChange={(panes) => setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, panes, serverId: panes[0]?.serverId ?? x.serverId } : x)))}
-                  servers={[...shellHosts, ...servers]}
                   byId={byId}
-                  active={active === t.id}
-                  onStatus={setStatus}
+                  statuses={statuses}
+                  nodes={terminals.current}
+                  broadcast={!!t.broadcast}
+                  onBroadcast={(on) => setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, broadcast: on } : x)))}
+                  onReconnect={(pane) => setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, panes: x.panes!.map((p) => (p.id === pane ? { ...p, reconnectKey: p.reconnectKey + 1 } : p)) } : x)))}
+                  onClosePane={(pane) => setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, panes: x.panes!.filter((p) => p.id !== pane) } : x)))}
+                  onPopOut={(pane) => popOut(t.id, pane)}
                   onEdit={openPanel}
-                  onOpenSftp={(srv) => void open(srv, false, 'sftp')}
-                  onManageSnippets={() => goTo('snippets')}
                 />
               </div>
             );
@@ -1146,9 +1235,7 @@ export function App() {
             <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
               <SessionCloseContext.Provider value={() => closeTab(t.id)}>
               {t.kind === 'sftp' && <SftpView {...common} servers={servers} />}
-              {t.kind === 'session' && isTerminalProtocol(s.protocol) && (
-                <TerminalView {...common} onOpenSftp={() => void open(s, false, 'sftp')} onManageSnippets={() => goTo('snippets')} />
-              )}
+              {t.kind === 'session' && isTerminalProtocol(s.protocol) && <TerminalSlot nodes={terminals.current} id={t.id} />}
               {t.kind === 'session' && s.protocol === 'vnc' && <VncView {...common} />}
               {t.kind === 'session' && s.protocol === 'rdp' && <RdpView {...common} />}
               {t.kind === 'session' && s.protocol === 'web' && (
@@ -1167,6 +1254,49 @@ export function App() {
             </div>
           );
         })}
+        <TerminalPool
+          nodes={terminals.current}
+          items={tabs.flatMap((t) => {
+            if (t.kind === 'sftp') return [];
+            return panesOf(t).flatMap((pane) => {
+              const s = byId.get(pane.serverId);
+              if (!s || !isTerminalProtocol(s.protocol)) return [];
+              const inSplit = t.kind === 'split';
+              return [
+                {
+                  id: pane.id,
+                  content: (
+                    <SessionCloseContext.Provider value={() => closeTab(t.id)}>
+                      <TerminalView
+                        tabId={pane.id}
+                        server={s}
+                        active={active === t.id}
+                        reconnectKey={pane.reconnectKey}
+                        onStatus={setStatus}
+                        onReconnect={() =>
+                          inSplit
+                            ? setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, panes: x.panes!.map((p) => (p.id === pane.id ? { ...p, reconnectKey: p.reconnectKey + 1 } : p)) } : x)))
+                            : reconnect(t.id)
+                        }
+                        onDuplicate={() => duplicate(t.id)}
+                        onEdit={() => openPanel(s)}
+                        onOpenSftp={() => void open(s, false, 'sftp')}
+                        onManageSnippets={() => goTo('snippets')}
+                        bare={inSplit}
+                        place={t.id}
+                        registerSender={(fn) => (fn ? senders.current.set(pane.id, fn) : senders.current.delete(pane.id))}
+                        onUserInput={(data) => {
+                          if (!inSplit || !t.broadcast) return;
+                          for (const other of t.panes ?? []) if (other.id !== pane.id) senders.current.get(other.id)?.(data);
+                        }}
+                      />
+                    </SessionCloseContext.Provider>
+                  ),
+                },
+              ];
+            });
+          })}
+        />
       </div>
 
       {drawerOpen && panelEl}
@@ -1195,8 +1325,6 @@ export function App() {
           onReplaced={() => void lock()}
         />
       )}
-
-      {splitPicker && <SplitPicker servers={[...shellHosts, ...servers.filter((x) => isTerminalProtocol(x.protocol))]} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
 
       {paletteOpen && (
         <CommandPalette
