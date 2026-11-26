@@ -507,6 +507,22 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return Object.fromEntries((params.ids as string[]).map((id, i) => [id, i % 5 === 3 ? 'down' : i % 7 === 5 ? 'closed' : 'up']));
     case 'hosts.wake':
       return onlyNative('Wake-on-LAN');
+    case 'servers.place': {
+      let moved = 0;
+      mock.servers = mock.servers.map((s) => {
+        if (!(params.ids as string[]).includes(s.id)) return s;
+        const workspace = params.setWorkspace ? params.workspace : s.workspace;
+        if (workspace === s.workspace && params.group === s.group) return s;
+        moved++;
+        return { ...s, workspace, group: params.group, sortOrder: 0 };
+      });
+      mock.servers = mock.servers.map((s) => {
+        const i = (params.order as string[]).indexOf(s.id);
+        return i < 0 ? s : { ...s, sortOrder: i + 1 };
+      });
+      persistMock();
+      return moved;
+    }
     case 'servers.reorder':
     case 'servers.deleteMany':
       return 0;
@@ -1022,6 +1038,9 @@ export const api = {
 
   hostsReachability: (ids: string[]) => call<Record<string, 'up' | 'closed' | 'down'>>('hosts.reachability', { ids }),
   hostsWake: (id: string) => call<void>('hosts.wake', { id }),
+  /** Puts hosts into a group; workspace undefined = each stays in its own, order = the target section's new order. */
+  serversPlace: (ids: string[], workspace: string | undefined, group: string, order: string[] = []) =>
+    call<number>('servers.place', { ids, setWorkspace: workspace !== undefined, workspace: workspace ?? '', group, order }),
   serversReorder: (ids: string[], reset = false) => call<number>('servers.reorder', { ids, reset }),
   serversBulkLogin: (ids: string[], login: BulkLogin) => call<{ changed: number; skipped: number }>('servers.bulkLogin', { ids, ...login }),
   serversDeleteMany: (ids: string[]) => call<number>('servers.deleteMany', { ids }),

@@ -42,6 +42,7 @@ export function HostsPage({
   keys,
   identities,
   onReorder,
+  onPlace,
   onBulkLogin,
   onDeleteMany,
   shells,
@@ -58,6 +59,8 @@ export function HostsPage({
   keys: KeyInfo[];
   identities: Identity[];
   onReorder: (ids: string[], reset?: boolean) => void;
+  /** Move hosts into a group; workspace undefined = each keeps its own, order = new order of the target section ([] = by name). */
+  onPlace: (list: Server[], workspace: string | undefined, group: string, order: string[]) => void;
   onBulkLogin: (list: Server[], login: BulkLogin) => void;
   onDeleteMany: (list: Server[]) => Promise<boolean>;
   servers: Server[];
@@ -90,7 +93,7 @@ export function HostsPage({
   const [menu, setMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const [powerMenu, setPowerMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const [wsMenu, setWsMenu] = useState<{ x: number; y: number; name: string } | null>(null);
-  const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | null>(null);
+  const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | { kind: 'group'; list: Server[] } | null>(null);
   const [dropWs, setDropWs] = useState<string | null>(null);
   const [shellMenu, setShellMenu] = useState<{ x: number; y: number } | null>(null);
   // Several hosts at once: Ctrl+click, or the "Select" button and then plain clicks.
@@ -108,13 +111,18 @@ export function HostsPage({
     setSelecting(false);
     setMarked(new Set());
   };
-  // Drag and drop inside a section changes the order.
+  // Drag and drop: inside a section it changes the order, onto another section it moves into that group, and the areas that
+  // appear at the bottom make a new group or take the host out of its group.
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const [dropOn, setDropOn] = useState<string | null>(null); // key of a section, '+' = new group, '-' = no group
   const endDrag = () => {
     setDragId(null);
     setDropAt(null);
+    setDropOn(null);
   };
+  /** What is being dragged: the host, or all selected hosts when it is one of them. */
+  const dragged = !dragId ? [] : marked.has(dragId) ? markedHosts : servers.filter((s) => s.id === dragId);
   const q = query.trim();
 
   // With search text, all workspaces are searched; otherwise only the selected one is shown.
@@ -145,7 +153,7 @@ export function HostsPage({
     const rank = (p: { ws: string; group: string }) => (p.ws === '' && p.group === '' ? 1 : 0);
     return parts
       .sort((a, b) => rank(a) - rank(b) || a.ws.localeCompare(b.ws) || a.group.localeCompare(b.group))
-      .map((p) => [label(p), p.list] as const);
+      .map((p) => ({ key: p.ws + '\u0000' + p.group, name: label(p), ws: p.ws, group: p.group, list: p.list }));
   }, [filtered, showWorkspace]);
 
   // Which of the listed hosts answer: checked while the list is on screen, then once a minute.
@@ -181,6 +189,47 @@ export function HostsPage({
       window.clearInterval(again);
     };
   }, [showStatus, visible, checkKey]);
+
+  type Section = (typeof grouped)[number];
+  // In the view of one workspace the hosts keep it; in "All" a section stands for its workspace too.
+  const workspaceOf = (section: Section) => (showWorkspace ? section.ws : undefined);
+  const isElsewhere = (section: Section) => dragged.some((d) => !section.list.some((x) => x.id === d.id));
+
+  /** Puts the dragged hosts into the section, before or after "at" (or at the end). */
+  function dropInto(section: Section, at?: { id: string; after: boolean }) {
+    const moving = dragged;
+    const elsewhere = isElsewhere(section);
+    endDrag();
+    if (!moving.length) return;
+    const ids = moving.map((s) => s.id);
+    const order = section.list.map((x) => x.id).filter((id) => !ids.includes(id));
+    // without a chosen spot, a section that is sorted by name stays that way
+    if (!at && !section.list.some((x) => x.sortOrder)) return onPlace(moving, workspaceOf(section), section.group, []);
+    const spot = at ? order.indexOf(at.id) : -1;
+    order.splice(spot < 0 ? order.length : spot + (at!.after ? 1 : 0), 0, ...ids);
+    if (elsewhere) onPlace(moving, workspaceOf(section), section.group, order);
+    else onReorder(order);
+  }
+
+  const dropZone = (id: '+' | '-', text: string, onDrop: (moving: Server[]) => void) => (
+    <div
+      className={'new-group-zone' + (dropOn === id ? ' over' : '')}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (dropOn !== id) setDropOn(id);
+        setDropAt(null);
+      }}
+      onDragLeave={() => setDropOn((d) => (d === id ? null : d))}
+      onDrop={(e) => {
+        e.preventDefault();
+        const moving = dragged;
+        endDrag();
+        if (moving.length) onDrop(moving);
+      }}
+    >
+      {text}
+    </div>
+  );
 
   const target = q ? parseTarget(q) : null;
   const canConnect = q.length > 0 && (filtered.length > 0 || target !== null);
@@ -337,9 +386,27 @@ export function HostsPage({
               No host found.{target ? ' Enter creates "' + (target.host ?? '') + '" and connects.' : ''}
             </p>
           )}
-          {grouped.map(([name, list]) => (
-            <section key={name}>
-              <div className="sec-label">{name}</div>
+          {grouped.map((section) => {
+            const { list } = section;
+            return (
+            <section
+              key={section.key}
+              className={'host-section' + (dropOn === section.key ? ' drop-into' : '')}
+              onDragOver={(e) => {
+                if (q || !dragged.length || !isElsewhere(section)) return;
+                e.preventDefault();
+                if (dropOn !== section.key) setDropOn(section.key);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn((d) => (d === section.key ? null : d));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (!q && isElsewhere(section)) dropInto(section);
+                else endDrag();
+              }}
+            >
+              <div className="sec-label">{section.name}</div>
               <div className="hgrid" style={{ marginTop: 10 }}>
                 {list.map((s) => (
                   <div
@@ -357,27 +424,26 @@ export function HostsPage({
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/msv-host', s.id);
-                      setDragId(s.id);
+                      // a moment later: changing the page inside this event can cancel the drag
+                      window.setTimeout(() => setDragId(s.id), 0);
                     }}
                     onDragEnd={endDrag}
                     onDragOver={(e) => {
-                      // only inside the same section, and not while searching (the list is sorted by relevance then)
-                      if (q || !dragId || dragId === s.id || !list.some((x) => x.id === dragId)) return;
+                      // not while searching (the list is sorted by relevance then)
+                      if (q || !dragged.length || dragged.some((d) => d.id === s.id)) return;
                       e.preventDefault();
+                      e.stopPropagation();
+                      if (dropOn !== (isElsewhere(section) ? section.key : null)) setDropOn(isElsewhere(section) ? section.key : null);
                       const r = e.currentTarget.getBoundingClientRect();
                       const after = e.clientX > r.left + r.width / 2;
                       if (dropAt?.id !== s.id || dropAt.after !== after) setDropAt({ id: s.id, after });
                     }}
                     onDragLeave={() => setDropAt((d) => (d?.id === s.id ? null : d))}
                     onDrop={(e) => {
+                      if (dropAt?.id !== s.id) return; // the section handles it
                       e.preventDefault();
-                      const at = dropAt;
-                      const from = dragId;
-                      endDrag();
-                      if (!from || !at || at.id !== s.id) return;
-                      const order = list.map((x) => x.id).filter((id) => id !== from);
-                      order.splice(order.indexOf(s.id) + (at.after ? 1 : 0), 0, from);
-                      onReorder(order);
+                      e.stopPropagation();
+                      dropInto(section, dropAt);
                     }}
                     title={`${s.name} – ${s.host}:${s.port}`}
                     onClick={(e) => {
@@ -446,9 +512,31 @@ export function HostsPage({
                 ))}
               </div>
             </section>
-          ))}
-          <p className="muted small">Double-click or Enter connects · drag to arrange · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session</p>
+            );
+          })}
+          <p className="muted small">Double-click or Enter connects · drag to arrange or into another group · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session</p>
         </>
+      )}
+
+      {!q && dragged.length > 0 && (
+        <div className="drop-zones">
+          {dropZone('+', 'Drop here to create a new group', (moving) => setWsDialog({ kind: 'group', list: moving }))}
+          {dragged.some((s) => s.group) && dropZone('-', 'Drop here to remove from the group', (moving) => onPlace(moving, undefined, '', []))}
+        </div>
+      )}
+
+      {wsDialog?.kind === 'group' && (
+        <PromptDialog
+          title={wsDialog.list.length === 1 ? `New group for "${wsDialog.list[0].name}"` : `New group for ${wsDialog.list.length} hosts`}
+          label="Name of the group"
+          confirmLabel="Create"
+          onClose={() => setWsDialog(null)}
+          onSubmit={(v) => {
+            const list = wsDialog.list;
+            setWsDialog(null);
+            onPlace(list, undefined, v, []);
+          }}
+        />
       )}
 
       {wsMenu && (

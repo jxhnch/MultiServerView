@@ -207,6 +207,14 @@ public sealed class Bridge : IDisposable
             }
             case "servers.reorder":
                 return _vault.Reorder(Strings(p, "ids").ToList(), Bool(p, "reset"));
+            case "servers.place":
+            {
+                var order = Strings(p, "order").ToList();
+                var count = _vault.Place(Strings(p, "ids").ToList(), Bool(p, "setWorkspace") ? Opt(p, "workspace") : null, Opt(p, "group"),
+                    order.Count > 0 ? order : null);
+                _mcp.InvalidateConnections(); // the MCP server may be limited to workspaces
+                return count;
+            }
             case "servers.bulkLogin":
             {
                 var login = new BulkLogin(Str(p, "mode"), Opt(p, "identityId"), Opt(p, "keyId"), Opt(p, "username").Trim(), Opt(p, "password"));

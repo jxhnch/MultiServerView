@@ -24,6 +24,34 @@ public class BulkAndOrderTests : IDisposable
     private ServerEntry Get(ServerEntry s) => _vault.List().Single(x => x.Id == s.Id);
 
     [Fact]
+    public void Hosts_can_be_put_into_a_group_at_a_chosen_place()
+    {
+        var a = Add("a");
+        var b = Add("b");
+        var c = Add("c");
+        _vault.Reorder(new[] { c.Id });
+
+        // by name: the old place is forgotten, the workspace stays
+        Assert.Equal(1, _vault.Place(new[] { c.Id }, null, " web "));
+        Assert.Equal(("web", "", 0), (Get(c).Group, Get(c).Workspace, Get(c).SortOrder));
+
+        // into a section at a chosen place, into another workspace
+        Assert.Equal(2, _vault.Place(new[] { a.Id, b.Id }, "lab", "web", new[] { b.Id, c.Id, a.Id }));
+        Assert.Equal(("web", "lab", 1), (Get(b).Group, Get(b).Workspace, Get(b).SortOrder));
+        Assert.Equal(("web", "", 2), (Get(c).Group, Get(c).Workspace, Get(c).SortOrder));
+        Assert.Equal(("web", "lab", 3), (Get(a).Group, Get(a).Workspace, Get(a).SortOrder));
+
+        // already there: nothing changes
+        var before = Get(a).UpdatedAt;
+        Assert.Equal(0, _vault.Place(new[] { a.Id }, null, "web"));
+        Assert.Equal(before, Get(a).UpdatedAt);
+
+        // out of the group
+        Assert.Equal(1, _vault.Place(new[] { a.Id }, null, ""));
+        Assert.Equal(("", "lab"), (Get(a).Group, Get(a).Workspace));
+    }
+
+    [Fact]
     public void Order_is_saved_and_can_be_reset()
     {
         var a = Add("a");

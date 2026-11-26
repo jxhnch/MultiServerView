@@ -328,6 +328,46 @@ public sealed class VaultStore
     }
 
     /// <summary>
+    /// Puts hosts into a group (drag and drop). <paramref name="workspace"/> null = every host stays in its workspace; group ""
+    /// = no group. With <paramref name="order"/> (the hosts of the target section, in their new order) the hosts get these
+    /// places; without it a moved host is sorted by name again. Returns how many hosts moved to another group or workspace.
+    /// </summary>
+    public int Place(IReadOnlyCollection<string> ids, string? workspace, string group, IReadOnlyList<string>? order = null)
+    {
+        var moved = 0;
+        var changed = false;
+        lock (_gate)
+        {
+            var data = Data();
+            var now = DateTimeOffset.UtcNow;
+            var wanted = ids.ToHashSet();
+            foreach (var s in data.Servers.Where(s => wanted.Contains(s.Id)))
+            {
+                var toWorkspace = workspace?.Trim() ?? s.Workspace;
+                var toGroup = group.Trim();
+                if (s.Workspace == toWorkspace && s.Group == toGroup) continue;
+                s.Workspace = toWorkspace;
+                s.Group = toGroup;
+                s.SortOrder = 0; // its old place belongs to the old section
+                s.UpdatedAt = now;
+                moved++;
+                changed = true;
+            }
+            for (var i = 0; order != null && i < order.Count; i++)
+            {
+                var s = data.Servers.FirstOrDefault(x => x.Id == order[i]);
+                if (s == null || s.SortOrder == i + 1) continue;
+                s.SortOrder = i + 1;
+                s.UpdatedAt = now;
+                changed = true;
+            }
+            if (changed) Save();
+        }
+        if (changed) Changed?.Invoke();
+        return moved;
+    }
+
+    /// <summary>
     /// Gives several hosts the same login at once. Hosts that cannot use it (an SSH key on an RDP host, anything on a serial
     /// port) are left alone and counted as skipped.
     /// </summary>

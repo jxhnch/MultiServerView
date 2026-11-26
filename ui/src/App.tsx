@@ -682,6 +682,20 @@ export function App() {
     }
   }
 
+  async function placeHosts(list: Server[], workspace: string | undefined, group: string, order: string[]) {
+    try {
+      await api.serversPlace(
+        list.map((s) => s.id),
+        workspace,
+        group,
+        order,
+      );
+      await refresh();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  }
+
   async function reorderHosts(ids: string[], reset = false) {
     try {
       await api.serversReorder(ids, reset);
@@ -1043,6 +1057,7 @@ export function App() {
                   keys={keys}
                   identities={identities}
                   onReorder={(ids, reset) => void reorderHosts(ids, reset)}
+                  onPlace={(list, ws, group, order) => void placeHosts(list, ws, group, order)}
                   onBulkLogin={(list, login) => void bulkLogin(list, login)}
                   onDeleteMany={deleteHosts}
                 />
