@@ -7,6 +7,7 @@ using MultiServerView.Core.Mcp;
 using MultiServerView.Core.Update;
 using MultiServerView.Core.Import;
 using MultiServerView.Core.Local;
+using MultiServerView.Core.Net;
 using MultiServerView.Core.Proxmox;
 using MultiServerView.Core.Vmware;
 using MultiServerView.Core.Sftp;
@@ -191,6 +192,17 @@ public sealed class Bridge : IDisposable
                 _vault.Delete(Str(p, "id"));
                 _mcp.InvalidateConnections();
                 return null;
+            case "hosts.reachability":
+            {
+                var ids = Strings(p, "ids").ToHashSet();
+                return await Reachability.CheckAsync(_vault.List().Where(s => ids.Contains(s.Id)), TimeSpan.FromSeconds(3));
+            }
+            case "hosts.wake":
+            {
+                var sleeper = _vault.Find(Str(p, "id")) ?? throw new KeyNotFoundException("Server not found.");
+                await WakeOnLan.SendAsync(sleeper.MacAddress);
+                return null;
+            }
             case "servers.reorder":
                 return _vault.Reorder(Strings(p, "ids").ToList(), Bool(p, "reset"));
             case "servers.bulkLogin":
@@ -663,19 +675,20 @@ public sealed class Bridge : IDisposable
                 try
                 {
                     var upload = method == "sftp.upload";
+                    var skipped = 0;
                     foreach (var path in Strings(p, upload ? "localPaths" : "remotePaths"))
                     {
                         void Report(TransferProgress tp) => _emit(new { @event = "sftp.progress", sessionId, transferId, name = tp.Name, done = tp.Done, total = tp.Total, finished = tp.Finished });
                         if (upload) await session.UploadAsync(path, Str(p, "remoteDir"), Report, cts.Token);
-                        else await session.DownloadAsync(path, Str(p, "localDir"), Report, cts.Token);
+                        else skipped += await session.DownloadAsync(path, Str(p, "localDir"), Report, cts.Token);
                     }
+                    return new { skipped };
                 }
                 finally
                 {
                     _transfers.TryRemove(transferId, out _);
                     cts.Dispose();
                 }
-                return null;
             }
             case "sftp.copyBetween":
             {
@@ -688,9 +701,11 @@ public sealed class Bridge : IDisposable
                 _transfers[transferId] = cts;
                 try
                 {
+                    var skipped = 0;
                     foreach (var path in Strings(p, "paths"))
-                        await from.CopyToAsync(to, path, Str(p, "targetDir"),
+                        skipped += await from.CopyToAsync(to, path, Str(p, "targetDir"),
                             tp => _emit(new { @event = "sftp.progress", sessionId, transferId, name = tp.Name, done = tp.Done, total = tp.Total, finished = tp.Finished }), cts.Token);
+                    return new { skipped };
                 }
                 catch (OperationCanceledException)
                 {
@@ -701,7 +716,6 @@ public sealed class Bridge : IDisposable
                     _transfers.TryRemove(transferId, out _);
                     cts.Dispose();
                 }
-                return null;
             }
             case "sftp.cancel":
                 if (_transfers.TryGetValue(Str(p, "transferId"), out var toCancel))

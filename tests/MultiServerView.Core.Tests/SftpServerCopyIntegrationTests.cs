@@ -46,6 +46,45 @@ public class SftpServerCopyIntegrationTests
     }
 
     [Fact]
+    public async Task Links_are_counted_and_an_interrupted_write_keeps_the_old_file()
+    {
+        if (!Enabled) return;
+        using var from = await Connect();
+        using var to = await Connect();
+        var root = "/tmp/msv-copy-" + Guid.NewGuid().ToString("N");
+        foreach (var dir in new[] { "", "/a", "/b", "/out" }) await from.MakeDirAsync(root + dir);
+        await from.WriteTextAsync(root + "/a/real.txt", "real", "lf", false, 0, 0, force: true);
+        using (var raw = new Renci.SshNet.SftpClient("127.0.0.1", 2222, "msvtest", Environment.GetEnvironmentVariable("MSV_SSH_TEST_PASSWORD") ?? "testpw-123"))
+        {
+            raw.Connect();
+            raw.SymbolicLink(root + "/a/real.txt", root + "/a/link.txt");
+        }
+
+        Assert.Equal(1, await from.CopyToAsync(to, root + "/a", root + "/b", _ => { }, CancellationToken.None));
+        var local = Path.Combine(Path.GetTempPath(), "msv-dl-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(local);
+        Assert.Equal(1, await from.DownloadAsync(root + "/a", local, _ => { }, CancellationToken.None));
+
+        // uploading over a link writes into the file it points to and keeps the link
+        var upload = Path.Combine(local, "link.txt");
+        await File.WriteAllTextAsync(upload, "through the link");
+        await to.UploadAsync(upload, root + "/a", _ => { }, CancellationToken.None);
+        Assert.True((await to.ListAsync(root + "/a")).Entries.Single(e => e.Name == "link.txt").IsLink);
+        Assert.Equal(16, (await to.StatAsync(root + "/a/real.txt")).Size);
+
+        // a normal upload over an existing file keeps its permissions and leaves no part file behind
+        await to.ChmodAsync(root + "/b/a/real.txt", 0x180, false);
+        var second = Path.Combine(local, "real.txt");
+        await File.WriteAllTextAsync(second, "second version");
+        await to.UploadAsync(second, root + "/b/a", _ => { }, CancellationToken.None);
+        Assert.Equal(0x180, (await to.StatAsync(root + "/b/a/real.txt")).Permissions);
+        Assert.DoesNotContain((await to.ListAsync(root + "/b/a")).Entries, e => e.Name.Contains(".msv-part"));
+
+        Directory.Delete(local, true);
+        await from.DeleteAsync(root);
+    }
+
+    [Fact]
     public async Task Copying_onto_or_into_itself_is_refused()
     {
         if (!Enabled) return;

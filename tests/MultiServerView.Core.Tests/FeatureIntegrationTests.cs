@@ -24,7 +24,7 @@ public class FeatureIntegrationTests : IDisposable
 
     private static ServerEntry Server() => new()
     {
-        Name = "local", Host = "127.0.0.1", Port = 2222, Username = "msvtest", Password = "testpw-123"
+        Name = "local", Host = "127.0.0.1", Port = 2222, Username = "msvtest", Password = Environment.GetEnvironmentVariable("MSV_SSH_TEST_PASSWORD") ?? "testpw-123"
     };
 
     private static Func<string, int, string, HostKeyTrust> Accept() => (_, _, _) => HostKeyTrust.NewlyTrusted;

@@ -45,7 +45,9 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 | **Edit** | Open remote files in your own editor (uploaded again on every save), or use the built-in text editor |
 | **Inspect** | Change permissions (chmod, also recursive), folder sizes, SHA-256 checksums, compare folders |
 
-**Two servers side by side.** *Left side* switches the left pane from this PC to another SSH host. Copy and move then go straight from one server to the other: the data passes through your PC but is not written to its disk. Each file is written next to its target first, so a cancelled copy does not damage an existing file. Links are not followed, and copying a folder onto or into itself is refused.
+**Safe transfers.** A file is first written next to its target and replaces it only when it is complete, so a cancelled transfer does not damage a file that was already there. Deleting or renaming a link acts on the link, never on what it points to. Links are not copied; a *move* then keeps the original.
+
+**Two servers side by side.** *Left side* switches the left pane from this PC to another SSH host. Copy and move then go straight from one server to the other: the data passes through your PC but is not written to its disk. Copying a folder onto or into itself is refused.
 
 **F-keys:** F2 rename, F4 edit, F5 copy, F6 move, F7 new folder, Del delete, Alt+Enter properties.
 
@@ -61,7 +63,9 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 - **Workspaces:** one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
 - **Quick switcher:** `Ctrl+K`, a search bar that also understands `ssh user@host`. Plus tabs, favorites, groups, OS logos, and a light and dark theme.
 - **Identities, keys and snippets:** reuse credentials across hosts, generate SSH keys and install the public key on a server with one click. Snippets can contain `{{variables}}` that ask for values when you run them.
-- **Your own order:** drag a host to a new place in its section. Right-click and choose *Sort these hosts by name again* to undo it.
+- **Your own order:** drag a host to a new place in its section. Right-click and choose *Sort these hosts by name again* to undo it. `msv` lists the hosts in the same order.
+- **Online status:** while the host list is on screen, each listed host gets a short TCP connection to its port once a minute (no login, nothing is sent). Green = it answers, orange = the machine answers but the port is closed, red = no answer. Hosts behind a jump host and serial hosts are not checked. The *Online status* button switches it off.
+- **Wake-on-LAN:** enter a MAC address in the host details, then right-click the host and choose *Wake up*. It works in your own network.
 - **Several hosts at once:** Ctrl+click or *Select*, then give them the same SSH key, identity or user name and password, move them to a workspace or delete them.
 - **Signing in:** when a login is missing or fails, you can enter a password or pick an SSH key, and save it for the host.
 - **Known hosts and history:** review and reset stored host keys, and see your connection history (local only, no passwords).

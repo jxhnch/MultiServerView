@@ -37,6 +37,9 @@ export interface BulkLogin {
   password?: string;
 }
 
+/** skipped = links that were not copied (they are never followed). */
+export type TransferResult = { skipped?: number } | null;
+
 export type HostEvent =
   | { event: 'ssh.data'; sessionId: string; data: string }
   | { event: 'ssh.closed'; sessionId: string; reason: string | null }
@@ -499,6 +502,11 @@ async function callMock(method: string, params: any): Promise<unknown> {
       mockShells.delete(params.sessionId);
       return null;
 
+    case 'hosts.reachability':
+      // demo data: most hosts answer
+      return Object.fromEntries((params.ids as string[]).map((id, i) => [id, i % 5 === 3 ? 'down' : i % 7 === 5 ? 'closed' : 'up']));
+    case 'hosts.wake':
+      return onlyNative('Wake-on-LAN');
     case 'servers.reorder':
     case 'servers.deleteMany':
       return 0;
@@ -1000,6 +1008,8 @@ export const api = {
   keysGenerate: (k: { name: string; type: 'ed25519' | 'rsa'; bits?: number; comment?: string }) => call<KeyInfo>('keys.generate', k),
   keysInstall: (k: { keyId: string; serverId: string; switchHost?: boolean } & Credentials) => call<void>('keys.install', k),
 
+  hostsReachability: (ids: string[]) => call<Record<string, 'up' | 'closed' | 'down'>>('hosts.reachability', { ids }),
+  hostsWake: (id: string) => call<void>('hosts.wake', { id }),
   serversReorder: (ids: string[], reset = false) => call<number>('servers.reorder', { ids, reset }),
   serversBulkLogin: (ids: string[], login: BulkLogin) => call<{ changed: number; skipped: number }>('servers.bulkLogin', { ids, ...login }),
   serversDeleteMany: (ids: string[]) => call<number>('servers.deleteMany', { ids }),
@@ -1061,7 +1071,7 @@ export const api = {
   historyClear: () => call<void>('history.clear'),
 
   sftpCopyBetween: (sessionId: string, transferId: string, fromSessionId: string, toSessionId: string, paths: string[], targetDir: string) =>
-    call<void>('sftp.copyBetween', { sessionId, transferId, fromSessionId, toSessionId, paths, targetDir }),
+    call<TransferResult>('sftp.copyBetween', { sessionId, transferId, fromSessionId, toSessionId, paths, targetDir }),
   sftpOpen: (sessionId: string, serverId: string, cred?: Credentials) => call<{ home: string }>('sftp.open', { sessionId, serverId, ...cred }),
   sftpReadText: (sessionId: string, path: string) =>
     call<{ content: string; lineEnding: 'lf' | 'crlf'; bom: boolean; size: number; modified: number }>('sftp.readText', { sessionId, path }),
@@ -1082,7 +1092,7 @@ export const api = {
   sftpUpload: (sessionId: string, transferId: string, localPaths: string[], remoteDir: string) =>
     call<void>('sftp.upload', { sessionId, transferId, localPaths, remoteDir }),
   sftpDownload: (sessionId: string, transferId: string, remotePaths: string[], localDir: string) =>
-    call<void>('sftp.download', { sessionId, transferId, remotePaths, localDir }),
+    call<TransferResult>('sftp.download', { sessionId, transferId, remotePaths, localDir }),
   sftpCancel: (transferId: string) => call<void>('sftp.cancel', { transferId }),
   sftpCreateFile: (sessionId: string, path: string) => call<void>('sftp.createFile', { sessionId, path }),
   sftpStat: (sessionId: string, path: string) => call<FileStat>('sftp.stat', { sessionId, path }),

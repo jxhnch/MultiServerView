@@ -77,6 +77,9 @@ public sealed class ServerEntry : IVaultItem
     /// </summary>
     public string VmwareRef { get; set; } = "";
 
+    /// <summary>Optional: for Wake-on-LAN.</summary>
+    public string MacAddress { get; set; } = "";
+
     public string Group { get; set; } = "";
 
     /// <summary>Position chosen by the user (drag and drop); 0 = not placed, such hosts come after the placed ones, by name.</summary>

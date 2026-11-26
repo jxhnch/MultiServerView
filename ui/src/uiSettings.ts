@@ -10,10 +10,12 @@ export interface UiSettings {
   checkUpdates: boolean;
   /** Reset the auto-lock inactivity timer on MCP requests. */
   mcpKeepUnlocked: boolean;
+  /** Dots in the host list that show which hosts answer on their port. */
+  hostStatus: boolean;
 }
 
 const KEY = 'msv-ui';
-const DEFAULTS: UiSettings = { theme: 'light', autoLockMinutes: 0, vncScale: true, vncQuality: 6, checkUpdates: true, mcpKeepUnlocked: false };
+const DEFAULTS: UiSettings = { theme: 'light', autoLockMinutes: 0, vncScale: true, vncQuality: 6, checkUpdates: true, mcpKeepUnlocked: false, hostStatus: true };
 let current: UiSettings = load();
 const listeners = new Set<(s: UiSettings) => void>();
 

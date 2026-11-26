@@ -146,9 +146,25 @@ public sealed partial class SftpSession : IDisposable
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
     }
 
-    public Task RenameAsync(string from, string to) => Task.Run(() => Client.RenameFile(from, to));
+    public Task RenameAsync(string from, string to) => Task.Run(() =>
+    {
+        var client = Client;
+        Entry(client, from).MoveTo(Normalize(client.WorkingDirectory, to));
+    });
 
-    public Task DeleteAsync(string path) => Task.Run(() => DeleteRecursive(Client, path));
+    public Task DeleteAsync(string path) => Task.Run(() => DeleteRecursive(Entry(Client, path), Client));
+
+    /// <summary>
+    /// The entry itself as the folder lists it. Needed for everything that removes or renames: SSH.NET's calls that take a path
+    /// first resolve it, so for a link they would delete or move the file it points to. The entry of a listing does not.
+    /// </summary>
+    private static ISftpFile Entry(SftpClient client, string path)
+    {
+        var full = Normalize(client.WorkingDirectory, path);
+        var name = full.Split('/').Last();
+        return client.ListDirectory(ParentOf(full)).FirstOrDefault(f => f.Name == name && name.Length > 0 && name is not ("." or ".."))
+               ?? throw new Renci.SshNet.Common.SftpPathNotFoundException("No such file: " + full);
+    }
 
     /// <summary>Uploads a file or a whole folder (recursively) into <paramref name="remoteDir"/>.</summary>
     public async Task UploadAsync(string localPath, string remoteDir, Action<TransferProgress> progress, CancellationToken ct)
@@ -179,15 +195,15 @@ public sealed partial class SftpSession : IDisposable
 
         var total = files.Sum(f => f.size);
         long done = 0;
+        var cache = new FolderCache();
         progress(new TransferProgress(name, 0, total, false));
         foreach (var (local, remote, size) in files)
         {
             ct.ThrowIfCancellationRequested();
             var baseDone = done;
-            await using var stream = File.OpenRead(local);
             // Async API: cancel via the token. Never throw in progress callbacks - they run on the thread pool.
-            await client.UploadFileAsync(stream, remote, true,
-                new Progress<UploadFileProgressReport>(r => progress(new TransferProgress(name, baseDone + (long)r.TotalBytesUploaded, total, false))), ct);
+            await SafeUploadAsync(client, () => File.OpenRead(local), remote, null, cache,
+                sent => progress(new TransferProgress(name, baseDone + sent, total, false)), ct);
             done += size;
         }
         progress(new TransferProgress(name, total, total, true));
@@ -232,13 +248,17 @@ public sealed partial class SftpSession : IDisposable
         return !string.IsNullOrEmpty(ext) && BlockedExternalExtensions.Contains(ext);
     }
 
-    /// <summary>Downloads a file or a whole folder (recursively) into the local folder <paramref name="localDir"/>.</summary>
-    public async Task DownloadAsync(string remotePath, string localDir, Action<TransferProgress> progress, CancellationToken ct)
+    /// <summary>
+    /// Downloads a file or a whole folder (recursively) into the local folder <paramref name="localDir"/>.
+    /// Returns the number of links (and too deeply nested folders) that were left out.
+    /// </summary>
+    public async Task<int> DownloadAsync(string remotePath, string localDir, Action<TransferProgress> progress, CancellationToken ct)
     {
         var client = Client;
         var name = remotePath.TrimEnd('/').Split('/').Last();
         var rootLocal = SafeLocalChildPath(localDir, name);
 
+        var skipped = 0;
         var (files, dirs) = await Task.Run(() =>
         {
             var attrs = client.GetAttributes(remotePath);
@@ -247,7 +267,7 @@ public sealed partial class SftpSession : IDisposable
             if (attrs.IsDirectory)
             {
                 d.Add(rootLocal);
-                CollectRemote(client, remotePath, rootLocal, f, d);
+                CollectRemote(client, remotePath, rootLocal, f, d, ref skipped);
             }
             else f.Add((remotePath, rootLocal, attrs.Size));
             foreach (var dir in d) Directory.CreateDirectory(dir);
@@ -261,48 +281,39 @@ public sealed partial class SftpSession : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             var baseDone = done;
-            await using var stream = File.Create(local);
-            await client.DownloadFileAsync(remote, stream,
-                new Progress<DownloadFileProgressReport>(r => progress(new TransferProgress(name, baseDone + (long)r.TotalBytesDownloaded, total, false))), ct);
+            await SafeLocalWriteAsync(local, stream => client.DownloadFileAsync(remote, stream,
+                new Progress<DownloadFileProgressReport>(r => progress(new TransferProgress(name, baseDone + (long)r.TotalBytesDownloaded, total, false))), ct));
             done += size;
         }
         progress(new TransferProgress(name, total, total, true));
+        return skipped;
     }
 
     private static void CollectRemote(SftpClient client, string remoteDir, string localDir,
-        List<(string, string, long)> files, List<string> dirs, int depth = 0)
+        List<(string, string, long)> files, List<string> dirs, ref int skipped, int depth = 0)
     {
-        if (depth > 64) return; // protects against link loops
+        if (depth > 64) { skipped++; return; } // protects against link loops
         foreach (var f in client.ListDirectory(remoteDir))
         {
             if (f.Name is "." or "..") continue;
-            if (f.IsSymbolicLink) continue;
+            if (f.IsSymbolicLink) { skipped++; continue; }
             var local = SafeLocalChildPath(localDir, f.Name);
             if (f.IsDirectory)
             {
                 dirs.Add(local);
-                CollectRemote(client, f.FullName, local, files, dirs, depth + 1);
+                CollectRemote(client, f.FullName, local, files, dirs, ref skipped, depth + 1);
             }
             else files.Add((f.FullName, local, f.Length));
         }
     }
 
-    private static void DeleteRecursive(SftpClient client, string path, int depth = 0)
+    private static void DeleteRecursive(ISftpFile item, SftpClient client, int depth = 0)
     {
         if (depth > 64) throw new InvalidOperationException("Folder nesting is too deep to delete safely.");
-        var item = client.Get(path);
-        if (!item.IsDirectory || item.IsSymbolicLink)
-        {
-            client.DeleteFile(path);
-            return;
-        }
-        foreach (var f in client.ListDirectory(path))
-        {
-            if (f.Name is "." or "..") continue;
-            if (f.IsDirectory && !f.IsSymbolicLink) DeleteRecursive(client, f.FullName, depth + 1);
-            else client.DeleteFile(f.FullName);
-        }
-        client.DeleteDirectory(path);
+        if (item.IsDirectory && !item.IsSymbolicLink)
+            foreach (var f in client.ListDirectory(item.FullName))
+                if (f.Name is not ("." or "..")) DeleteRecursive(f, client, depth + 1);
+        item.Delete(); // a link is removed itself, never what it points to
     }
 
     /// <summary>Largest file the built-in editor opens.</summary>

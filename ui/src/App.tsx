@@ -1008,6 +1008,13 @@ export function App() {
             <div className="home-main">
               {section === 'hosts' && (
                 <HostsPage
+                  visible={active === HOME}
+                  onWake={(s) =>
+                    void api
+                      .hostsWake(s.id)
+                      .then(() => toast(`Wake-up packet sent to ${s.name}. It takes a moment until the machine answers.`))
+                      .catch((e: Error) => toast(e.message, 'error'))
+                  }
                   servers={servers}
                   vmStates={vmStates}
                   onVmPower={(s, action) => void vmPower(s, action)}

@@ -286,10 +286,15 @@ export function SftpView({
     setTransfers((prev) => [{ id, name: label, direction: direction as 'up' | 'down', move, done: 0, total: 0, started: Date.now(), state: 'running' as const }, ...prev].slice(0, 8));
     try {
       const paths = list.map((x) => x.path);
-      if (leftHost) await api.sftpCopyBetween(tabId, id, sid(from), sid(to), paths, target.path);
+      let skipped = 0;
+      if (leftHost) skipped = (await api.sftpCopyBetween(tabId, id, sid(from), sid(to), paths, target.path))?.skipped ?? 0;
       else if (direction === 'up') await api.sftpUpload(tabId, id, paths, pane('remote').data?.path ?? '/');
-      else await api.sftpDownload(tabId, id, paths, pane('local').data?.path ?? '');
-      if (move) {
+      else skipped = (await api.sftpDownload(tabId, id, paths, pane('local').data?.path ?? ''))?.skipped ?? 0;
+      const left = `${skipped} link${skipped === 1 ? ' was' : 's were'} not copied`;
+      // A "move" must never delete something that did not arrive.
+      if (move && skipped > 0) setError(`Copied, but the original was kept: ${left}.`);
+      else if (skipped > 0) flash(`Copied. ${left}.`);
+      if (move && skipped === 0) {
         if (isPc(from)) await api.localDelete(paths);
         else for (const it of list) await api.sftpDelete(sid(from), it.path);
       }

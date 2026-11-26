@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using Renci.SshNet;
-using Renci.SshNet.Sftp;
 
 namespace MultiServerView.Core.Sftp;
 
@@ -8,10 +7,10 @@ public sealed partial class SftpSession
 {
     /// <summary>
     /// Copies a file or a whole folder from this server straight to another one. The data passes through this PC but is never
-    /// written to its disk. Every file is first written next to its target and only then put in its place, so a cancelled or
-    /// failed copy does not damage a file that was already there. Links are not followed.
+    /// written to its disk. Files are replaced safely (see SafeWrite.cs). Links are not followed; returns how many entries
+    /// were left out.
     /// </summary>
-    public async Task CopyToAsync(SftpSession destination, string sourcePath, string destinationDir, Action<TransferProgress> progress, CancellationToken ct)
+    public async Task<int> CopyToAsync(SftpSession destination, string sourcePath, string destinationDir, Action<TransferProgress> progress, CancellationToken ct)
     {
         var source = Client;
         var target = destination.Client;
@@ -19,6 +18,7 @@ public sealed partial class SftpSession
         var name = SafeRemoteName(sourcePath.Split('/').Last());
         var rootTarget = Combine(destinationDir, name);
 
+        var skipped = 0;
         var files = await Task.Run(() =>
         {
             RefuseSameFolder(source, target, sourcePath, destinationDir);
@@ -28,7 +28,7 @@ public sealed partial class SftpSession
             if (attributes.IsDirectory)
             {
                 folders.Add(rootTarget);
-                CollectForCopy(source, sourcePath, rootTarget, list, folders, ct, 0);
+                CollectForCopy(source, sourcePath, rootTarget, list, folders, ref skipped, ct, 0);
             }
             else list.Add((sourcePath, rootTarget, attributes.Size, PermissionBits(attributes)));
             foreach (var folder in folders)
@@ -38,28 +38,19 @@ public sealed partial class SftpSession
 
         var total = files.Sum(f => f.Size);
         long done = 0;
+        var cache = new FolderCache();
         progress(new TransferProgress(name, 0, total, false));
         foreach (var (from, to, size, mode) in files)
         {
             ct.ThrowIfCancellationRequested();
             var before = done;
-            var temporary = to + ".msv-part-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
-            try
-            {
-                await using (var input = await Task.Run(() => source.OpenRead(from), ct))
-                    await target.UploadFileAsync(input, temporary, true,
-                        new Progress<UploadFileProgressReport>(r => progress(new TransferProgress(name, before + (long)r.TotalBytesUploaded, total, false))), ct);
-                await Task.Run(() => PutInPlace(target, temporary, to, mode), ct);
-            }
-            catch
-            {
-                try { if (target.Exists(temporary)) target.DeleteFile(temporary); }
-                catch (Exception) { /* the connection may be gone; the leftover is clearly named */ }
-                throw;
-            }
+            // a replaced file keeps its permissions, a new one gets those of the original (so scripts stay executable)
+            await SafeUploadAsync(target, () => source.OpenRead(from), to, mode, cache,
+                sent => progress(new TransferProgress(name, before + sent, total, false)), ct);
             done += size;
         }
         progress(new TransferProgress(name, total, total, true));
+        return skipped;
     }
 
     private static string SafeRemoteName(string name)
@@ -90,39 +81,21 @@ public sealed partial class SftpSession
         }
     }
 
-    private static void CollectForCopy(SftpClient source, string folder, string targetFolder, List<(string, string, long, int)> files, List<string> folders, CancellationToken ct, int depth)
+    private static void CollectForCopy(SftpClient source, string folder, string targetFolder, List<(string, string, long, int)> files, List<string> folders, ref int skipped, CancellationToken ct, int depth)
     {
-        if (depth > 64) return;
+        if (depth > 64) { skipped++; return; }
         foreach (var f in source.ListDirectory(folder))
         {
             ct.ThrowIfCancellationRequested();
-            if (f.Name is "." or ".." || f.IsSymbolicLink) continue;
+            if (f.Name is "." or "..") continue;
+            if (f.IsSymbolicLink) { skipped++; continue; }
             var to = Combine(targetFolder, SafeRemoteName(f.Name));
             if (f.IsDirectory)
             {
                 folders.Add(to);
-                CollectForCopy(source, f.FullName, to, files, folders, ct, depth + 1);
+                CollectForCopy(source, f.FullName, to, files, folders, ref skipped, ct, depth + 1);
             }
             else files.Add((f.FullName, to, f.Length, PermissionBits(f.Attributes)));
         }
-    }
-
-    private static void PutInPlace(SftpClient target, string temporary, string final, int sourceMode)
-    {
-        SftpFileAttributes? existing = target.Exists(final) ? target.GetAttributes(final) : null;
-        if (existing is { IsDirectory: true }) throw new InvalidOperationException($"\"{final}\" is a folder on the target.");
-        try
-        {
-            target.RenameFile(temporary, final, isPosix: true); // replaces in one step where the server supports it
-        }
-        catch (Exception ex) when (ex is NotSupportedException or Renci.SshNet.Common.SshException)
-        {
-            if (existing != null) target.DeleteFile(final);
-            target.RenameFile(temporary, final);
-        }
-        // a replaced file keeps its permissions, a new one gets those of the original (so scripts stay executable)
-        var mode = existing != null ? PermissionBits(existing) : sourceMode;
-        try { target.ChangePermissions(final, short.Parse(Convert.ToString(mode, 8))); }
-        catch (Exception ex) when (ex is Renci.SshNet.Common.SshException or NotSupportedException) { /* some servers do not allow it */ }
     }
 }

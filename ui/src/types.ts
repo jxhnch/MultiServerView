@@ -23,6 +23,8 @@ export interface Server {
   proxmoxRef: string;
   /** Origin if the host was imported from VMware Workstation (path of the .vmx, lowercase). */
   vmwareRef: string;
+  /** For Wake-on-LAN. */
+  macAddress?: string;
   group: string;
   /** Position chosen by drag and drop; 0 or missing = by name. */
   sortOrder?: number;

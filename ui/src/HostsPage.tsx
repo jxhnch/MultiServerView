@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { getUiSettings, setUiSettings } from './uiSettings';
 import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay, IconTerminal } from './Icons';
 import { api, type BulkLogin, type VmAction } from './bridge';
 import { BulkLoginDialog } from './BulkLoginDialog';
@@ -7,6 +8,8 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { PromptDialog } from './Prompt';
 import { filterServers, parseTarget } from './search';
 import type { Identity, KeyInfo, Server } from './types';
+
+const REACH_TEXT = { up: 'Answers on its port', closed: 'The machine answers, but the port is closed', down: 'No answer' } as const;
 
 /** The user's own order first (drag and drop), everything not placed yet by name. */
 const byPlace = (a: Server, b: Server) => (a.sortOrder || 1e9) - (b.sortOrder || 1e9) || a.name.localeCompare(b.name);
@@ -43,7 +46,12 @@ export function HostsPage({
   onDeleteMany,
   shells,
   onShell,
+  visible,
+  onWake,
 }: {
+  /** The host list is on screen (only then the hosts are checked). */
+  visible: boolean;
+  onWake: (s: Server) => void;
   /** Shells of this PC that can be opened in a tab. */
   shells: Server[];
   onShell: (shell: Server) => void;
@@ -139,6 +147,40 @@ export function HostsPage({
       .sort((a, b) => rank(a) - rank(b) || a.ws.localeCompare(b.ws) || a.group.localeCompare(b.group))
       .map((p) => [label(p), p.list] as const);
   }, [filtered, showWorkspace]);
+
+  // Which of the listed hosts answer: checked while the list is on screen, then once a minute.
+  const [showStatus, setShowStatus] = useState(() => getUiSettings().hostStatus);
+  const [reach, setReach] = useState<Record<string, 'up' | 'closed' | 'down'>>({});
+  const checkKey = filtered.map((s) => `${s.id}\t${s.host}\t${s.port}\t${s.protocol}\t${s.jumpHostId}`).join('\n');
+  useEffect(() => {
+    if (!showStatus || !visible || !checkKey) return;
+    const ids = checkKey.split('\n').map((line) => line.split('\t')[0]);
+    let cancelled = false;
+    let busy = false;
+    const check = () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      api
+        .hostsReachability(ids)
+        .then((found) => {
+          if (cancelled) return;
+          setReach((old) => {
+            const next = { ...old };
+            for (const id of ids) delete next[id];
+            return { ...next, ...found };
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => (busy = false));
+    };
+    const first = window.setTimeout(check, 500); // not while the search is still being typed
+    const again = window.setInterval(check, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(first);
+      window.clearInterval(again);
+    };
+  }, [showStatus, visible, checkKey]);
 
   const target = q ? parseTarget(q) : null;
   const canConnect = q.length > 0 && (filtered.length > 0 || target !== null);
@@ -236,6 +278,18 @@ export function HostsPage({
         )}
         <button className="tool" title="Several terminals side by side in one tab" onClick={onSplit}>
           <IconGrid size={15} /> Split view
+        </button>
+        <button
+          className={'tool' + (showStatus ? ' on' : '')}
+          title="Show which hosts answer (a short connection to their port once a minute, no login)"
+          aria-pressed={showStatus}
+          onClick={() => {
+            setUiSettings({ hostStatus: !showStatus });
+            setShowStatus(!showStatus);
+            setReach({});
+          }}
+        >
+          Online status
         </button>
         <button className={'tool' + (selecting ? ' on' : '')} title="Select several hosts (or Ctrl+click on them)" onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
           Select
@@ -347,7 +401,10 @@ export function HostsPage({
                     <HostTile server={s} vmState={vmStates[s.id]} />
                     <span className="hcard-text">
                       <span className="hcard-name">{s.name}</span>
-                      <span className="hcard-sub">{sub(s)}</span>
+                      <span className="hcard-sub">
+                        {showStatus && reach[s.id] && <i className={'reach ' + reach[s.id]} role="img" title={REACH_TEXT[reach[s.id]]} aria-label={REACH_TEXT[reach[s.id]]} />}
+                        {sub(s)}
+                      </span>
                     </span>
                     {s.favorite && (
                       <span className="fav" title="Favorite">
@@ -526,6 +583,7 @@ export function HostsPage({
                 ]
               : []),
             { label: 'Duplicate', icon: <IconDuplicate size={14} />, onClick: () => onDuplicateHost(menu.server) },
+            ...(menu.server.macAddress ? [{ label: 'Wake up (Wake-on-LAN)', icon: <IconPower size={14} />, onClick: () => onWake(menu.server) }] : []),
             ...(filtered.some((x) => x.sortOrder)
               ? [{ label: 'Sort these hosts by name again', icon: <IconRefresh size={14} />, onClick: () => onReorder(filtered.map((x) => x.id), true) }]
               : []),

@@ -58,7 +58,8 @@ internal static class Program
         var vault = new VaultStore(vaultPath);
         if (!Unlock(vault)) return 1;
 
-        var servers = vault.List().Where(s => IsTerminalHost(s.Protocol)).OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        // the same order as in the app, including the places chosen there by drag and drop
+        var servers = HostOrder.Sort(vault.List().Where(s => IsTerminalHost(s.Protocol)));
         if (servers.Count == 0)
         {
             Console.Error.WriteLine("There are no SSH, Telnet or serial hosts in the vault yet.");

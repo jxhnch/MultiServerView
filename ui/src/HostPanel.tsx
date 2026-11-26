@@ -226,6 +226,17 @@ export function HostPanel({
         </div>
         )}
 
+        {s.protocol !== 'serial' && s.protocol !== 'teamviewer' && (
+        <div className="group-card">
+          <h3>Wake-on-LAN</h3>
+          <label className="field">
+            MAC address (optional)
+            <input value={s.macAddress ?? ''} onChange={(e) => set('macAddress', e.target.value)} placeholder="AA:BB:CC:DD:EE:FF" spellCheck={false} />
+          </label>
+          <p className="hint">With a MAC address, right-click the host to wake it. This works in your own network, and Wake-on-LAN must be switched on in the machine.</p>
+        </div>
+        )}
+
         {(s.protocol === 'ssh' || s.protocol === 'rdp' || s.protocol === 'vnc' || s.protocol === 'web') && (
         <div className="group-card">
           <h3>Connection</h3>
