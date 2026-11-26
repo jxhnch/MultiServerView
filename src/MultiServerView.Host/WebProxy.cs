@@ -188,15 +188,15 @@ internal sealed class WebProxySession : IDisposable
         {
             var request = ctx.Request;
             // Only requests for the exact local address (no DNS rebinding) and from this page itself (no other web site).
-            if (request.Headers["Host"] != $"127.0.0.1:{_port}") { Fail(ctx, 403, "Forbidden"); return; }
+            if (request.Headers["Host"] != $"127.0.0.1:{_port}") { Refuse(ctx, "HOST", "the request did not use the local address of this tab"); return; }
             var origin = request.Headers["Origin"];
-            if (!string.IsNullOrEmpty(origin) && origin != _proxyOrigin && origin != "null") { Fail(ctx, 403, "Forbidden"); return; }
+            if (!string.IsNullOrEmpty(origin) && origin != _proxyOrigin && origin != "null") { Refuse(ctx, "ORIGIN", "the request came from another web page"); return; }
 
             var path = request.RawUrl ?? "/";
             var entry = $"/__msv/{_token}/";
             if (path.StartsWith("/__msv/", StringComparison.Ordinal))
             {
-                if (!path.StartsWith(entry, StringComparison.Ordinal)) { Fail(ctx, 403, "Forbidden"); return; }
+                if (!path.StartsWith(entry, StringComparison.Ordinal)) { Refuse(ctx, "TOKEN", "the address of this tab is out of date. Reload the tab"); return; }
                 var to = "/";
                 var q = path.IndexOf("?to=", StringComparison.Ordinal);
                 if (q >= 0) to = Uri.UnescapeDataString(path[(q + 4)..]);
@@ -211,7 +211,12 @@ internal sealed class WebProxySession : IDisposable
             }
 
             var cookies = ParseCookies(request.Headers["Cookie"]);
-            if (!cookies.TryGetValue(AccessCookieName, out var presented) || !SameSecret(presented, _token)) { Fail(ctx, 403, "Forbidden"); return; }
+            if (!cookies.TryGetValue(AccessCookieName, out var presented) || !SameSecret(presented, _token))
+            {
+                Refuse(ctx, "COOKIE", "the built-in browser of this system did not send back the access cookie of the tab. "
+                    + "Use the globe button at the top right to open the page in your normal browser instead");
+                return;
+            }
 
             if (request.IsWebSocketRequest) await ProxyWebSocketAsync(ctx, cookies);
             else await ProxyHttpAsync(ctx, cookies);
@@ -229,6 +234,13 @@ internal sealed class WebProxySession : IDisposable
             if (e is System.Security.Authentication.AuthenticationException or SocketException or IOException) return e.Message;
         return ex.InnerException?.Message ?? ex.Message;
     }
+
+    /// <summary>
+    /// The app's own "no", clearly marked as such: the device was never asked. The code names the check that failed, so a
+    /// report ("it said access denied") can be traced.
+    /// </summary>
+    private static void Refuse(HttpListenerContext ctx, string code, string reason)
+        => Fail(ctx, 403, $"MultiServerView blocked this request itself, the device was not contacted: {reason}. (Code MSV-{code})");
 
     private static void Fail(HttpListenerContext ctx, int status, string message)
     {
