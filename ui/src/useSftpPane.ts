@@ -26,6 +26,8 @@ export interface PaneModel {
   reload: () => Promise<void>;
   /** Replaces the list (e.g. after the first connect) without a history entry. */
   show: (r: BrowseResult) => void;
+  /** Empties the pane and its history (the side now shows another computer). */
+  reset: () => void;
   selected: () => FileEntry[];
 }
 
@@ -107,6 +109,15 @@ export function useSftpPane(side: Side, load: (path: string) => Promise<BrowseRe
         index.current = 0;
         bump((n) => n + 1);
       }
+    },
+    reset: () => {
+      history.current = [];
+      index.current = -1;
+      setData(null);
+      setSel(new Set());
+      setCursor(null);
+      setFilter('');
+      bump((n) => n + 1);
     },
     selected: () => (data?.entries ?? []).filter((e) => sel.has(e.path)),
   };

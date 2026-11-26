@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay } from './Icons';
+import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay, IconTerminal } from './Icons';
 import { api, type BulkLogin, type VmAction } from './bridge';
 import { BulkLoginDialog } from './BulkLoginDialog';
 import { HostTile } from './HostTile';
@@ -41,7 +41,12 @@ export function HostsPage({
   onReorder,
   onBulkLogin,
   onDeleteMany,
+  shells,
+  onShell,
 }: {
+  /** Shells of this PC that can be opened in a tab. */
+  shells: Server[];
+  onShell: (shell: Server) => void;
   keys: KeyInfo[];
   identities: Identity[];
   onReorder: (ids: string[], reset?: boolean) => void;
@@ -79,6 +84,7 @@ export function HostsPage({
   const [wsMenu, setWsMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | null>(null);
   const [dropWs, setDropWs] = useState<string | null>(null);
+  const [shellMenu, setShellMenu] = useState<{ x: number; y: number } | null>(null);
   // Several hosts at once: Ctrl+click, or the "Select" button and then plain clicks.
   const [selecting, setSelecting] = useState(false);
   const [marked, setMarked] = useState<Set<string>>(new Set());
@@ -215,7 +221,20 @@ export function HostsPage({
         <button className="primary" onClick={onNew}>
           <IconPlus size={15} /> New host
         </button>
-        <button className="tool" title="Several SSH hosts side by side in one tab" onClick={onSplit}>
+        {shells.length > 0 && (
+          <button
+            className="tool"
+            title="A shell of this PC in a tab"
+            onClick={(e) => {
+              if (shells.length === 1) return onShell(shells[0]);
+              const r = e.currentTarget.getBoundingClientRect();
+              setShellMenu({ x: r.left, y: r.bottom + 4 });
+            }}
+          >
+            <IconTerminal size={15} /> Local terminal
+          </button>
+        )}
+        <button className="tool" title="Several terminals side by side in one tab" onClick={onSplit}>
           <IconGrid size={15} /> Split view
         </button>
         <button className={'tool' + (selecting ? ' on' : '')} title="Select several hosts (or Ctrl+click on them)" onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
@@ -450,6 +469,15 @@ export function HostsPage({
             onMove(markedHosts, target);
             stopSelecting();
           }}
+        />
+      )}
+
+      {shellMenu && (
+        <ContextMenu
+          x={shellMenu.x}
+          y={shellMenu.y}
+          onClose={() => setShellMenu(null)}
+          items={shells.map((sh) => ({ label: sh.name, icon: <IconTerminal size={14} />, onClick: () => onShell(sh) }))}
         />
       )}
 

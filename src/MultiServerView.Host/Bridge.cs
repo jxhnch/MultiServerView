@@ -6,6 +6,7 @@ using MultiServerView.Core;
 using MultiServerView.Core.Mcp;
 using MultiServerView.Core.Update;
 using MultiServerView.Core.Import;
+using MultiServerView.Core.Local;
 using MultiServerView.Core.Proxmox;
 using MultiServerView.Core.Vmware;
 using MultiServerView.Core.Sftp;
@@ -305,6 +306,13 @@ public sealed class Bridge : IDisposable
             // ---------------------------------------------------------- SSH
             case "ssh.open":
                 await OpenSshAsync(Str(p, "sessionId"), Str(p, "serverId"), (uint)Int(p, "cols", 80), (uint)Int(p, "rows", 24), p);
+                return null;
+            // A shell of this PC in the same kind of terminal. Deliberately its own method: only the window uses it (the AI
+            // tools never call it), and only a shell from the fixed list can be named.
+            case "shell.list":
+                return LocalShells.Available().Select(s => new { id = s.Id, name = s.Name }).ToList();
+            case "shell.open":
+                await OpenShellAsync(Str(p, "sessionId"), Str(p, "shell"), (uint)Int(p, "cols", 80), (uint)Int(p, "rows", 24));
                 return null;
             case "ssh.input":
                 if (_ssh.TryGetValue(Str(p, "sessionId"), out var inputTarget))
@@ -661,6 +669,32 @@ public sealed class Bridge : IDisposable
                         if (upload) await session.UploadAsync(path, Str(p, "remoteDir"), Report, cts.Token);
                         else await session.DownloadAsync(path, Str(p, "localDir"), Report, cts.Token);
                     }
+                }
+                finally
+                {
+                    _transfers.TryRemove(transferId, out _);
+                    cts.Dispose();
+                }
+                return null;
+            }
+            case "sftp.copyBetween":
+            {
+                // From one SFTP connection of a tab straight to another one (two servers side by side).
+                var sessionId = Str(p, "sessionId"); // the tab that shows the progress
+                var from = _sftp.TryGetValue(Str(p, "fromSessionId"), out var f) ? f : throw new InvalidOperationException("The SFTP connection is not open.");
+                var to = _sftp.TryGetValue(Str(p, "toSessionId"), out var t) ? t : throw new InvalidOperationException("The SFTP connection is not open.");
+                var transferId = Str(p, "transferId");
+                var cts = new CancellationTokenSource();
+                _transfers[transferId] = cts;
+                try
+                {
+                    foreach (var path in Strings(p, "paths"))
+                        await from.CopyToAsync(to, path, Str(p, "targetDir"),
+                            tp => _emit(new { @event = "sftp.progress", sessionId, transferId, name = tp.Name, done = tp.Done, total = tp.Total, finished = tp.Finished }), cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new InvalidOperationException("Cancelled.");
                 }
                 finally
                 {
@@ -1064,6 +1098,30 @@ public sealed class Bridge : IDisposable
                 _emit(new { @event = "vault.changed" }); // the host list shows the new logo right away
             }
         });
+    }
+
+    private async Task OpenShellAsync(string sessionId, string shellId, uint cols, uint rows)
+    {
+        CloseSsh(sessionId); // reconnect with the same id
+        var session = new LocalTerminalSession(LocalShells.Find(shellId));
+        var pump = new SshPump(session, chunk => _emit(new { @event = "ssh.data", sessionId, data = Convert.ToBase64String(chunk) }));
+        session.Closed += reason =>
+        {
+            pump.Flush();
+            if (_ssh.TryRemove(new KeyValuePair<string, SshPump>(sessionId, pump))) pump.Dispose();
+            _emit(new { @event = "ssh.closed", sessionId, reason });
+        };
+        _ssh[sessionId] = pump;
+        try
+        {
+            await session.ConnectAsync(cols, rows);
+        }
+        catch
+        {
+            _ssh.TryRemove(new KeyValuePair<string, SshPump>(sessionId, pump));
+            pump.Dispose();
+            throw;
+        }
     }
 
     private void CloseSsh(string sessionId)

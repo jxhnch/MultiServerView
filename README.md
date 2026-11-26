@@ -51,9 +51,10 @@ MultiServerView is a desktop app for people who jump between many machines: home
 | | |
 |---|---|
 | **SSH** | xterm.js terminal, password or key login, host key check, 10 color schemes |
-| **SFTP** | Two panes, drag & drop, WinSCP-style F-keys, folder compare, edit remote files in your own editor |
+| **SFTP** | Two panes (this PC and a server, or two servers), drag & drop, WinSCP-style F-keys, folder compare, edit remote files in your own editor |
 | **RDP** | Inside a tab. Windows uses the same native control as `mstsc` |
 | **VNC** | noVNC with clipboard and Ctrl+Alt+Del |
+| **Local terminal** | PowerShell, cmd, WSL, Git Bash or your Linux shell in a tab, also inside a split view |
 | **Telnet and serial** | For switches, routers and consoles (`COM3`, `/dev/ttyUSB0`) |
 | **Web** | Open firewall, router, Proxmox or printer pages in a tab, with the saved login filled in |
 | **WinRM** | PowerShell on Windows servers without SSH *(experimental)* |
@@ -155,7 +156,7 @@ SSH host keys are trusted on first use. If a known key changes, the connection i
 
 ## Known limitations
 
-- No Mosh, no local terminal tab, no AI autocomplete, no team features
+- No Mosh, no AI autocomplete, no team features
 - PuTTY keys (`.ppk`) must first be converted to OpenSSH format in PuTTYgen
 - There is no Termius import
 - Windows: a running RDP window is briefly hidden while a menu, palette or dialog is open. The session keeps running

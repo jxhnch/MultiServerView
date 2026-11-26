@@ -264,7 +264,9 @@ export function TerminalView({
 
     if (reconnectKey > 0) term.writeln('\x1b[2m────────── new connection ──────────\x1b[0m');
     term.writeln(
-      server.protocol === 'serial'
+      server.protocol === 'local'
+        ? `\x1b[2mStarting ${server.name} …\x1b[0m`
+        : server.protocol === 'serial'
         ? `\x1b[2mOpening ${server.host} at ${server.port} baud …\x1b[0m`
         : `\x1b[2m${server.protocol === 'telnet' ? 'Telnet: connecting to ' : 'Connecting to '}${server.username && server.protocol === 'ssh' ? server.username + '@' : ''}${server.host}:${server.port} …\x1b[0m`,
     );
@@ -286,8 +288,10 @@ export function TerminalView({
       /* container has no size yet */
     }
 
-    api
-      .sshOpen(tabId, server.id, term.cols || 120, term.rows || 30, cred)
+    const cols = term.cols || 120;
+    const rows = term.rows || 30;
+    // A shell of this PC is not a saved host: it is named by its id (the host field).
+    (server.protocol === 'local' ? api.shellOpen(tabId, server.host, cols, rows) : api.sshOpen(tabId, server.id, cols, rows, cred))
       .then(() => {
         if (cancelled) return;
         setStatus('connected');

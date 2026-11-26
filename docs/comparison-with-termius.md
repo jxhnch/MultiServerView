@@ -14,11 +14,11 @@ context menu, settings page (including master password change, auto-lock, backup
 ## What Termius can do and MultiServerView cannot (yet)
 | Area | Termius | MultiServerView |
 |---|---|---|
-| Protocols | Mosh, Telnet, Serial, local terminal | Telnet and serial yes; Mosh and local terminal missing |
+| Protocols | Mosh, Telnet, Serial, local terminal | Telnet, serial and local terminal yes; Mosh missing |
 | Jump hosts | chain inherited per group | chain per host (multi-hop) yes, per group no |
 | Terminal | AI autocomplete | missing |
 | Split view | up to 16 panes, layouts by drag | grid with several panes, broadcast yes; no free layouts |
-| SFTP | change permissions, two servers side by side | change permissions yes; two servers side by side missing |
+| SFTP | change permissions, two servers side by side | both yes |
 | Snippets | packages (groups) | single snippets with variables |
 | Keys | SSH certificates, FIDO2 keys, agent forwarding | import and generation of keys only |
 | Import | known_hosts, whole ~/.ssh folder including keys | ssh_config (with `IdentityFile` keys), mRemoteNG and CSV (with passwords), PuTTY, Proxmox, VMware; no known_hosts or whole-folder import |

@@ -20,7 +20,7 @@ export function SplitPicker({ servers, onConfirm, onClose }: { servers: Server[]
             <IconClose size={16} />
           </button>
         </div>
-        <p className="hint">Choose at least 2 SSH hosts. They open side by side in one tab; with "Broadcast" your input goes to all of them at once.</p>
+        <p className="hint">Choose at least 2 terminals (hosts or shells of this PC). They open side by side in one tab; with "Broadcast" your input goes to all of them at once.</p>
         <div className="searchbar">
           <IconSearch size={16} />
           <input autoFocus placeholder="Filter hosts…" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -35,7 +35,7 @@ export function SplitPicker({ servers, onConfirm, onClose }: { servers: Server[]
               {s.group && <span className="chip">{s.group}</span>}
             </label>
           ))}
-          {list.length === 0 && <div className="muted pad-sm">No SSH hosts found.</div>}
+          {list.length === 0 && <div className="muted pad-sm">Nothing found.</div>}
         </div>
         <div className="actions">
           <span className="muted small">{picked.length} selected</span>

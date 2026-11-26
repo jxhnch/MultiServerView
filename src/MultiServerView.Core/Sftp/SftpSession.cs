@@ -17,7 +17,7 @@ public sealed class RemoteChangedException : InvalidOperationException
 }
 
 /// <summary>An SFTP connection to a host: list, upload/download, create, rename and delete files.</summary>
-public sealed class SftpSession : IDisposable
+public sealed partial class SftpSession : IDisposable
 {
     private readonly ServerEntry _server;
     private readonly KeyEntry? _key;

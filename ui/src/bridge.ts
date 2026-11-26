@@ -505,6 +505,14 @@ async function callMock(method: string, params: any): Promise<unknown> {
     case 'servers.bulkLogin':
       return onlyNative('Changing several hosts');
 
+    case 'shell.list':
+      return [
+        { id: 'powershell', name: 'Windows PowerShell' },
+        { id: 'cmd', name: 'Command Prompt' },
+      ];
+    case 'shell.open':
+      return onlyNative('The local terminal');
+
     case 'vnc.open': {
       // For development/tests only: localStorage.setItem('msv-dev-vnc-url', 'ws://127.0.0.1:PORT/TOKEN')
       const devUrl = localStorage.getItem('msv-dev-vnc-url');
@@ -998,6 +1006,8 @@ export const api = {
 
   sshOpen: (sessionId: string, serverId: string, cols: number, rows: number, cred?: Credentials) =>
     call<void>('ssh.open', { sessionId, serverId, cols, rows, ...cred }),
+  shellList: () => call<{ id: string; name: string }[]>('shell.list'),
+  shellOpen: (sessionId: string, shell: string, cols: number, rows: number) => call<void>('shell.open', { sessionId, shell, cols, rows }),
   sshInput: (sessionId: string, data: string) => call<void>('ssh.input', { sessionId, data }),
   sshResize: (sessionId: string, cols: number, rows: number) => call<void>('ssh.resize', { sessionId, cols, rows }),
   sshClose: (sessionId: string) => call<void>('ssh.close', { sessionId }),
@@ -1050,6 +1060,8 @@ export const api = {
   historyList: () => call<HistoryEntry[]>('history.list'),
   historyClear: () => call<void>('history.clear'),
 
+  sftpCopyBetween: (sessionId: string, transferId: string, fromSessionId: string, toSessionId: string, paths: string[], targetDir: string) =>
+    call<void>('sftp.copyBetween', { sessionId, transferId, fromSessionId, toSessionId, paths, targetDir }),
   sftpOpen: (sessionId: string, serverId: string, cred?: Credentials) => call<{ home: string }>('sftp.open', { sessionId, serverId, ...cred }),
   sftpReadText: (sessionId: string, path: string) =>
     call<{ content: string; lineEnding: 'lf' | 'crlf'; bom: boolean; size: number; modified: number }>('sftp.readText', { sessionId, path }),

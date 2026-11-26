@@ -17,6 +17,8 @@
 
 **VNC.** noVNC in a tab, including Ctrl+Alt+Del and clipboard.
 
+**Local terminal.** A shell of this PC in a tab: PowerShell, Command Prompt, WSL or Git Bash on Windows, bash, zsh or fish on Linux. It is a real terminal (full-screen programs, Ctrl+C and resizing work), can be put into a split view and is found with `Ctrl+K`. Only these built-in shells can be started; nothing is saved in the vault, and the AI tools cannot open one.
+
 **Telnet and serial.** The same terminal for network devices such as switches and routers: Telnet with proper option negotiation (not encrypted), and serial consoles (COM ports, `/dev/ttyUSB0`, any baud rate).
 
 **WinRM (experimental).** A PowerShell prompt on a Windows server without SSH. HTTPS is recommended.
@@ -42,6 +44,8 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 | **Select** | Multi-select with masks, right-click menus, move by dragging onto a folder |
 | **Edit** | Open remote files in your own editor (uploaded again on every save), or use the built-in text editor |
 | **Inspect** | Change permissions (chmod, also recursive), folder sizes, SHA-256 checksums, compare folders |
+
+**Two servers side by side.** *Left side* switches the left pane from this PC to another SSH host. Copy and move then go straight from one server to the other: the data passes through your PC but is not written to its disk. Each file is written next to its target first, so a cancelled copy does not damage an existing file. Links are not followed, and copying a folder onto or into itself is refused.
 
 **F-keys:** F2 rename, F4 edit, F5 copy, F6 move, F7 new folder, Del delete, Alt+Enter properties.
 

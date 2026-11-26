@@ -104,7 +104,16 @@ export function App() {
     }
   });
 
-  const byId = useMemo(() => new Map(servers.map((s) => [s.id, s])), [servers]);
+  // Shells of this PC can be opened like hosts, but they are not saved anywhere.
+  const [shells, setShells] = useState<{ id: string; name: string }[]>([]);
+  const shellHosts = useMemo<Server[]>(
+    () => shells.map((sh) => ({ ...emptyServer(), id: `local:${sh.id}`, name: sh.name, host: sh.id, port: 0, protocol: 'local' })),
+    [shells],
+  );
+  const byId = useMemo(() => new Map([...servers, ...shellHosts].map((s) => [s.id, s])), [servers, shellHosts]);
+  useEffect(() => {
+    void api.shellList().then(setShells).catch(() => undefined);
+  }, []);
   const workspaces = useMemo(
     () => [...new Set([...servers.map((s) => s.workspace).filter(Boolean), ...localWorkspaces])].sort((a, b) => a.localeCompare(b)),
     [servers, localWorkspaces],
@@ -223,6 +232,7 @@ export function App() {
         setTabs((prev) => [...prev, t]);
         setActive(t.id);
       }
+      if (s.protocol === 'local') return;
       try {
         const updated = await api.serversTouch(s.id);
         setServers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
@@ -479,7 +489,9 @@ export function App() {
   const setStatus = useCallback((id: string, s: SessionStatus) => setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s })), []);
 
   // ---------------------------------------------------------------- Panel
-  const openPanel = useCallback((server: Server) => setPanel((p) => ({ server, key: (p?.key ?? 0) + 1 })), []);
+  const openPanel = useCallback((server: Server) => {
+    if (server.protocol !== 'local') setPanel((p) => ({ server, key: (p?.key ?? 0) + 1 }));
+  }, []);
   const newHost = useCallback(() => {
     setSection('hosts');
     setActive(HOME);
@@ -555,6 +567,7 @@ export function App() {
       if (!tab || tab.kind === 'split') return null;
       const s = byId.get(tab.serverId);
       if (!s || s.id === p.server.id) return p;
+      if (s.protocol === 'local') return null;
       return { server: s, key: p.key + 1 };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1009,6 +1022,8 @@ export function App() {
                   onDuplicateHost={(s) => void duplicateHost(s)}
                   onDelete={(s) => void deleteHost(s)}
                   onSplit={() => setSplitPicker(true)}
+                  shells={shellHosts}
+                  onShell={(sh) => void open(sh, true)}
                   onNew={newHost}
                   onQuick={(draft) => openPanel({ ...emptyServer(), workspace: activeWorkspace, ...draft })}
                   workspace={activeWorkspace}
@@ -1064,7 +1079,7 @@ export function App() {
                   tabId={t.id}
                   panes={t.panes ?? []}
                   onPanesChange={(panes) => setTabs((prev) => prev.map((x) => (x.id === t.id ? { ...x, panes, serverId: panes[0]?.serverId ?? x.serverId } : x)))}
-                  servers={servers}
+                  servers={[...shellHosts, ...servers]}
                   byId={byId}
                   active={active === t.id}
                   onStatus={setStatus}
@@ -1090,7 +1105,7 @@ export function App() {
           return (
             <div key={t.id} className={'view' + (active === t.id ? ' on' : '')}>
               <SessionCloseContext.Provider value={() => closeTab(t.id)}>
-              {t.kind === 'sftp' && <SftpView {...common} />}
+              {t.kind === 'sftp' && <SftpView {...common} servers={servers} />}
               {t.kind === 'session' && isTerminalProtocol(s.protocol) && (
                 <TerminalView {...common} onOpenSftp={() => void open(s, false, 'sftp')} onManageSnippets={() => goTo('snippets')} />
               )}
@@ -1130,11 +1145,11 @@ export function App() {
         />
       )}
 
-      {splitPicker && <SplitPicker servers={servers.filter((x) => isTerminalProtocol(x.protocol))} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
+      {splitPicker && <SplitPicker servers={[...shellHosts, ...servers.filter((x) => isTerminalProtocol(x.protocol))]} onConfirm={openSplit} onClose={() => setSplitPicker(false)} />}
 
       {paletteOpen && (
         <CommandPalette
-          servers={servers}
+          servers={[...servers, ...shellHosts]}
           openServerIds={openServerIds}
           onOpen={(s, forceNew) => void open(s, forceNew)}
           onAction={onPaletteAction}

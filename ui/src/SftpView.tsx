@@ -36,7 +36,10 @@ export function SftpView({
   onStatus,
   onReconnect,
   onEdit,
+  servers,
 }: {
+  /** All saved hosts: the left side can show another SSH host instead of this PC. */
+  servers: Server[];
   tabId: string;
   server: Server;
   active: boolean;
@@ -51,7 +54,7 @@ export function SftpView({
   const credRef = useRef<Credentials | undefined>(undefined);
   const [retry, setRetry] = useState(0);
   const [authPrompt, setAuthPrompt] = useState(false);
-  const [editing, setEditing] = useState<FileEntry | null>(null);
+  const [editing, setEditing] = useState<{ entry: FileEntry; sessionId: string } | null>(null);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [prompt, setPrompt] = useState<null | { kind: PromptKind; side: Side; entry?: FileEntry }>(null);
   const [dropSide, setDropSide] = useState<Side | null>(null);
@@ -64,13 +67,31 @@ export function SftpView({
   const paneEls = { local: useRef<HTMLElement>(null), remote: useRef<HTMLElement>(null) };
   const noticeTimer = useRef<number | undefined>(undefined);
 
-  const loadLocal = useCallback((path: string): Promise<BrowseResult> => (path === '' ? api.localRoots() : api.localBrowse(path)), []);
+  // The left side shows this PC, or a second server with its own connection.
+  const [leftId, setLeftId] = useState('');
+  const leftHost = leftId ? (servers.find((x) => x.id === leftId) ?? null) : null;
+  const [leftReady, setLeftReady] = useState(false);
+  const [leftRetry, setLeftRetry] = useState(0);
+  // Every choice gets its own connection id: a slow, older connection can never end up behind the name of another server.
+  const leftSid = `${tabId}:left:${leftId}:${leftRetry}:${reconnectKey}`;
+  const [leftAuth, setLeftAuth] = useState(false);
+  const leftCred = useRef<Credentials | undefined>(undefined);
+  const isPc = (side: Side) => side === 'local' && !leftHost;
+  /** What a side behaves like: files of this PC, or files on a server. */
+  const kind = (side: Side): Side => (isPc(side) ? 'local' : 'remote');
+  const sid = (side: Side) => (side === 'local' ? leftSid : tabId);
+  const sideName = (side: Side) => (side === 'remote' ? server.name : (leftHost?.name ?? 'This PC'));
+
+  const loadLocal = useCallback(
+    (path: string): Promise<BrowseResult> => (leftId ? api.sftpList(leftSid, path) : path === '' ? api.localRoots() : api.localBrowse(path)),
+    [leftId, leftSid],
+  );
   const loadRemote = useCallback((path: string): Promise<BrowseResult> => api.sftpList(tabId, path), [tabId]);
   const local = useSftpPane('local', loadLocal);
   const remote = useSftpPane('remote', loadRemote);
   const pane = (side: Side) => (side === 'local' ? local : remote);
 
-  const bmKey = (side: Side) => `msv-sftp-bm-${side === 'remote' ? server.id : 'local'}`;
+  const bmKey = (side: Side) => `msv-sftp-bm-${side === 'remote' ? server.id : leftId || 'local'}`;
   const [bookmarks, setBookmarks] = useState<Record<Side, string[]>>(() => ({ local: loadBookmarks('msv-sftp-bm-local'), remote: loadBookmarks(`msv-sftp-bm-${server.id}`) }));
 
   const setStatus = useCallback(
@@ -116,11 +137,44 @@ export function SftpView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, reconnectKey, retry]);
 
-  // Local pane: start in the home folder the first time
+  // Left pane: this PC (start in the home folder), or the connection to the second server
   useEffect(() => {
-    void api.localBrowse('').then(local.show).catch(() => undefined);
+    let cancelled = false;
+    local.reset();
+    setLeftAuth(false);
+    setBookmarks((prev) => ({ ...prev, local: loadBookmarks(`msv-sftp-bm-${leftId || 'local'}`) }));
+    if (!leftId) {
+      setLeftReady(true);
+      void api.localBrowse('').then((r) => !cancelled && local.show(r)).catch(() => undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setLeftReady(false);
+    const cred = leftCred.current;
+    leftCred.current = undefined;
+    api
+      .sftpOpen(leftSid, leftId, cred)
+      .then(async ({ home }) => {
+        // switched away while it was still connecting: do not keep the connection
+        if (cancelled) return void api.sftpClose(leftSid).catch(() => undefined);
+        const listing = await api.sftpList(leftSid, home);
+        if (cancelled) return;
+        local.show(listing);
+        setLeftReady(true);
+        setError('');
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setError(`${servers.find((x) => x.id === leftId)?.name ?? 'Left side'}: ${e.message}`);
+        if (isAuthError(e.message)) setLeftAuth(true);
+      });
+    return () => {
+      cancelled = true;
+      void api.sftpClose(leftSid).catch(() => undefined);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [leftId, leftRetry, reconnectKey]);
 
   // Progress of transfers and saves of files opened with a local program
   useEffect(
@@ -128,7 +182,7 @@ export function SftpView({
       onEvent((e) => {
         if (e.event === 'sftp.progress' && e.sessionId === tabId)
           setTransfers((prev) => prev.map((t) => (t.id === e.transferId ? { ...t, done: e.done, total: e.total } : t)));
-        if (e.event === 'sftp.externalSaved' && e.sessionId === tabId) {
+        if (e.event === 'sftp.externalSaved' && (e.sessionId === tabId || e.sessionId.startsWith(`${tabId}:left`))) {
           if (e.error) setError(`Could not upload "${e.name}": ${e.error}`);
           else flash(`"${e.name}" was saved to the server.`);
         }
@@ -137,6 +191,7 @@ export function SftpView({
   );
 
   const connected = status === 'connected';
+  const canTransfer = connected && leftReady;
 
   // the keyboard works in the pane that had the focus last
   useEffect(() => {
@@ -174,8 +229,8 @@ export function SftpView({
 
   const activate = (side: Side, entry: FileEntry) => {
     if (entry.isDir) return go(side, entry.path);
-    if (side === 'local') void api.localOpen(entry.path).catch(fail);
-    else if (connected) void api.sftpOpenExternal(tabId, entry.path).then(() => flash(`Opened "${entry.name}". Saving it in your program uploads it again.`)).catch(fail);
+    if (isPc(side)) void api.localOpen(entry.path).catch(fail);
+    else if (side === 'local' ? leftReady : connected) void api.sftpOpenExternal(sid(side), entry.path).then(() => flash(`Opened "${entry.name}". Saving it in your program uploads it again.`)).catch(fail);
   };
 
   const selectWhere = (side: Side, test: (e: FileEntry) => boolean, add = false) => {
@@ -199,10 +254,10 @@ export function SftpView({
   const askOverwrite = (names: string[]) => new Promise<OverwriteChoice>((resolve) => setOverwrite({ names, resolve }));
 
   async function transferEntries(from: Side, entries: FileEntry[], move: boolean) {
-    if (entries.length === 0 || !connected) return;
+    if (entries.length === 0 || !canTransfer) return;
     const to = other(from);
     const target = pane(to).data;
-    if (!target || (to === 'local' && target.path === '')) {
+    if (!target || (isPc(to) && target.path === '')) {
       setError('Open a folder on the other side first.');
       return;
     }
@@ -227,14 +282,16 @@ export function SftpView({
 
     const id = crypto.randomUUID();
     const label = list.length === 1 ? list[0].name : `${list.length} items`;
-    const direction = from === 'local' ? 'up' : 'down';
+    const direction = from === 'local' ? 'up' : 'down'; // towards the right = "up", towards the left = "down"
     setTransfers((prev) => [{ id, name: label, direction: direction as 'up' | 'down', move, done: 0, total: 0, started: Date.now(), state: 'running' as const }, ...prev].slice(0, 8));
     try {
-      if (direction === 'up') await api.sftpUpload(tabId, id, list.map((x) => x.path), pane('remote').data?.path ?? '/');
-      else await api.sftpDownload(tabId, id, list.map((x) => x.path), pane('local').data?.path ?? '');
+      const paths = list.map((x) => x.path);
+      if (leftHost) await api.sftpCopyBetween(tabId, id, sid(from), sid(to), paths, target.path);
+      else if (direction === 'up') await api.sftpUpload(tabId, id, paths, pane('remote').data?.path ?? '/');
+      else await api.sftpDownload(tabId, id, paths, pane('local').data?.path ?? '');
       if (move) {
-        if (from === 'local') await api.localDelete(list.map((x) => x.path));
-        else for (const it of list) await api.sftpDelete(tabId, it.path);
+        if (isPc(from)) await api.localDelete(paths);
+        else for (const it of list) await api.sftpDelete(sid(from), it.path);
       }
       setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, state: 'done', done: t.total } : t)));
     } catch (e) {
@@ -249,16 +306,16 @@ export function SftpView({
     const moving = entries.filter((e) => e.path !== folder.path);
     if (moving.length === 0) return;
     try {
-      const names = new Set((await (side === 'remote' ? api.sftpList(tabId, folder.path) : api.localBrowse(folder.path))).entries.map((e) => e.name));
+      const names = new Set((await (isPc(side) ? api.localBrowse(folder.path) : api.sftpList(sid(side), folder.path))).entries.map((e) => e.name));
       const clash = moving.filter((m) => names.has(m.name));
       if (clash.length > 0) {
         setError(`"${clash[0].name}" already exists in "${folder.name}". Nothing was moved.`);
         return;
       }
       for (const e of moving) {
-        const to = joinPath(folder.path, e.name, side);
-        if (side === 'remote') await api.sftpRename(tabId, e.path, to);
-        else await api.localRename(e.path, to);
+        const to = joinPath(folder.path, e.name, kind(side));
+        if (isPc(side)) await api.localRename(e.path, to);
+        else await api.sftpRename(sid(side), e.path, to);
       }
       flash(`Moved ${moving.length === 1 ? `"${moving[0].name}"` : `${moving.length} items`} to "${folder.name}".`);
     } catch (e) {
@@ -272,13 +329,13 @@ export function SftpView({
     const what = items.length === 1 ? `"${items[0].name}"` : `${items.length} items`;
     const hasDir = items.some((i) => i.isDir);
     const ok =
-      side === 'remote'
-        ? await askConfirm(`Permanently delete ${what} from the server?${hasDir ? '\nFolders are deleted with their contents.' : ''}`, { title: 'Delete from server', confirmLabel: 'Delete', danger: true })
+      !isPc(side)
+        ? await askConfirm(`Permanently delete ${what} from ${sideName(side)}?${hasDir ? '\nFolders are deleted with their contents.' : ''}`, { title: 'Delete from server', confirmLabel: 'Delete', danger: true })
         : await askConfirm(`Move ${what} to the Recycle Bin?`, { title: 'Delete on this PC', confirmLabel: 'Move to Recycle Bin', danger: true });
     if (!ok) return;
     try {
-      if (side === 'remote') for (const it of items) await api.sftpDelete(tabId, it.path);
-      else await api.localDelete(items.map((i) => i.path));
+      if (isPc(side)) await api.localDelete(items.map((i) => i.path));
+      else for (const it of items) await api.sftpDelete(sid(side), it.path);
     } catch (e) {
       fail(e);
     }
@@ -302,16 +359,16 @@ export function SftpView({
         }
         return;
       }
-      const target = joinPath(dir, value, p.side);
+      const target = joinPath(dir, value, kind(p.side));
       if (p.kind === 'mkdir') {
-        if (p.side === 'remote') await api.sftpMkdir(tabId, target);
-        else await api.localMkdir(target);
+        if (isPc(p.side)) await api.localMkdir(target);
+        else await api.sftpMkdir(sid(p.side), target);
       } else if (p.kind === 'newfile') {
-        if (p.side === 'remote') await api.sftpCreateFile(tabId, target);
-        else await api.localCreateFile(target);
+        if (isPc(p.side)) await api.localCreateFile(target);
+        else await api.sftpCreateFile(sid(p.side), target);
       } else if (p.entry) {
-        if (p.side === 'remote') await api.sftpRename(tabId, p.entry.path, target);
-        else await api.localRename(p.entry.path, target);
+        if (isPc(p.side)) await api.localRename(p.entry.path, target);
+        else await api.sftpRename(sid(p.side), p.entry.path, target);
       }
       await reload(p.side);
     } catch (e) {
@@ -400,8 +457,8 @@ export function SftpView({
       case 'F4':
         e.preventDefault();
         if (sel.length === 1 && !sel[0].isDir) {
-          if (side === 'remote') setEditing(sel[0]);
-          else void api.localOpen(sel[0].path).catch(fail);
+          if (isPc(side)) void api.localOpen(sel[0].path).catch(fail);
+          else setEditing({ entry: sel[0], sessionId: sid(side) });
         }
         break;
       case 'F5':
@@ -446,23 +503,23 @@ export function SftpView({
     const to = other(side);
     const targets = entry ? (m.sel.has(entry.path) ? m.selected() : [entry]) : [];
     const one = targets.length === 1 ? targets[0] : null;
-    const moveWord = side === 'local' ? 'Upload' : 'Download';
+    const moveWord = leftHost ? `Copy to ${sideName(to)}` : side === 'local' ? 'Upload' : 'Download';
+    const moveAway = leftHost ? `Move to ${sideName(to)}` : `${moveWord} and delete here`;
     const items: MenuItem[] = [];
 
     if (entry) {
       items.push({ label: entry.isDir && one ? 'Open folder' : 'Open', icon: <IconFolder size={14} />, disabled: !one, onClick: () => one && activate(side, one) });
-      if (side === 'remote') items.push({ label: 'Edit (built-in editor)', icon: <IconText size={14} />, disabled: !one || one.isDir, onClick: () => one && setEditing(one) });
-      if (side === 'local') items.push({ label: 'Show in Explorer', icon: <IconFolder size={14} />, disabled: !one, onClick: () => one && void api.localReveal(one.path).catch(fail) });
-      items.push({ label: `${moveWord} (F5)`, icon: side === 'local' ? <IconUpload size={14} /> : <IconDownload size={14} />, separator: true, disabled: !connected, onClick: () => void transferEntries(side, targets, false) });
-      items.push({ label: `${moveWord} and delete here (F6)`, icon: side === 'local' ? <IconUpload size={14} /> : <IconDownload size={14} />, disabled: !connected, onClick: () => void transferEntries(side, targets, true) });
+      if (!isPc(side)) items.push({ label: 'Edit (built-in editor)', icon: <IconText size={14} />, disabled: !one || one.isDir, onClick: () => one && setEditing({ entry: one, sessionId: sid(side) }) });
+      if (isPc(side)) items.push({ label: 'Show in Explorer', icon: <IconFolder size={14} />, disabled: !one, onClick: () => one && void api.localReveal(one.path).catch(fail) });
+      items.push({ label: `${moveWord} (F5)`, icon: side === 'local' ? <IconUpload size={14} /> : <IconDownload size={14} />, separator: true, disabled: !canTransfer, onClick: () => void transferEntries(side, targets, false) });
+      items.push({ label: `${moveAway} (F6)`, icon: side === 'local' ? <IconUpload size={14} /> : <IconDownload size={14} />, disabled: !canTransfer, onClick: () => void transferEntries(side, targets, true) });
       items.push({ label: 'Rename (F2)', icon: <IconEdit size={14} />, separator: true, disabled: !one, onClick: () => startRename(side) });
-      items.push({ label: side === 'remote' ? 'Delete (Del)' : 'Delete – Recycle Bin (Del)', icon: <IconTrash size={14} />, danger: true, onClick: () => void deleteEntries(side, targets) });
-      items.push({ label: side === 'remote' ? 'Properties and permissions (Alt+Enter)' : 'Properties (Alt+Enter)', icon: <IconFile size={14} />, separator: true, onClick: () => setProps({ side, entries: targets }) });
+      items.push({ label: isPc(side) ? 'Delete – Recycle Bin (Del)' : 'Delete (Del)', icon: <IconTrash size={14} />, danger: true, onClick: () => void deleteEntries(side, targets) });
+      items.push({ label: isPc(side) ? 'Properties (Alt+Enter)' : 'Properties and permissions (Alt+Enter)', icon: <IconFile size={14} />, separator: true, onClick: () => setProps({ side, entries: targets }) });
       items.push({ label: 'Copy path', icon: <IconCopy size={14} />, disabled: !one, onClick: () => one && copyPath(one.path) });
-      void to;
     }
-    items.push({ label: 'New file…', icon: <IconFile size={14} />, separator: !!entry, disabled: !m.data || (side === 'local' && m.data.path === ''), onClick: () => setPrompt({ kind: 'newfile', side }) });
-    items.push({ label: 'New folder… (F7)', icon: <IconPlus size={14} />, disabled: !m.data || (side === 'local' && m.data.path === ''), onClick: () => setPrompt({ kind: 'mkdir', side }) });
+    items.push({ label: 'New file…', icon: <IconFile size={14} />, separator: !!entry, disabled: !m.data || (isPc(side) && m.data.path === ''), onClick: () => setPrompt({ kind: 'newfile', side }) });
+    items.push({ label: 'New folder… (F7)', icon: <IconPlus size={14} />, disabled: !m.data || (isPc(side) && m.data.path === ''), onClick: () => setPrompt({ kind: 'mkdir', side }) });
     items.push({ label: 'Select all (Ctrl+A)', separator: true, onClick: () => selectWhere(side, () => true) });
     items.push({ label: 'Select by mask… (+)', onClick: () => setPrompt({ kind: 'mask', side }) });
     items.push({ label: 'Invert selection (*)', onClick: () => m.setSel(new Set(m.view.filter((x) => !m.sel.has(x.path)).map((x) => x.path))) });
@@ -482,12 +539,12 @@ export function SftpView({
   const paneProps = (side: Side) => {
     const m = pane(side);
     return {
-      model: m,
-      title: side === 'local' ? 'This PC' : server.name,
+      model: { ...m, side: kind(side) },
+      title: sideName(side),
       paneRef: paneEls[side],
       diff: diffs[side],
       bookmarks: bookmarks[side],
-      enabled: side === 'local' || connected,
+      enabled: side === 'local' ? leftReady : connected,
       dropActive: dropSide === side,
       setDropActive: (on: boolean) => setDropSide(on ? side : null),
       go: (path: string) => go(side, path),
@@ -524,6 +581,20 @@ export function SftpView({
           {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting…' : 'Error'}
         </span>
         <span className="grow" />
+        <label className="sftp-left">
+          Left side
+          <select value={leftId} onChange={(e) => setLeftId(e.target.value)} disabled={running > 0}>
+            <option value="">This PC</option>
+            {servers
+              .filter((x) => x.protocol === 'ssh')
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+          </select>
+        </label>
         <button className={'ghost' + (compare ? ' on' : '')} title="Mark files that differ between the two folders" onClick={() => setCompare((c) => !c)}>
           Compare folders
         </button>
@@ -546,10 +617,10 @@ export function SftpView({
         <div className="sftp-main">
           <SftpPane {...paneProps('local')} />
           <div className="sftp-mid">
-            <button className="primary icon-only" title="Upload selection (F5)" disabled={local.sel.size === 0 || !connected} onClick={() => void transferEntries('local', local.selected(), false)}>
+            <button className="primary icon-only" title={leftHost ? 'Copy to the right (F5)' : 'Upload selection (F5)'} disabled={local.sel.size === 0 || !canTransfer} onClick={() => void transferEntries('local', local.selected(), false)}>
               <IconArrowRight size={17} />
             </button>
-            <button className="primary icon-only" title="Download selection (F5)" disabled={remote.sel.size === 0 || !connected} onClick={() => void transferEntries('remote', remote.selected(), false)}>
+            <button className="primary icon-only" title={leftHost ? 'Copy to the left (F5)' : 'Download selection (F5)'} disabled={remote.sel.size === 0 || !canTransfer} onClick={() => void transferEntries('remote', remote.selected(), false)}>
               <IconArrowLeft size={17} />
             </button>
           </div>
@@ -567,7 +638,7 @@ export function SftpView({
         <span><b>Alt+Enter</b> Properties</span>
         <span><b>Tab</b> Other side</span>
         <span className="grow" />
-        <span>{focusSide === 'local' ? 'This PC' : server.name} is active</span>
+        <span>{sideName(focusSide)} is active</span>
       </div>
 
       {(error || notice) && (
@@ -587,7 +658,7 @@ export function SftpView({
             const eta = speed > 0 && t.total > t.done ? Math.ceil((t.total - t.done) / speed) : 0;
             return (
               <div key={t.id} className={'transfer ' + t.state}>
-                <span className="t-dir">{t.direction === 'up' ? '↑' : '↓'}</span>
+                <span className="t-dir">{leftId ? (t.direction === 'up' ? '→' : '←') : t.direction === 'up' ? '↑' : '↓'}</span>
                 <span className="t-name">
                   {t.name}
                   {t.move && <span className="muted small"> (move)</span>}
@@ -643,15 +714,27 @@ export function SftpView({
       )}
       {props && (
         <PropertiesDialog
-          side={props.side}
-          sessionId={tabId}
+          side={kind(props.side)}
+          sessionId={sid(props.side)}
           entries={props.entries}
           onClose={() => setProps(null)}
           onChanged={() => void reload(props.side)}
           toast={(m, k) => (k === 'error' ? setError(m) : flash(m))}
         />
       )}
-      {editing && <RemoteEditor sessionId={tabId} file={editing} onClose={() => setEditing(null)} />}
+      {editing && <RemoteEditor sessionId={editing.sessionId} file={editing.entry} onClose={() => setEditing(null)} />}
+      {leftAuth && leftHost && (
+        <PasswordPrompt
+          server={leftHost}
+          failed
+          onCancel={() => setLeftAuth(false)}
+          onSubmit={(cred) => {
+            leftCred.current = cred;
+            setLeftAuth(false);
+            setLeftRetry((n) => n + 1);
+          }}
+        />
+      )}
       {authPrompt && (
         <PasswordPrompt
           server={server}

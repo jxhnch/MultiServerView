@@ -2957,3 +2957,7 @@ label {
 .hcard.dragging { opacity: 0.45; }
 .hcard.drop-before { box-shadow: -4px 0 0 0 var(--accent); }
 .hcard.drop-after { box-shadow: 4px 0 0 0 var(--accent); }
+
+/* SFTP: which computer the left side shows */
+.sftp-left { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; white-space: nowrap; }
+.sftp-left select { width: auto; max-width: 220px; padding: 4px 8px; }
