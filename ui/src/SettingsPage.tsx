@@ -155,6 +155,15 @@ export function SettingsPage({ onLock, onCleared, toast }: { onLock: () => void;
         </Row>
       </Card>
 
+      <Card title="Host list">
+        <Row
+          title="Online status"
+          hint="A dot shows which hosts answer: the app opens a short connection to their port once a minute while the list is visible, without signing in. It may show up in server logs."
+        >
+          <Switch label="Online status" checked={ui.hostStatus} onChange={(v) => setUiSettings({ hostStatus: v })} />
+        </Row>
+      </Card>
+
       <Card title="Terminal" subtitle="Applies to all SSH terminals, including the split view.">
         <div className="term-preview" style={{ background: theme.bg, color: theme.fg, fontFamily: font.css, fontSize: term.fontSize }}>
           <div>

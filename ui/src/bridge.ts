@@ -507,6 +507,11 @@ async function callMock(method: string, params: any): Promise<unknown> {
       return Object.fromEntries((params.ids as string[]).map((id, i) => [id, i % 5 === 3 ? 'down' : i % 7 === 5 ? 'closed' : 'up']));
     case 'hosts.wake':
       return onlyNative('Wake-on-LAN');
+    case 'groups.list':
+      return JSON.parse(localStorage.getItem('msv-mock-groups') ?? '[]');
+    case 'groups.reorder':
+      localStorage.setItem('msv-mock-groups', JSON.stringify(params.keys));
+      return null;
     case 'servers.place': {
       let moved = 0;
       mock.servers = mock.servers.map((s) => {
@@ -1038,6 +1043,9 @@ export const api = {
 
   hostsReachability: (ids: string[]) => call<Record<string, 'up' | 'closed' | 'down'>>('hosts.reachability', { ids }),
   hostsWake: (id: string) => call<void>('hosts.wake', { id }),
+  /** The user's order of the sections of the host list. */
+  groupsList: () => call<string[]>('groups.list'),
+  groupsReorder: (keys: string[]) => call<void>('groups.reorder', { keys }),
   /** Puts hosts into a group; workspace undefined = each stays in its own, order = the target section's new order. */
   serversPlace: (ids: string[], workspace: string | undefined, group: string, order: string[] = []) =>
     call<number>('servers.place', { ids, setWorkspace: workspace !== undefined, workspace: workspace ?? '', group, order }),

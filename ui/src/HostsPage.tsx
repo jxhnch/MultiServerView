@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { getUiSettings, setUiSettings } from './uiSettings';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getUiSettings, onUiSettings } from './uiSettings';
+import { pointerDrag, useFlip } from './dragArrange';
 import { IconEdit, IconFolder, IconGrid, IconPlus, IconPower, IconRefresh, IconSearch, IconServer, IconStar, IconTrash, IconDuplicate, IconPlay, IconTerminal } from './Icons';
 import { api, type BulkLogin, type VmAction } from './bridge';
 import { BulkLoginDialog } from './BulkLoginDialog';
@@ -13,6 +14,19 @@ const REACH_TEXT = { up: 'Answers on its port', closed: 'The machine answers, bu
 
 /** The user's own order first (drag and drop), everything not placed yet by name. */
 const byPlace = (a: Server, b: Server) => (a.sortOrder || 1e9) - (b.sortOrder || 1e9) || a.name.localeCompare(b.name);
+
+/** The name of a section in the saved order; the same text as HostOrder.SectionKey in C#. */
+export const sectionKey = (workspace: string, group: string) => workspace + '\u001f' + group;
+/** Hosts without workspace and group always stay at the bottom. */
+const LOOSE = sectionKey('', '');
+
+/** Where the dragged hosts would land: in this section, after this many of the others. */
+interface Spot {
+  key: string;
+  index: number;
+}
+
+type Drag = { kind: 'host'; ids: string[] } | { kind: 'group'; key: string };
 
 /** Termius style: search bar on top, plain cards below ("ssh, root"). */
 export function HostsPage({
@@ -42,6 +56,8 @@ export function HostsPage({
   keys,
   identities,
   onReorder,
+  groupOrder,
+  onGroupOrder,
   onPlace,
   onBulkLogin,
   onDeleteMany,
@@ -58,9 +74,12 @@ export function HostsPage({
   onShell: (shell: Server) => void;
   keys: KeyInfo[];
   identities: Identity[];
-  onReorder: (ids: string[], reset?: boolean) => void;
+  onReorder: (ids: string[], reset?: boolean) => Promise<unknown> | void;
+  /** The saved order of the sections, and how to change it. */
+  groupOrder: string[];
+  onGroupOrder: (keys: string[]) => void;
   /** Move hosts into a group; workspace undefined = each keeps its own, order = new order of the target section ([] = by name). */
-  onPlace: (list: Server[], workspace: string | undefined, group: string, order: string[]) => void;
+  onPlace: (list: Server[], workspace: string | undefined, group: string, order: string[]) => Promise<unknown> | void;
   onBulkLogin: (list: Server[], login: BulkLogin) => void;
   onDeleteMany: (list: Server[]) => Promise<boolean>;
   servers: Server[];
@@ -87,14 +106,13 @@ export function HostsPage({
   onCreateWorkspace: (name: string) => void;
   onRenameWorkspace: (from: string, to: string) => void;
   onDissolveWorkspace: (name: string) => void;
-  onMove: (list: Server[], target: string) => void;
+  onMove: (list: Server[], target: string) => Promise<unknown> | void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const [powerMenu, setPowerMenu] = useState<{ x: number; y: number; server: Server } | null>(null);
   const [wsMenu, setWsMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [wsDialog, setWsDialog] = useState<{ kind: 'new' } | { kind: 'rename'; name: string } | { kind: 'move'; server: Server } | { kind: 'group'; list: Server[] } | null>(null);
-  const [dropWs, setDropWs] = useState<string | null>(null);
   const [shellMenu, setShellMenu] = useState<{ x: number; y: number } | null>(null);
   // Several hosts at once: Ctrl+click, or the "Select" button and then plain clicks.
   const [selecting, setSelecting] = useState(false);
@@ -111,18 +129,14 @@ export function HostsPage({
     setSelecting(false);
     setMarked(new Set());
   };
-  // Drag and drop: inside a section it changes the order, onto another section it moves into that group, and the areas that
-  // appear at the bottom make a new group or take the host out of its group.
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
-  const [dropOn, setDropOn] = useState<string | null>(null); // key of a section, '+' = new group, '-' = no group
-  const endDrag = () => {
-    setDragId(null);
-    setDropAt(null);
-    setDropOn(null);
-  };
-  /** What is being dragged: the host, or all selected hosts when it is one of them. */
-  const dragged = !dragId ? [] : marked.has(dragId) ? markedHosts : servers.filter((s) => s.id === dragId);
+  // Dragging rearranges the list while the pointer moves: hosts inside and between groups, and whole groups by their heading.
+  // Areas at the bottom make a new group or take hosts out of theirs; the workspace tabs move them there.
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [spot, setSpot] = useState<{ ids: string[]; at: Spot } | null>(null); // preview of moved hosts
+  const [groupSpot, setGroupSpot] = useState<string[] | null>(null); // preview of moved groups
+  const [over, setOver] = useState<string | null>(null); // '+' new group, '-' no group, 'ws:name' a workspace tab
+  const listRef = useRef<HTMLDivElement>(null);
+  useFlip(listRef);
   const q = query.trim();
 
   // With search text, all workspaces are searched; otherwise only the selected one is shown.
@@ -137,11 +151,11 @@ export function HostsPage({
   // Groups work like folders; without groups, "Hosts" is shown above.
   const grouped = useMemo(() => {
     // Key: (workspace, group). The workspace part only exists in the "All" view or during a search.
-    const m = new Map<string, { ws: string; group: string; list: Server[] }>();
+    const m = new Map<string, { key: string; ws: string; group: string; list: Server[] }>();
     for (const s of filtered) {
       const ws = showWorkspace ? s.workspace : '';
-      const key = ws + '\u0000' + s.group;
-      const entry = m.get(key) ?? { ws, group: s.group, list: [] };
+      const key = sectionKey(s.workspace, s.group);
+      const entry = m.get(key) ?? { key, ws, group: s.group, list: [] };
       entry.list.push(s);
       m.set(key, entry);
     }
@@ -151,13 +165,21 @@ export function HostsPage({
     const label = (p: { ws: string; group: string }) =>
       p.ws && p.group ? `${p.ws} · ${p.group}` : p.ws || p.group || (hasWorkspaces ? 'No workspace' : hasGroups ? 'No group' : 'Hosts');
     const rank = (p: { ws: string; group: string }) => (p.ws === '' && p.group === '' ? 1 : 0);
+    const place = (p: { key: string }) => {
+      const i = groupOrder.indexOf(p.key);
+      return i < 0 ? groupOrder.length : i;
+    };
     return parts
-      .sort((a, b) => rank(a) - rank(b) || a.ws.localeCompare(b.ws) || a.group.localeCompare(b.group))
-      .map((p) => ({ key: p.ws + '\u0000' + p.group, name: label(p), ws: p.ws, group: p.group, list: p.list }));
-  }, [filtered, showWorkspace]);
+      .sort(
+        (a, b) =>
+          Number(a.key === LOOSE) - Number(b.key === LOOSE) || place(a) - place(b) || rank(a) - rank(b) || a.ws.localeCompare(b.ws) || a.group.localeCompare(b.group),
+      )
+      .map((p) => ({ ...p, name: label(p) }));
+  }, [filtered, showWorkspace, groupOrder]);
 
   // Which of the listed hosts answer: checked while the list is on screen, then once a minute.
   const [showStatus, setShowStatus] = useState(() => getUiSettings().hostStatus);
+  useEffect(() => onUiSettings((u) => setShowStatus(u.hostStatus)), []);
   const [reach, setReach] = useState<Record<string, 'up' | 'closed' | 'down'>>({});
   const checkKey = filtered.map((s) => `${s.id}\t${s.host}\t${s.port}\t${s.protocol}\t${s.jumpHostId}`).join('\n');
   useEffect(() => {
@@ -191,42 +213,147 @@ export function HostsPage({
   }, [showStatus, visible, checkKey]);
 
   type Section = (typeof grouped)[number];
-  // In the view of one workspace the hosts keep it; in "All" a section stands for its workspace too.
-  const workspaceOf = (section: Section) => (showWorkspace ? section.ws : undefined);
-  const isElsewhere = (section: Section) => dragged.some((d) => !section.list.some((x) => x.id === d.id));
+  const movableKeys = grouped.filter((g) => g.key !== LOOSE).map((g) => g.key);
 
-  /** Puts the dragged hosts into the section, before or after "at" (or at the end). */
-  function dropInto(section: Section, at?: { id: string; after: boolean }) {
-    const moving = dragged;
-    const elsewhere = isElsewhere(section);
-    endDrag();
-    if (!moving.length) return;
+  /** What is on screen: the real sections, or the preview of what is being dragged. */
+  const shown = useMemo(() => {
+    let list: Section[] = grouped;
+    if (spot) {
+      const moving = spot.ids.map((id) => servers.find((s) => s.id === id)).filter((s): s is Server => !!s);
+      list = grouped.map((g) => {
+        const rest = g.list.filter((s) => !spot.ids.includes(s.id));
+        if (g.key === spot.at.key) rest.splice(spot.at.index, 0, ...moving);
+        return { ...g, list: rest };
+      });
+    }
+    if (groupSpot) {
+      const place = (key: string) => (key === LOOSE ? groupSpot.length : groupSpot.indexOf(key));
+      list = [...list].sort((a, b) => place(a.key) - place(b.key));
+    }
+    return list;
+  }, [grouped, spot, groupSpot, servers]);
+
+  /** Drag one host, or all selected ones when it is one of them. */
+  function startHostDrag(down: React.PointerEvent<HTMLElement>, host: Server) {
+    if (q) return; // while searching, the list is sorted by relevance
+    const moving = marked.has(host.id) ? [host, ...markedHosts.filter((s) => s.id !== host.id)] : [host];
     const ids = moving.map((s) => s.id);
-    const order = section.list.map((x) => x.id).filter((id) => !ids.includes(id));
-    // without a chosen spot, a section that is sorted by name stays that way
-    if (!at && !section.list.some((x) => x.sortOrder)) return onPlace(moving, workspaceOf(section), section.group, []);
-    const spot = at ? order.indexOf(at.id) : -1;
-    order.splice(spot < 0 ? order.length : spot + (at!.after ? 1 : 0), 0, ...ids);
-    if (elsewhere) onPlace(moving, workspaceOf(section), section.group, order);
-    else onReorder(order);
+    // in the order of the list
+    const inList = grouped.flatMap((g) => g.list.map((s) => s.id));
+    ids.sort((a, b) => inList.indexOf(a) - inList.indexOf(b));
+    const sections = grouped;
+    const rest = (key: string) => sections.find((g) => g.key === key)?.list.filter((s) => !ids.includes(s.id)) ?? [];
+    const home = ((): Spot | null => {
+      const from = sections.find((g) => ids.every((id) => g.list.some((s) => s.id === id)));
+      return from ? { key: from.key, index: from.list.findIndex((s) => ids.includes(s.id)) } : null;
+    })();
+    let now: Spot | null = home;
+    let zone: string | null = null;
+    let settledAt = 0;
+    const preview = (next: Spot | null) => {
+      if (next?.key === now?.key && next?.index === now?.index) return;
+      now = next;
+      settledAt = performance.now() + 200; // let the cards glide before looking again, or they swap back and forth
+      setSpot(next ? { ids, at: next } : null);
+    };
+    const finish = () => {
+      setDrag(null);
+      setSpot(null);
+      setOver(null);
+    };
+
+    pointerDrag(down, down.currentTarget, {
+      count: ids.length,
+      onStart: () => {
+        setDrag({ kind: 'host', ids });
+        setSpot(home ? { ids, at: home } : null);
+      },
+      onOver: (hit, x, _y, final) => {
+        const special = hit?.closest<HTMLElement>('[data-zone]');
+        zone = special?.dataset.zone ?? null;
+        setOver(zone);
+        if (zone || !hit || !listRef.current?.contains(hit)) return preview(home);
+        if (!final && performance.now() < settledAt) return false;
+        const key = hit.closest<HTMLElement>('[data-section]')?.dataset.section;
+        if (key === undefined) return;
+        const card = hit.closest<HTMLElement>('[data-host]');
+        if (card) {
+          const id = card.dataset.host!;
+          if (ids.includes(id)) return; // the gap itself
+          const index = rest(key).findIndex((s) => s.id === id);
+          if (index < 0) return;
+          const r = card.getBoundingClientRect();
+          // coming from before the card: go behind it, and the other way round
+          const after = now?.key === key ? now.index <= index : x > r.left + r.width / 2;
+          preview({ key, index: index + (after ? 1 : 0) });
+        } else if (now?.key !== key) preview({ key, index: rest(key).length });
+      },
+      onDrop: () => {
+        setDrag(null);
+        setOver(null);
+        let done = undefined as Promise<unknown> | void;
+        if (zone === '+') setWsDialog({ kind: 'group', list: moving });
+        else if (zone === '-') done = onPlace(moving, undefined, '', []);
+        else if (zone?.startsWith('ws:')) done = onMove(moving, zone.slice(3));
+        else if (now && (now.key !== home?.key || now.index !== home.index)) {
+          const section = sections.find((g) => g.key === now!.key)!;
+          const order = rest(section.key).map((s) => s.id);
+          order.splice(now.index, 0, ...ids);
+          const stays = ids.every((id) => section.list.some((s) => s.id === id));
+          // in the view of one workspace the hosts keep it; in "All" a section stands for its workspace too
+          done = stays ? onReorder(order) : onPlace(moving, showWorkspace ? section.ws : undefined, section.group, order);
+        }
+        // the preview stays until the change is saved, so nothing jumps back in between
+        if (done) void done.finally(() => setSpot(null));
+        else setSpot(null);
+      },
+      onCancel: finish,
+      landing: () => listRef.current?.querySelector(`[data-host="${CSS.escape(host.id)}"]`) ?? null,
+    });
   }
 
-  const dropZone = (id: '+' | '-', text: string, onDrop: (moving: Server[]) => void) => (
-    <div
-      className={'new-group-zone' + (dropOn === id ? ' over' : '')}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (dropOn !== id) setDropOn(id);
-        setDropAt(null);
-      }}
-      onDragLeave={() => setDropOn((d) => (d === id ? null : d))}
-      onDrop={(e) => {
-        e.preventDefault();
-        const moving = dragged;
-        endDrag();
-        if (moving.length) onDrop(moving);
-      }}
-    >
+  /** Drag a whole group by its heading. While doing so, all groups fold up to their headings. */
+  function startGroupDrag(down: React.PointerEvent<HTMLElement>, section: Section) {
+    const start = movableKeys;
+    let now = start;
+    let settledAt = 0;
+    const finish = () => {
+      setDrag(null);
+      setGroupSpot(null);
+    };
+    pointerDrag(down, down.currentTarget, {
+      onStart: () => {
+        setDrag({ kind: 'group', key: section.key });
+        settledAt = performance.now() + 250;
+      },
+      onOver: (hit, _x, _y, final) => {
+        if (!final && performance.now() < settledAt) return false;
+        const key = hit?.closest<HTMLElement>('[data-section]')?.dataset.section;
+        if (key === undefined || key === section.key || !now.includes(key)) return;
+        const next = now.filter((k) => k !== section.key);
+        next.splice(now.indexOf(key), 0, section.key);
+        now = next;
+        settledAt = performance.now() + 200;
+        setGroupSpot(next);
+      },
+      onDrop: () => {
+        if (now.join() !== start.join()) {
+          // the groups on screen swap their places; groups of other workspaces keep theirs
+          const all = [...new Set(servers.map((s) => sectionKey(s.workspace, s.group)))].filter((k) => k !== LOOSE);
+          const place = (k: string) => (groupOrder.includes(k) ? groupOrder.indexOf(k) : groupOrder.length);
+          all.sort((a, b) => place(a) - place(b) || a.localeCompare(b));
+          const queue = [...now];
+          onGroupOrder(all.map((k) => (now.includes(k) ? queue.shift()! : k)));
+        }
+        finish();
+      },
+      onCancel: finish,
+      landing: () => listRef.current?.querySelector(`[data-handle="${CSS.escape(section.key)}"]`) ?? null,
+    });
+  }
+
+  const dropZone = (id: '+' | '-', text: string) => (
+    <div className={'new-group-zone' + (over === id ? ' over' : '')} data-zone={id}>
       {text}
     </div>
   );
@@ -264,15 +391,9 @@ export function HostsPage({
 
       <div className="toolbar ws-bar">
         <button
-          className={'tool' + (!workspace ? ' on' : '')}
+          className={'tool' + (!workspace ? ' on' : '') + (over === 'ws:' ? ' drop' : '')}
           onClick={() => onWorkspace('')}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const id = e.dataTransfer.getData('text/msv-host');
-            const dragged = servers.find((x) => x.id === id);
-            if (dragged) onMove([dragged], '');
-          }}
+          data-zone="ws:"
           title="Show all hosts (drag a host here = remove it from its workspace)"
         >
           All <span className="ws-count">{servers.length}</span>
@@ -280,24 +401,13 @@ export function HostsPage({
         {workspaces.map((w) => (
           <button
             key={w}
-            className={'tool' + (workspace === w ? ' on' : '') + (dropWs === w ? ' drop' : '')}
+            className={'tool' + (workspace === w ? ' on' : '') + (over === 'ws:' + w ? ' drop' : '')}
             onClick={() => onWorkspace(w)}
             onContextMenu={(e) => {
               e.preventDefault();
               setWsMenu({ x: e.clientX, y: e.clientY, name: w });
             }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (dropWs !== w) setDropWs(w);
-            }}
-            onDragLeave={() => setDropWs((d) => (d === w ? null : d))}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDropWs(null);
-              const id = e.dataTransfer.getData('text/msv-host');
-              const dragged = servers.find((x) => x.id === id);
-              if (dragged) onMove([dragged], w);
-            }}
+            data-zone={'ws:' + w}
             title="Right-click: rename or dissolve · drag hosts here to move them"
           >
             {w} <span className="ws-count">{countOf(w)}</span>
@@ -327,18 +437,6 @@ export function HostsPage({
         )}
         <button className="tool" title="Several terminals side by side in one tab" onClick={onSplit}>
           <IconGrid size={15} /> Split view
-        </button>
-        <button
-          className={'tool' + (showStatus ? ' on' : '')}
-          title="Show which hosts answer (a short connection to their port once a minute, no login)"
-          aria-pressed={showStatus}
-          onClick={() => {
-            setUiSettings({ hostStatus: !showStatus });
-            setShowStatus(!showStatus);
-            setReach({});
-          }}
-        >
-          Online status
         </button>
         <button className={'tool' + (selecting ? ' on' : '')} title="Select several hosts (or Ctrl+click on them)" onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
           Select
@@ -386,27 +484,31 @@ export function HostsPage({
               No host found.{target ? ' Enter creates "' + (target.host ?? '') + '" and connects.' : ''}
             </p>
           )}
-          {grouped.map((section) => {
+          <div className={'host-list' + (drag?.kind === 'group' ? ' arranging' : '')} ref={listRef}>
+          {shown.map((section) => {
             const { list } = section;
+            const movable = !q && section.key !== LOOSE && movableKeys.length > 1;
             return (
             <section
               key={section.key}
-              className={'host-section' + (dropOn === section.key ? ' drop-into' : '')}
-              onDragOver={(e) => {
-                if (q || !dragged.length || !isElsewhere(section)) return;
-                e.preventDefault();
-                if (dropOn !== section.key) setDropOn(section.key);
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn((d) => (d === section.key ? null : d));
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (!q && isElsewhere(section)) dropInto(section);
-                else endDrag();
-              }}
+              data-section={section.key}
+              className={
+                'host-section' +
+                (drag?.kind === 'host' && spot?.at.key === section.key ? ' drop-into' : '') +
+                (drag?.kind === 'group' && drag.key === section.key ? ' lifted' : '')
+              }
             >
-              <div className="sec-label">{section.name}</div>
+              <div
+                className={'sec-label' + (movable ? ' movable' : '')}
+                data-flip={'g:' + section.key}
+                data-handle={section.key}
+                title={movable ? 'Drag to move this group' : undefined}
+                onPointerDown={movable ? (e) => startGroupDrag(e, section) : undefined}
+              >
+                {section.name}
+                <span className="count">{list.length}</span>
+                {movable && <span className="grip" aria-hidden="true">⋮⋮</span>}
+              </div>
               <div className="hgrid" style={{ marginTop: 10 }}>
                 {list.map((s) => (
                   <div
@@ -416,35 +518,13 @@ export function HostsPage({
                       (selectedId === s.id ? ' sel' : '') +
                       (picked === s.id ? ' picked' : '') +
                       (marked.has(s.id) ? ' marked' : '') +
-                      (dragId === s.id ? ' dragging' : '') +
-                      (dropAt?.id === s.id ? (dropAt.after ? ' drop-after' : ' drop-before') : '')
+                      (drag?.kind === 'host' && drag.ids.includes(s.id) ? ' placeholder' : '')
                     }
+                    data-host={s.id}
+                    data-flip={'h:' + s.id}
+                    onPointerDown={(e) => startHostDrag(e, s)}
                     aria-selected={marked.has(s.id)}
                     tabIndex={0}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/msv-host', s.id);
-                      // a moment later: changing the page inside this event can cancel the drag
-                      window.setTimeout(() => setDragId(s.id), 0);
-                    }}
-                    onDragEnd={endDrag}
-                    onDragOver={(e) => {
-                      // not while searching (the list is sorted by relevance then)
-                      if (q || !dragged.length || dragged.some((d) => d.id === s.id)) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (dropOn !== (isElsewhere(section) ? section.key : null)) setDropOn(isElsewhere(section) ? section.key : null);
-                      const r = e.currentTarget.getBoundingClientRect();
-                      const after = e.clientX > r.left + r.width / 2;
-                      if (dropAt?.id !== s.id || dropAt.after !== after) setDropAt({ id: s.id, after });
-                    }}
-                    onDragLeave={() => setDropAt((d) => (d?.id === s.id ? null : d))}
-                    onDrop={(e) => {
-                      if (dropAt?.id !== s.id) return; // the section handles it
-                      e.preventDefault();
-                      e.stopPropagation();
-                      dropInto(section, dropAt);
-                    }}
                     title={`${s.name} – ${s.host}:${s.port}`}
                     onClick={(e) => {
                       if (selecting || e.ctrlKey || e.metaKey) toggleMark(s.id);
@@ -510,18 +590,20 @@ export function HostsPage({
                     </button>
                   </div>
                 ))}
+                {drag?.kind === 'host' && list.length === 0 && <div className="empty-slot">Drop here</div>}
               </div>
             </section>
             );
           })}
-          <p className="muted small">Double-click or Enter connects · drag to arrange or into another group · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session</p>
+          </div>
+          <p className="muted small">Double-click or Enter connects · drag hosts or group headings to arrange · Ctrl+click selects several · pencil edits · right-click for more · Shift opens an additional session</p>
         </>
       )}
 
-      {!q && dragged.length > 0 && (
+      {drag?.kind === 'host' && (
         <div className="drop-zones">
-          {dropZone('+', 'Drop here to create a new group', (moving) => setWsDialog({ kind: 'group', list: moving }))}
-          {dragged.some((s) => s.group) && dropZone('-', 'Drop here to remove from the group', (moving) => onPlace(moving, undefined, '', []))}
+          {dropZone('+', 'Drop here to create a new group')}
+          {servers.some((s) => drag.ids.includes(s.id) && s.group) && dropZone('-', 'Drop here to remove from the group')}
         </div>
       )}
 

@@ -76,7 +76,7 @@ public sealed class Bridge : IDisposable
         async Task<object?> ForMcp(string method, JsonElement p)
         {
             var result = await DispatchAsync(method, p);
-            if (!method.EndsWith(".list", StringComparison.Ordinal) && method.Split('.')[0] is "servers" or "keys" or "snippets" or "identities" or "forwards" or "knownhosts" or "history")
+            if (!method.EndsWith(".list", StringComparison.Ordinal) && method.Split('.')[0] is "servers" or "keys" or "snippets" or "identities" or "forwards" or "knownhosts" or "history" or "groups")
                 _emit(new { @event = "vault.changed" });
             return result;
         }
@@ -207,6 +207,11 @@ public sealed class Bridge : IDisposable
             }
             case "servers.reorder":
                 return _vault.Reorder(Strings(p, "ids").ToList(), Bool(p, "reset"));
+            case "groups.list":
+                return _vault.ListGroupOrder();
+            case "groups.reorder":
+                _vault.SetGroupOrder(Strings(p, "keys"));
+                return null;
             case "servers.place":
             {
                 var order = Strings(p, "order").ToList();

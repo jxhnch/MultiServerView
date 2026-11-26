@@ -30,7 +30,7 @@ import { SettingsPage } from './SettingsPage';
 import { WindowControls } from './WindowControls';
 import { SplitView, type SplitPane } from './SplitView';
 import { SplitPicker } from './SplitPicker';
-import { HostsPage } from './HostsPage';
+import { HostsPage, sectionKey } from './HostsPage';
 import { effectiveTheme, getUiSettings, onTheme, setUiSettings } from './uiSettings';
 import { readTextAuto } from './files';
 import { IconClock, IconClose, IconCloud, IconCode, IconDuplicate, IconFolder, IconForward, IconGrid, IconKey, IconLock, IconMoon, IconPlus, IconRefresh, IconServer, IconSettings, IconShield, IconSparkle, IconSun, IconUpload } from './Icons';
@@ -78,6 +78,7 @@ export function App() {
   const [servers, setServers] = useState<Server[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
   const [identities, setIdentities] = useState<Identity[]>([]);
+  const [groupOrder, setGroupOrder] = useState<string[]>([]);
   const [sourceInfo, setSourceInfo] = useState<SourceInfo | null>(null);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ kind: 'local', state: 'local', message: '' });
   const [conflictHidden, setConflictHidden] = useState(false);
@@ -135,7 +136,8 @@ export function App() {
 
   // ---------------------------------------------------------------- Loading
   const refresh = useCallback(async () => {
-    const [s, k, ids, src] = await Promise.all([api.serversList(), api.keysList(), api.identitiesList(), api.sourceGet()]);
+    const [s, k, ids, src, order] = await Promise.all([api.serversList(), api.keysList(), api.identitiesList(), api.sourceGet(), api.groupsList()]);
+    setGroupOrder(order);
     setServers(s);
     setKeys(k);
     setIdentities(ids);
@@ -696,6 +698,16 @@ export function App() {
     }
   }
 
+  async function saveGroupOrder(keys: string[]) {
+    setGroupOrder(keys); // shown right away
+    try {
+      await api.groupsReorder(keys);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+      setGroupOrder(await api.groupsList());
+    }
+  }
+
   async function reorderHosts(ids: string[], reset = false) {
     try {
       await api.serversReorder(ids, reset);
@@ -735,6 +747,9 @@ export function App() {
     const n = to.trim();
     if (!n || n === from) return;
     await moveToWorkspace(servers.filter((s) => s.workspace === from), n);
+    // the places of its groups go with the new name
+    if (groupOrder.some((k) => k.startsWith(sectionKey(from, ''))))
+      await saveGroupOrder(groupOrder.map((k) => (k.startsWith(sectionKey(from, '')) ? sectionKey(n, k.slice(from.length + 1)) : k)));
     rememberWorkspaces(localWorkspaces.filter((w) => w !== from && w !== n).concat(n));
     if (activeWorkspace === from) setWorkspace(n);
     toast(`Workspace "${from}" is now called "${n}"`);
@@ -1053,11 +1068,13 @@ export function App() {
                   onCreateWorkspace={createWorkspace}
                   onRenameWorkspace={(from, to) => void renameWorkspace(from, to)}
                   onDissolveWorkspace={(name) => void dissolveWorkspace(name)}
-                  onMove={(list, target) => void moveToWorkspace(list, target)}
+                  onMove={(list, target) => moveToWorkspace(list, target)}
                   keys={keys}
                   identities={identities}
-                  onReorder={(ids, reset) => void reorderHosts(ids, reset)}
-                  onPlace={(list, ws, group, order) => void placeHosts(list, ws, group, order)}
+                  onReorder={(ids, reset) => reorderHosts(ids, reset)}
+                  groupOrder={groupOrder}
+                  onGroupOrder={(keys) => void saveGroupOrder(keys)}
+                  onPlace={(list, ws, group, order) => placeHosts(list, ws, group, order)}
                   onBulkLogin={(list, login) => void bulkLogin(list, login)}
                   onDeleteMany={deleteHosts}
                 />

@@ -13,6 +13,9 @@ public sealed class VaultData
     public List<PortForwardEntry> Forwards { get; set; } = new();
     public List<ProxmoxEntry> Proxmox { get; set; } = new();
 
+    /// <summary>The user's order of the sections of the host list (see <see cref="HostOrder.SectionKey"/>); empty = by name.</summary>
+    public List<string> GroupOrder { get; set; } = new();
+
     /// <summary>"host:port" -> SHA256-Fingerprint (Trust on first use).</summary>
     public Dictionary<string, string> KnownHosts { get; set; } = new();
 
@@ -55,6 +58,9 @@ public static class VaultMerge
         result.Snippets = MergeById(a.Snippets, b.Snippets, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
         result.Forwards = MergeById(a.Forwards, b.Forwards, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
         result.Proxmox = MergeById(a.Proxmox, b.Proxmox, i => i.Id, i => i.UpdatedAt, result.Tombstones, null);
+
+        // a list as a whole: the synced state wins when it has one
+        result.GroupOrder = b.GroupOrder.Count > 0 ? b.GroupOrder : a.GroupOrder;
 
         foreach (var src in new[] { a.KnownHosts, b.KnownHosts })
             foreach (var (host, fp) in src)

@@ -163,6 +163,7 @@ public sealed class VaultStore
             data.Forwards.Clear();
             data.Proxmox.Clear();
             data.KnownHosts.Clear();
+            data.GroupOrder.Clear();
             Save();
         }
         Changed?.Invoke();
@@ -365,6 +366,25 @@ public sealed class VaultStore
         }
         if (changed) Changed?.Invoke();
         return moved;
+    }
+
+    public IReadOnlyList<string> ListGroupOrder()
+    {
+        lock (_gate) return Data().GroupOrder.ToList();
+    }
+
+    /// <summary>Saves the user's order of the sections of the host list.</summary>
+    public void SetGroupOrder(IEnumerable<string> keys)
+    {
+        var wanted = keys.Where(k => k.Length > 0).Distinct().ToList();
+        lock (_gate)
+        {
+            var data = Data();
+            if (data.GroupOrder.SequenceEqual(wanted)) return;
+            data.GroupOrder = wanted;
+            Save();
+        }
+        Changed?.Invoke();
     }
 
     /// <summary>

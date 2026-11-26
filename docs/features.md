@@ -64,9 +64,10 @@ A two-pane file browser in the style of WinSCP. The left pane works on your PC t
 - **Workspaces:** one section per customer, teacher, project or lab, so you never stare at hundreds of hosts at once.
 - **Quick switcher:** `Ctrl+K`, a search bar that also understands `ssh user@host`. Plus tabs, favorites, groups, OS logos, and a light and dark theme that follows your system unless you choose one.
 - **Identities, keys and snippets:** reuse credentials across hosts, generate SSH keys and install the public key on a server with one click. Snippets can contain `{{variables}}` that ask for values when you run them.
+- **Groups in your order:** drag a group by its heading to move the whole group. `msv` lists them in the same order.
 - **Groups by drag and drop:** drag a host (or several selected ones) onto another group to move it there. While you drag, areas appear at the bottom: one creates a new group, one takes the host out of its group.
 - **Your own order:** drag a host to a new place in its section. Right-click and choose *Sort these hosts by name again* to undo it. `msv` lists the hosts in the same order.
-- **Online status:** while the host list is on screen, each listed host gets a short TCP connection to its port once a minute (no login, nothing is sent). Green = it answers, orange = the machine answers but the port is closed, red = no answer. Hosts behind a jump host and serial hosts are not checked. The *Online status* button switches it off.
+- **Online status:** while the host list is on screen, each listed host gets a short TCP connection to its port once a minute (no login, nothing is sent). Green = it answers, orange = the machine answers but the port is closed, red = no answer. Hosts behind a jump host and serial hosts are not checked. Switch it off in *Settings → Host list*.
 - **Wake-on-LAN:** enter a MAC address in the host details, then right-click the host and choose *Wake up*. It works in your own network.
 - **Several hosts at once:** Ctrl+click or *Select*, then give them the same SSH key, identity or user name and password, move them to a workspace or delete them.
 - **Signing in:** when a login is missing or fails, you can enter a password or pick an SSH key, and save it for the host.

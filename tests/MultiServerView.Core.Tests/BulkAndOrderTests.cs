@@ -52,6 +52,21 @@ public class BulkAndOrderTests : IDisposable
     }
 
     [Fact]
+    public void The_order_of_the_groups_is_saved_with_the_vault()
+    {
+        _vault.SetGroupOrder(new[] { "b", "a", "b", "" });
+        var reopened = new VaultStore(Path.Combine(_dir, "vault.msv"));
+        reopened.Unlock("master-password");
+        Assert.Equal(new[] { "b", "a" }, reopened.ListGroupOrder());
+        // it counts as a change, so it is synced, and merging keeps it
+        var data = reopened.Snapshot();
+        Assert.NotEqual(VaultMerge.Fingerprint(new VaultData()), VaultMerge.Fingerprint(new VaultData { GroupOrder = data.GroupOrder }));
+        Assert.Equal(new[] { "b", "a" }, VaultMerge.Merge(data, new VaultData()).GroupOrder);
+        reopened.Clear("master-password");
+        Assert.Empty(reopened.ListGroupOrder());
+    }
+
+    [Fact]
     public void Order_is_saved_and_can_be_reset()
     {
         var a = Add("a");

@@ -72,7 +72,7 @@ MultiServerView is a desktop app for people who jump between many machines: home
 
 - **Workspaces** per customer, project or lab, so you never scroll through hundreds of hosts
 - **Quick switcher** on `Ctrl+K`, which also understands `ssh user@host`
-- Status dots show which hosts answer, and sleeping machines can be woken with Wake-on-LAN
+- Status dots show which hosts answer (can be switched off in the settings), and sleeping machines can be woken with Wake-on-LAN
 - Web addresses need not be exact: the app finds out whether it is http or https, and which port
 - Drag hosts into your own order, and select several to set their SSH key or login, move or delete them
 - Favorites, groups, OS logos, light and dark theme, known hosts and connection history
